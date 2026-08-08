@@ -5,10 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { CommandPalette } from "@/components/CommandPalette";
 
 const navItems = [
-  { path: "/", label: "Home" },
   { path: "/dashboard", label: "Command Center" },
-  { path: "/how-it-works", label: "How It Works" },
-  { path: "/features", label: "Features" },
   { path: "/cases", label: "Cases" },
   { path: "/radar", label: "Eligibility Radar" },
   { path: "/documents", label: "Documents" },
@@ -45,7 +42,7 @@ export function AppLayout() {
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`relative px-4 py-2 text-sm transition-colors rounded-md hover:bg-white/5 ${
+                  className={`relative px-4 py-2 text-sm transition-colors rounded-md hover:bg-white/5 whitespace-nowrap shrink-0 ${
                     isActive ? "text-white font-medium" : "text-muted-foreground"
                   }`}
                 >

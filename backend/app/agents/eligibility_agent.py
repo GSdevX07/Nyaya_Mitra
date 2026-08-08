@@ -16,6 +16,7 @@ Section 479 BNSS thresholds
 """
 
 from __future__ import annotations
+import math
 
 from app.models.schemas import CaseRecord
 
@@ -72,7 +73,10 @@ def evaluate_eligibility(case: CaseRecord) -> dict:
         legal_basis = _LEGAL_BASIS_REPEAT
 
     # ── 2. Calculate minimum required custody days ───────────────────────────
-    required_days = int(case.max_sentence_days_for_offense * threshold_fraction)
+    # We use math.ceil() to ensure we never silently round down a legal threshold.
+    # Note: The exact interpretation of statutory fractional days should be
+    # validated with a legal expert before production deployment.
+    required_days = math.ceil(case.max_sentence_days_for_offense * threshold_fraction)
 
     # ── 3. Evaluate eligibility ──────────────────────────────────────────────
     is_eligible = case.custody_days >= required_days
@@ -97,8 +101,8 @@ if __name__ == "__main__":
     from app.models.schemas import UrgencyFlags
 
     # ── Test Case A: Eligible first-time offender ────────────────────────────
-    # Offense max: 730 days | Threshold (1/3): 243 days | Served: 410 days
-    # Expected: eligible=True, days_overdue=167
+    # Offense max: 730 days | Threshold (1/3): ceil(243.33) = 244 days | Served: 410 days
+    # Expected: eligible=True, days_overdue=166
     case_a = CaseRecord(
         case_id="UTP-0007",
         name="synthetic - not a real person",
@@ -145,7 +149,7 @@ if __name__ == "__main__":
         # Assertions
         if case.case_id == "UTP-0007":
             assert result["eligible"] is True,  "UTP-0007 should be eligible"
-            assert result["days_overdue"] == 167, f"Expected 167, got {result['days_overdue']}"
+            assert result["days_overdue"] == 166, f"Expected 166, got {result['days_overdue']}"
             assert result["threshold_fraction"] == 1 / 3
             print("  [PASS] All assertions passed")
 

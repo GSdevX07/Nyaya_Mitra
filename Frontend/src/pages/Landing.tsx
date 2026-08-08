@@ -1,6 +1,6 @@
 import { motion, useScroll, useTransform } from "framer-motion";
 import { Link } from "react-router-dom";
-import { ArrowRight, BrainCircuit, Activity, Shield, Eye, Scale, FileCheck, Users, ChevronDown } from "lucide-react";
+import { ArrowRight, BrainCircuit, Activity, Shield, Eye, Scale, FileCheck, Users, ChevronDown, ArrowUp } from "lucide-react";
 import { useRef, useEffect, useState } from "react";
 
 function useCounter(end: number, duration = 2000) {
@@ -52,6 +52,23 @@ export function Landing() {
   const casesMonitored = useCounter(1284);
   const eligibleFound = useCounter(127);
   const timeSaved = useCounter(340);
+  const [showBackToTop, setShowBackToTop] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.scrollY > 300) {
+        setShowBackToTop(true);
+      } else {
+        setShowBackToTop(false);
+      }
+    };
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   const particles = Array.from({ length: 20 }, (_, i) => ({
     id: i, x: Math.random() * 100, y: Math.random() * 100,
@@ -69,18 +86,34 @@ export function Landing() {
         {particles.map(p => <Particle key={p.id} {...p} />)}
       </div>
 
-      {/* Header */}
-      <header className="relative z-20 flex items-center justify-between px-8 lg:px-16 py-6">
-        <div className="flex items-center gap-3">
+      {/* Floating Back to Top / Home button */}
+      {showBackToTop && (
+        <motion.button
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.8 }}
+          onClick={scrollToTop}
+          className="fixed bottom-6 left-6 z-50 bg-[#0a0a0b]/90 border border-white/10 hover:border-accent/40 text-white px-4 py-2.5 rounded-full shadow-2xl backdrop-blur-xl flex items-center gap-2 text-xs font-semibold uppercase tracking-wider group transition-all"
+        >
+          <ArrowUp className="w-4 h-4 text-accent group-hover:-translate-y-0.5 transition-transform" />
+          <span>Back to Top</span>
+        </motion.button>
+      )}
+
+      {/* Header - Sticky Top Bar */}
+      <header className="sticky top-0 z-50 flex items-center justify-between px-8 lg:px-16 py-4 border-b border-white/5 bg-[#0a0a0b]/85 backdrop-blur-xl">
+        <Link to="/" onClick={scrollToTop} className="flex items-center gap-3 cursor-pointer group hover:opacity-90 transition-opacity">
           <div className="relative flex items-center justify-center w-9 h-9">
             <motion.div className="absolute inset-0 bg-accent/20 rounded-full" animate={{ scale: [1, 1.5, 1], opacity: [0.5, 0, 0.5] }} transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }} />
             <Activity className="w-5 h-5 text-accent relative z-10" />
           </div>
-          <span className="font-bold text-xl tracking-tight text-white uppercase">Nyaya Mitra</span>
-        </div>
-        <div className="flex items-center gap-8">
-          <a href="#features" className="text-sm text-muted-foreground hover:text-white transition-colors hidden md:inline">Features</a>
-          <a href="#pipeline" className="text-sm text-muted-foreground hover:text-white transition-colors hidden md:inline">How it works</a>
+          <span className="font-bold text-xl tracking-tight text-white uppercase group-hover:text-accent transition-colors">Nyaya Mitra</span>
+        </Link>
+        <div className="flex items-center gap-6">
+          <button onClick={scrollToTop} className="text-sm text-muted-foreground hover:text-white transition-colors hidden md:inline">Home</button>
+          <Link to="/how-it-works" className="text-sm text-muted-foreground hover:text-white transition-colors hidden md:inline">How it works</Link>
+          <Link to="/features" className="text-sm text-muted-foreground hover:text-white transition-colors hidden md:inline">Features</Link>
+          <Link to="/dashboard" className="text-sm text-muted-foreground hover:text-white transition-colors hidden md:inline font-medium">Command Center</Link>
           <Link to="/login" className="text-sm font-medium text-black bg-white hover:bg-white/90 px-5 py-2 rounded-lg transition-colors">Officer Login</Link>
         </div>
       </header>
@@ -206,10 +239,24 @@ export function Landing() {
       </section>
 
       {/* Footer */}
-      <footer className="relative z-20 border-t border-white/5 px-8 py-8">
-        <div className="max-w-6xl mx-auto flex items-center justify-between text-xs text-muted-foreground">
-          <div className="flex items-center gap-2"><Activity className="w-4 h-4 text-accent" /><span className="uppercase tracking-wider font-medium">Nyaya Mitra</span></div>
-          <div>An Agentic AI Legal Operations Platform</div>
+      <footer className="relative z-20 border-t border-white/5 px-8 py-10 bg-black/40">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 text-xs text-muted-foreground">
+          <Link to="/" onClick={scrollToTop} className="flex items-center gap-2 text-white hover:text-accent transition-colors">
+            <Activity className="w-4 h-4 text-accent" />
+            <span className="uppercase tracking-wider font-bold text-sm">Nyaya Mitra</span>
+          </Link>
+
+          <div className="flex flex-wrap items-center gap-6 text-xs font-medium">
+            <button onClick={scrollToTop} className="hover:text-white transition-colors">Home</button>
+            <Link to="/how-it-works" className="hover:text-white transition-colors">How it works</Link>
+            <Link to="/features" className="hover:text-white transition-colors">Features</Link>
+            <Link to="/dashboard" className="hover:text-white transition-colors">Command Center</Link>
+            <Link to="/login" className="hover:text-white transition-colors">Officer Login</Link>
+          </div>
+
+          <button onClick={scrollToTop} className="flex items-center gap-1.5 text-accent hover:underline uppercase tracking-wider font-semibold">
+            <ArrowUp className="w-3.5 h-3.5" /> Back to top
+          </button>
         </div>
       </footer>
     </div>

@@ -65,11 +65,17 @@ export function EligibilityRadar() {
     return true;
   });
 
-  // Compute real summary stats from actual case data (no multipliers)
+  // Compute real summary stats from actual case data
   const countOverdue = caseList.filter((c) => c.daysOverdue > 0).length;
   const countDocsRequired = caseList.filter((c) => c.missingDocs.length > 0).length;
-  // "Approaching" = eligible (overdue > 0) but docs still missing
-  const countApproaching = caseList.filter((c) => c.isEligible && c.missingDocs.length > 0).length;
+  // "Approaching" = threshold NOT yet crossed (days_overdue <= 0) but within ~90 days of crossing
+  // A case that is already OVERDUE is not "approaching" — it has already crossed the threshold.
+  const APPROACHING_WINDOW_DAYS = selectedTimeframe === "Today" ? 1 : selectedTimeframe === "7 days" ? 7 : selectedTimeframe === "30 days" ? 30 : 90;
+  const countApproaching = caseList.filter((c) => {
+    if (c.daysOverdue > 0) return false; // already overdue, not approaching
+    const daysUntilThreshold = -c.daysOverdue; // daysOverdue is negative when not yet due
+    return daysUntilThreshold >= 0 && daysUntilThreshold <= APPROACHING_WINDOW_DAYS;
+  }).length;
 
   // Group cases for timeline: needs attention vs. standard
   const thisWeekCases = filteredCases.filter(

@@ -112,29 +112,50 @@ def _call_mock_fallback(prompt: str, system: str) -> str:
 
 # ── Public interface — the ONLY function the rest of the codebase imports ─────
 
+# Module-level tracker: set by the most recent generate() call
+# This lets the orchestrator retrieve which provider served the last request.
+_last_provider: str = "unknown"
+
+
+def get_last_provider() -> str:
+    """Return which LLM provider served the most recent generate() call."""
+    return _last_provider
+
+
 def generate(prompt: str, system: str = "", _override: str | None = None) -> str:
     """
     Universal LLM gateway with 3-tier transparent fallback:
       1. Primary Cloud Tier (Groq API — llama-3.1-8b-instant)
       2. Local Edge LLM Tier (Ollama — granite4.1:8b)
       3. Deterministic Pre-computed Safety Fallback
+
+    After calling this function, call get_last_provider() to see which
+    tier actually served the response.
     """
+    global _last_provider
+
     if _override is not None:
+        _last_provider = "override"
         return _override
 
     # Tier 1: Primary Cloud (Groq)
     try:
-        return _call_primary(prompt, system)
+        result = _call_primary(prompt, system)
+        _last_provider = "Groq — llama-3.1-8b-instant"
+        return result
     except Exception as e:
         print(f"\n[NETWORK WARNING] Primary Groq LLM failed: {e}")
         print("Attempting Tier 2 Local Edge Fallback (Ollama granite4.1:8b)...\n")
 
     # Tier 2: Local Edge LLM (Ollama granite4.1:8b)
     try:
-        return _call_ollama_fallback(prompt, system)
+        result = _call_ollama_fallback(prompt, system)
+        _last_provider = f"Ollama — {OLLAMA_MODEL} (local edge fallback)"
+        return result
     except Exception as e:
         print(f"\n[OLLAMA WARNING] Local Ollama fallback failed: {e}")
         print("Switching to Tier 3 Deterministic Safety Fallback...\n")
 
     # Tier 3: Deterministic Pre-computed Fallback
+    _last_provider = "Deterministic Safety Fallback (Tier 3)"
     return _call_mock_fallback(prompt, system)

@@ -35,6 +35,7 @@ from app.agents.notification_agent import trigger_notification
 from app.agents.prioritization_agent import calculate_urgency_score
 from app.agents.retrieval_agent import execute_retrieval
 from app.agents.status_agent import get_status
+from app.llm_client import get_last_provider
 from app.models.schemas import CaseRecord
 
 
@@ -136,7 +137,11 @@ def process_case(case: CaseRecord) -> dict:
             _log_step(activity_log, "DraftingAgent", "RUNNING", "Generating bail application draft via LLM")
             draft_result = draft_bail_application(case, retrieved_law=retrieved_law)
             draft_ready = True
-            _log_step(activity_log, "DraftingAgent", "DONE", "Draft generated — awaiting human-lawyer approval")
+            provider = get_last_provider()
+            _log_step(
+                activity_log, "DraftingAgent", "DONE",
+                f"Draft generated via [{provider}] — awaiting human-lawyer approval"
+            )
         else:
             _log_step(activity_log, "DraftingAgent", "SKIPPED", "No statute text retrieved — draft skipped")
     else:
@@ -155,7 +160,11 @@ def process_case(case: CaseRecord) -> dict:
         f"Generating plain-language explanation in '{case.preferred_language}'"
     )
     explanation_result = generate_explanation(case, eligibility_details=eligibility_result)
-    _log_step(activity_log, "ExplainerAgent", "DONE", "Explanation generated for family view")
+    provider = get_last_provider()
+    _log_step(
+        activity_log, "ExplainerAgent", "DONE",
+        f"Explanation generated via [{provider}] for family view"
+    )
 
     # ── Step 6: Status Tracking Agent ────────────────────────────────────────
     _log_step(activity_log, "StatusAgent", "RUNNING", "Fetching court status")
@@ -165,9 +174,10 @@ def process_case(case: CaseRecord) -> dict:
         f"current_status='{status_result['current_status']}'"
     )
 
-    # ── Consolidated result ───────────────────────────────────────────────────
+    # ── Consolidated result ───────────────────────────────────────────────
     return {
         "case_id": case.case_id,
+        "case": case.model_dump(),          # Full case data for frontend
         "eligibility": eligibility_result,
         "completeness": completeness_result,
         "urgency_score": urgency_score,
@@ -177,6 +187,7 @@ def process_case(case: CaseRecord) -> dict:
         "explanation": explanation_result,
         "status_tracking": status_result,
         "draft_ready": draft_ready,
+        "llm_provider": get_last_provider(),  # Which tier served the LLM calls
         "agent_activity_log": activity_log,
     }
 

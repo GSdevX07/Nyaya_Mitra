@@ -105,6 +105,7 @@ export function CaseIntelligence() {
   const statusTracking = caseData.status_tracking || {};
   const agentLog = caseData.agent_activity_log || [];
   const draftReady = caseData.draft_ready || false;
+  const llmProvider: string = caseData.llm_provider || "";
 
   const missingDocs: string[] = completeness.missing_docs || [];
   const legalSources: any[] = retrieval.sources || [];
@@ -327,8 +328,24 @@ export function CaseIntelligence() {
             <section className="space-y-4">
               <h2 className="text-xl font-medium tracking-tight uppercase text-white flex items-center gap-2">
                 <Activity className="w-5 h-5 text-accent" /> Agent Execution Trace
-                <span className="text-xs font-normal text-muted-foreground normal-case ml-2">Not a live stream — logged pipeline execution</span>
+                <span className="text-xs font-normal text-muted-foreground normal-case ml-2">Logged pipeline execution</span>
               </h2>
+
+              {/* LLM Provider Badge — visible fault tolerance demo */}
+              {llmProvider && (
+                <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold ${
+                  llmProvider.includes("Groq") ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" :
+                  llmProvider.includes("Ollama") ? "bg-amber-500/10 border-amber-500/30 text-amber-400" :
+                  "bg-white/5 border-white/10 text-white/50"
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    llmProvider.includes("Groq") ? "bg-emerald-400" :
+                    llmProvider.includes("Ollama") ? "bg-amber-400" : "bg-white/30"
+                  }`} />
+                  LLM PROVIDER: {llmProvider}
+                </div>
+              )}
+
               <div className="p-6 rounded-xl border border-white/5 bg-black/40 space-y-3">
                 {agentLog.map((entry: any, idx: number) => (
                   <div key={idx} className="flex items-center gap-4 text-sm">

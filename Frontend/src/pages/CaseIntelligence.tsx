@@ -1,7 +1,6 @@
 import { useParams, Link } from "react-router-dom";
 import { MOCK_CASES } from "@/data/mock";
-import { ArrowLeft, FileText, CheckCircle2, AlertTriangle, AlertCircle, Scale, Calculator, Link as LinkIcon, Download, Search, PenTool, Check, X, Activity } from "lucide-react";
-import { motion } from "framer-motion";
+import { ArrowLeft, FileText, CheckCircle2, AlertTriangle, AlertCircle, Scale, Calculator, Link as LinkIcon, Download, PenTool, Check, X, Activity } from "lucide-react";
 import { useState } from "react";
 
 export function CaseIntelligence() {
@@ -110,7 +109,7 @@ export function CaseIntelligence() {
               {/* Chain Diagram */}
               <div className="p-6 rounded-xl border border-white/5 bg-white/[0.02] space-y-4 relative">
                 <div className="absolute left-8 top-10 bottom-10 w-px bg-white/10" />
-                {caseData.evidenceChain.map((node, idx) => (
+                {caseData.evidenceChain.map((node, _idx) => (
                   <div 
                     key={node.id} 
                     className={`relative z-10 pl-10 cursor-pointer transition-opacity ${selectedEvidence?.id === node.id ? 'opacity-100' : 'opacity-50 hover:opacity-100'}`}

@@ -1,185 +1,565 @@
-import { motion } from "framer-motion";
-import { MOCK_CASES, DASHBOARD_METRICS } from "@/data/mock";
-import { ArrowRight, AlertCircle, FileText, CheckCircle2, AlertTriangle, Scale, Clock, Activity } from "lucide-react";
-import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence, type Variants } from "framer-motion";
+import {
+  AlertCircle, FileText, CheckCircle2, Activity,
+  Scale, Loader2, User, MapPin, Languages,
+  ShieldCheck, XCircle, ScrollText, Bot, Gavel
+} from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
-const container = {
+// ── Type definitions ──────────────────────────────────────────────────────────
+
+interface UrgencyFlags {
+  age: number;
+  health_flag: boolean;
+  repeat_offender: boolean;
+}
+
+interface CaseRecord {
+  case_id: string;
+  name: string;
+  offense_sections: string[];
+  arrest_date: string;
+  custody_days: number;
+  max_sentence_days_for_offense: number;
+  required_docs: string[];
+  present_docs: string[];
+  urgency_flags: UrgencyFlags;
+  jail_location: string;
+  preferred_language: string;
+  prior_bail_orders: string[];
+}
+
+interface QueueEntry {
+  case: CaseRecord;
+  days_overdue: number;
+  urgency_score: number;
+}
+
+interface EligibilityResult {
+  eligible: boolean;
+  threshold_fraction: number;
+  required_custody_days: number;
+  custody_days_served: number;
+  days_overdue: number;
+  legal_basis: string;
+}
+
+interface CompletenessResult {
+  is_complete: boolean;
+  missing_docs: string[];
+  message: string;
+}
+
+interface LogEntry {
+  timestamp: string;
+  agent: string;
+  status: string;
+  detail: string;
+}
+
+interface CaseDetail {
+  case_id: string;
+  eligibility: EligibilityResult;
+  completeness: CompletenessResult;
+  urgency_score: number;
+  notification: { alert_level: string; dispatched_message: string };
+  retrieval: { retrieved_statutes: string };
+  draft: { drafted_document: string };
+  explanation: { explanation: string; language: string };
+  status_tracking: { current_status: string; last_updated: string };
+  draft_ready: boolean;
+  agent_activity_log: LogEntry[];
+}
+
+// ── Animation variants ────────────────────────────────────────────────────────
+
+const fadeUp: Variants = {
+  hidden: { opacity: 0, y: 16 },
+  show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 280, damping: 24 } },
+};
+
+const stagger: Variants = {
   hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: { staggerChildren: 0.1 }
-  }
+  show: { opacity: 1, transition: { staggerChildren: 0.07 } },
 };
 
-const item = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
+// ── Status badge colours ──────────────────────────────────────────────────────
+
+const STATUS_COLORS: Record<string, string> = {
+  RUNNING:  "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  DONE:     "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  SKIPPED:  "bg-white/5 text-muted-foreground border-white/10",
 };
 
-export function CommandCenter() {
-  const urgentCase = MOCK_CASES.find(c => c.urgency === "URGENT") || MOCK_CASES[0];
+const COURT_STATUS_COLORS: Record<string, string> = {
+  "Pending Review":     "text-amber-400",
+  "Filed":              "text-blue-400",
+  "Hearing Scheduled":  "text-purple-400",
+  "Order Passed":       "text-emerald-400",
+  "Released":           "text-emerald-500",
+};
+
+// ── Subcomponents ─────────────────────────────────────────────────────────────
+
+function QueueCard({
+  entry,
+  isSelected,
+  isLoading,
+  onClick,
+}: {
+  entry: QueueEntry;
+  isSelected: boolean;
+  isLoading: boolean;
+  onClick: () => void;
+}) {
+  const { case: c, days_overdue, urgency_score } = entry;
+  const isHigh = urgency_score > 100;
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <motion.div initial="hidden" animate="show" variants={container} className="space-y-10">
-        
-        {/* Header */}
-        <motion.div variants={item} className="space-y-2">
-          <h1 className="text-4xl font-semibold tracking-tight text-white">Good morning, Officer.</h1>
-          <p className="text-xl text-muted-foreground">Here is what requires attention today.</p>
-        </motion.div>
+    <motion.div variants={fadeUp}>
+      <Card
+        onClick={onClick}
+        className={`cursor-pointer transition-all duration-200 border relative overflow-hidden
+          ${isSelected
+            ? "border-blue-500/50 bg-blue-500/5 shadow-lg shadow-blue-500/10"
+            : "border-white/8 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]"
+          }`}
+      >
+        {/* left accent bar */}
+        <div className={`absolute left-0 top-0 bottom-0 w-0.5 ${isHigh ? "bg-red-500" : "bg-blue-500/40"}`} />
 
-        {/* Primary Metrics */}
-        <motion.div variants={item} className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          {[
-            { label: "Cases monitored", value: DASHBOARD_METRICS.monitored, color: "text-white" },
-            { label: "Potentially eligible", value: DASHBOARD_METRICS.potentiallyEligible, color: "text-accent" },
-            { label: "Missing documents", value: DASHBOARD_METRICS.missingDocuments, color: "text-amber-500" },
-            { label: "Awaiting legal review", value: DASHBOARD_METRICS.awaitingReview, color: "text-white" },
-            { label: "Urgent actions", value: DASHBOARD_METRICS.urgentActions, color: "text-destructive" },
-          ].map((metric, i) => (
-            <div key={i} className="p-5 rounded-xl border border-white/5 bg-white/[0.02] backdrop-blur-sm relative overflow-hidden group">
-              <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-              <div className={`text-4xl font-light tracking-tight mb-2 ${metric.color}`}>
-                {metric.value.toLocaleString()}
+        <CardContent className="p-4 pl-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap mb-1">
+                <span className="text-xs font-mono text-muted-foreground">{c.case_id}</span>
+                {isHigh && (
+                  <Badge variant="destructive" className="text-[10px] px-1.5 py-0">HIGH PRIORITY</Badge>
+                )}
               </div>
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                {metric.label}
-              </div>
+              <p className="text-sm font-medium text-white truncate">{c.name}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{c.offense_sections.join(", ")}</p>
             </div>
-          ))}
+            <div className="text-right shrink-0">
+              <div className={`text-lg font-bold ${isHigh ? "text-red-400" : "text-white/70"}`}>
+                {days_overdue}d
+              </div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider">overdue</div>
+              <div className="text-[10px] text-muted-foreground mt-1">Score: {urgency_score}</div>
+            </div>
+          </div>
+
+          {/* flags row */}
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            {c.urgency_flags.health_flag && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">Health Flag</span>
+            )}
+            {c.urgency_flags.age > 60 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Elderly ({c.urgency_flags.age})</span>
+            )}
+            {!c.urgency_flags.repeat_offender && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">First-Time</span>
+            )}
+          </div>
+        </CardContent>
+
+        {isSelected && isLoading && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+            <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
+          </div>
+        )}
+      </Card>
+    </motion.div>
+  );
+}
+
+function OverviewTab({ detail }: { detail: CaseDetail }) {
+  const { eligibility: elig, completeness: comp, status_tracking: st, notification: notif } = detail;
+
+  return (
+    <div className="space-y-4">
+      {/* Eligibility */}
+      <Card className="border-white/8 bg-white/[0.02]">
+        <CardHeader className="pb-2 pt-4 px-4">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Scale className="w-4 h-4 text-blue-400" /> Eligibility — Section 479 BNSS
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4 space-y-2">
+          <div className="flex items-center gap-2">
+            {elig.eligible
+              ? <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+              : <XCircle className="w-5 h-5 text-red-400" />}
+            <span className={`font-semibold ${elig.eligible ? "text-emerald-400" : "text-red-400"}`}>
+              {elig.eligible ? "ELIGIBLE" : "NOT YET ELIGIBLE"}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">{elig.legal_basis}</p>
+          <div className="grid grid-cols-3 gap-2 mt-2">
+            {[
+              { label: "Days Served", value: elig.custody_days_served },
+              { label: "Required", value: elig.required_custody_days },
+              { label: "Overdue", value: elig.days_overdue, highlight: elig.days_overdue > 0 },
+            ].map(({ label, value, highlight }) => (
+              <div key={label} className="p-2 rounded-lg bg-white/[0.03] text-center">
+                <div className={`text-lg font-bold ${highlight ? "text-red-400" : "text-white"}`}>{value}</div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Completeness */}
+      <Card className="border-white/8 bg-white/[0.02]">
+        <CardHeader className="pb-2 pt-4 px-4">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <FileText className="w-4 h-4 text-amber-400" /> Document Completeness
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          {comp.is_complete ? (
+            <div className="flex items-center gap-2 text-emerald-400 text-sm">
+              <CheckCircle2 className="w-4 h-4" /> All required documents are present.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-amber-400 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4" /> Missing documents:
+              </p>
+              <ul className="space-y-1">
+                {comp.missing_docs.map((doc) => (
+                  <li key={doc} className="text-xs px-3 py-1.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 font-mono">
+                    {doc}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Status & Notification */}
+      <div className="grid grid-cols-2 gap-4">
+        <Card className="border-white/8 bg-white/[0.02]">
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1"><Gavel className="w-3 h-3" /> Court Status</div>
+            <div className={`font-semibold text-sm ${COURT_STATUS_COLORS[st.current_status] ?? "text-white"}`}>
+              {st.current_status}
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-1">
+              {new Date(st.last_updated).toLocaleTimeString()}
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-white/8 bg-white/[0.02]">
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Alert Level</div>
+            <Badge
+              variant={notif.alert_level === "HIGH" ? "destructive" : "secondary"}
+              className="text-xs"
+            >
+              {notif.alert_level}
+            </Badge>
+            <div className="text-[10px] text-muted-foreground mt-1">Urgency: {detail.urgency_score}</div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function DraftTab({ detail, onApprove, approving }: { detail: CaseDetail; onApprove: () => void; approving: boolean }) {
+  return (
+    <div className="space-y-4">
+      {detail.draft_ready ? (
+        <>
+          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/8">
+            <pre className="whitespace-pre-wrap text-sm text-white/80 font-mono leading-relaxed">
+              {detail.draft.drafted_document}
+            </pre>
+          </div>
+          <button
+            onClick={onApprove}
+            disabled={approving}
+            className="w-full py-3 px-6 rounded-xl bg-emerald-500/90 hover:bg-emerald-500 text-white font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {approving
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Filing...</>
+              : <><ShieldCheck className="w-4 h-4" /> Approve &amp; File</>
+            }
+          </button>
+        </>
+      ) : (
+        <div className="p-8 text-center rounded-xl border border-white/8 bg-white/[0.02]">
+          <XCircle className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
+          <p className="text-muted-foreground text-sm">
+            Draft not available. Case must be <span className="text-white">eligible</span> and{" "}
+            <span className="text-white">documents complete</span> before a bail application can be drafted.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExplanationTab({ detail }: { detail: CaseDetail }) {
+  const { explanation } = detail;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Languages className="w-3.5 h-3.5" />
+        Language code: <span className="text-white font-mono">{explanation.language}</span>
+      </div>
+      <div className="p-5 rounded-xl bg-white/[0.02] border border-white/8">
+        <p className="text-white/90 leading-relaxed text-sm whitespace-pre-wrap">
+          {explanation.explanation}
+        </p>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        This explanation is generated in the prisoner's preferred language and is suitable for reading aloud to family members.
+      </p>
+    </div>
+  );
+}
+
+function AgentLogTab({ log }: { log: LogEntry[] }) {
+  return (
+    <div className="space-y-2">
+      {log.map((entry, i) => (
+        <motion.div
+          key={i}
+          initial={{ opacity: 0, x: -8 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: i * 0.04 }}
+          className="flex items-start gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/5"
+        >
+          <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border font-mono uppercase tracking-wider ${STATUS_COLORS[entry.status] ?? "bg-white/5 text-white border-white/10"}`}>
+            {entry.status}
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-white">{entry.agent}</span>
+              <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                {new Date(entry.timestamp).toLocaleTimeString()}
+              </span>
+            </div>
+            {entry.detail && (
+              <p className="text-xs text-muted-foreground mt-0.5 truncate">{entry.detail}</p>
+            )}
+          </div>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────────────────────────
+
+export function CommandCenter() {
+  const [cases, setCases] = useState<QueueEntry[]>([]);
+  const [selectedCase, setSelectedCase] = useState<CaseDetail | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [queueLoading, setQueueLoading] = useState(true);
+  const [approving, setApproving] = useState(false);
+  const [approveMsg, setApproveMsg] = useState<string | null>(null);
+
+  // Fetch prioritized queue on mount
+  useEffect(() => {
+    setQueueLoading(true);
+    fetch("http://127.0.0.1:8000/cases")
+      .then((r) => r.json())
+      .then((data) => setCases(data))
+      .catch((e) => console.error("Failed to fetch queue:", e))
+      .finally(() => setQueueLoading(false));
+  }, []);
+
+  // Fetch full case detail when a queue card is clicked
+  const handleSelectCase = (caseId: string) => {
+    setSelectedId(caseId);
+    setSelectedCase(null);
+    setApproveMsg(null);
+    setIsLoading(true);
+    fetch(`http://127.0.0.1:8000/cases/${caseId}`)
+      .then((r) => r.json())
+      .then((data) => setSelectedCase(data))
+      .catch((e) => console.error("Failed to fetch case detail:", e))
+      .finally(() => setIsLoading(false));
+  };
+
+  // Human-lawyer approval gate
+  const handleApprove = async () => {
+    if (!selectedId) return;
+    setApproving(true);
+    setApproveMsg(null);
+    try {
+      const r = await fetch(`http://127.0.0.1:8000/cases/${selectedId}/approve`, { method: "POST" });
+      const data = await r.json();
+      setApproveMsg(data.status ?? "Approved.");
+    } catch {
+      setApproveMsg("Error: Could not reach the server.");
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto h-full">
+      <motion.div initial="hidden" animate="show" variants={stagger} className="space-y-6">
+
+        {/* Header */}
+        <motion.div variants={fadeUp} className="space-y-1">
+          <h1 className="text-3xl font-semibold tracking-tight text-white">Lawyer Command Centre</h1>
+          <p className="text-muted-foreground text-sm">
+            Prioritized undertrial queue — powered by the Nyaya Mitra agent pipeline.
+          </p>
         </motion.div>
 
-        {/* Layout Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          
-          {/* Main Case Flow / Priority Queue */}
-          <motion.div variants={item} className="lg:col-span-2 space-y-8">
-            
-            {/* Action Required */}
-            <section className="space-y-4">
-              <div className="flex items-center gap-2 text-destructive">
-                <AlertCircle className="w-5 h-5" />
-                <h2 className="text-lg font-medium tracking-tight uppercase">Action Required</h2>
+        {/* Two-column layout */}
+        <motion.div variants={fadeUp} className="grid grid-cols-1 md:grid-cols-3 gap-6 min-h-[calc(100vh-12rem)]">
+
+          {/* ── LEFT: Prioritized Queue ──────────────────────────────────── */}
+          <div className="md:col-span-1 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Activity className="w-3.5 h-3.5" /> Prioritized Queue
+              </h2>
+              {!queueLoading && (
+                <span className="text-xs text-muted-foreground">{cases.length} cases</span>
+              )}
+            </div>
+
+            {queueLoading ? (
+              <div className="flex-1 flex items-center justify-center">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
               </div>
-              
-              <Link to={`/case/${urgentCase.id}`} className="block">
-                <div className="p-6 rounded-xl border border-destructive/20 bg-destructive/5 hover:bg-destructive/10 transition-colors relative overflow-hidden group cursor-pointer">
-                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-destructive" />
-                  
-                  <div className="flex justify-between items-start mb-4">
+            ) : (
+              <motion.div variants={stagger} className="flex flex-col gap-2 overflow-y-auto pr-1">
+                {cases.map((entry) => (
+                  <QueueCard
+                    key={entry.case.case_id}
+                    entry={entry}
+                    isSelected={selectedId === entry.case.case_id}
+                    isLoading={isLoading && selectedId === entry.case.case_id}
+                    onClick={() => handleSelectCase(entry.case.case_id)}
+                  />
+                ))}
+              </motion.div>
+            )}
+          </div>
+
+          {/* ── RIGHT: Case Detail View ──────────────────────────────────── */}
+          <div className="md:col-span-2">
+            <AnimatePresence mode="wait">
+              {!selectedId && !isLoading ? (
+                <motion.div
+                  key="placeholder"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="h-full flex flex-col items-center justify-center text-center p-12 rounded-xl border border-dashed border-white/10 bg-white/[0.01]"
+                >
+                  <Scale className="w-10 h-10 text-muted-foreground/40 mb-4" />
+                  <p className="text-muted-foreground text-sm max-w-xs">
+                    Select a case from the queue to view the full agent pipeline report.
+                  </p>
+                </motion.div>
+              ) : isLoading ? (
+                <motion.div
+                  key="loading"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="h-full flex flex-col items-center justify-center gap-4 rounded-xl border border-white/8 bg-white/[0.02]"
+                >
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
+                  <p className="text-muted-foreground text-sm">Running agent pipeline…</p>
+                  <div className="flex flex-col gap-1.5 text-xs text-muted-foreground/60">
+                    {["EligibilityAgent", "CompletenessAgent", "PrioritizationAgent", "DraftingAgent", "ExplainerAgent"].map((a) => (
+                      <span key={a} className="flex items-center gap-1.5">
+                        <Bot className="w-3 h-3" /> {a}
+                      </span>
+                    ))}
+                  </div>
+                </motion.div>
+              ) : selectedCase ? (
+                <motion.div
+                  key={selectedCase.case_id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="flex flex-col gap-4"
+                >
+                  {/* Case header */}
+                  <div className="flex items-start justify-between gap-4">
                     <div>
-                      <div className="flex items-center gap-3 mb-1">
-                        <h3 className="text-xl font-medium text-white">CASE #{urgentCase.id}</h3>
-                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-destructive/20 text-destructive border border-destructive/30">
-                          {urgentCase.urgency}
-                        </span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-sm text-muted-foreground">{selectedCase.case_id}</span>
+                        <Badge variant={selectedCase.draft_ready ? "default" : "secondary"} className="text-[10px]">
+                          {selectedCase.draft_ready ? "Draft Ready" : "Draft Pending"}
+                        </Badge>
                       </div>
-                      <p className="text-muted-foreground">{urgentCase.prisonerName} • Potential Section 479 eligibility</p>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-destructive font-bold text-lg">47 DAYS</div>
-                      <div className="text-xs text-destructive/80 uppercase tracking-wider font-medium">Over Threshold</div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 text-sm mt-6 pt-4 border-t border-white/5">
-                    <div>
-                      <span className="text-muted-foreground block mb-1 text-xs uppercase tracking-wider">Missing Records</span>
-                      <ul className="space-y-1">
-                        {urgentCase.documents.filter(d => d.status === "missing").map(d => (
-                          <li key={d.id} className="flex items-center gap-2 text-amber-500/90">
-                            <AlertTriangle className="w-3.5 h-3.5" /> {d.name}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div className="flex justify-end items-end">
-                      <div className="flex items-center gap-2 text-white font-medium group-hover:text-accent transition-colors">
-                        Review Case <ArrowRight className="w-4 h-4" />
+                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1"><User className="w-3 h-3" /> {cases.find(c => c.case.case_id === selectedCase.case_id)?.case.offense_sections.join(", ")}</span>
+                        <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {cases.find(c => c.case.case_id === selectedCase.case_id)?.case.jail_location}</span>
                       </div>
                     </div>
                   </div>
-                </div>
-              </Link>
-            </section>
 
-            {/* Case Flow Simple Visualization */}
-            <section className="space-y-4">
-               <h2 className="text-lg font-medium tracking-tight uppercase text-muted-foreground">Case Flow</h2>
-               <div className="p-8 rounded-xl border border-white/5 bg-white/[0.02] overflow-x-auto">
-                 <div className="flex items-center justify-between min-w-[600px]">
-                   {["DISCOVERED", "VERIFIED", "DOCUMENTS", "ELIGIBILITY", "REVIEW", "FILED"].map((stage, i, arr) => (
-                     <div key={stage} className="flex items-center">
-                       <div className="flex flex-col items-center gap-3">
-                         <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 ${i === 3 ? "border-accent bg-accent/10 text-accent" : i < 3 ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-500" : "border-white/10 bg-white/5 text-muted-foreground"}`}>
-                           {i < 3 ? <CheckCircle2 className="w-5 h-5" /> : i === 3 ? <Activity className="w-5 h-5 animate-pulse" /> : <Clock className="w-5 h-5" />}
-                         </div>
-                         <span className={`text-xs font-medium tracking-wider ${i === 3 ? "text-accent" : "text-muted-foreground"}`}>{stage}</span>
-                       </div>
-                       {i < arr.length - 1 && (
-                         <div className={`w-16 h-px mx-2 ${i < 3 ? "bg-emerald-500/30" : "bg-white/10"}`} />
-                       )}
-                     </div>
-                   ))}
-                 </div>
-               </div>
-            </section>
+                  {/* Approve success message */}
+                  <AnimatePresence>
+                    {approveMsg && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0 }}
+                        className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-sm flex items-center gap-2"
+                      >
+                        <ShieldCheck className="w-4 h-4 shrink-0" /> {approveMsg}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
 
-          </motion.div>
+                  {/* Tabbed detail */}
+                  <Tabs defaultValue="overview" className="w-full">
+                    <TabsList className="w-full grid grid-cols-4 bg-white/[0.04] border border-white/8">
+                      <TabsTrigger value="overview" className="text-xs gap-1.5">
+                        <Scale className="w-3.5 h-3.5" /> Overview
+                      </TabsTrigger>
+                      <TabsTrigger value="draft" className="text-xs gap-1.5">
+                        <ScrollText className="w-3.5 h-3.5" /> Draft
+                      </TabsTrigger>
+                      <TabsTrigger value="family" className="text-xs gap-1.5">
+                        <Languages className="w-3.5 h-3.5" /> Family
+                      </TabsTrigger>
+                      <TabsTrigger value="log" className="text-xs gap-1.5">
+                        <Bot className="w-3.5 h-3.5" /> Agent Log
+                      </TabsTrigger>
+                    </TabsList>
 
-          {/* Sidebar Metrics */}
-          <motion.div variants={item} className="space-y-8">
-            
-            {/* Case Readiness */}
-            <section className="space-y-4">
-              <h2 className="text-lg font-medium tracking-tight uppercase text-muted-foreground">Case Readiness</h2>
-              <div className="p-6 rounded-xl border border-white/5 bg-white/[0.02] flex flex-col items-center justify-center relative">
-                {/* Radial Chart Placeholder */}
-                <div className="relative w-48 h-48 flex items-center justify-center mb-6">
-                  <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="45" className="stroke-white/10" strokeWidth="4" fill="none" />
-                    <circle cx="50" cy="50" r="45" className="stroke-accent" strokeWidth="4" fill="none" strokeDasharray="283" strokeDashoffset={283 * (1 - 0.82)} strokeLinecap="round" />
-                    
-                    <circle cx="50" cy="50" r="35" className="stroke-white/10" strokeWidth="4" fill="none" />
-                    <circle cx="50" cy="50" r="35" className="stroke-emerald-500" strokeWidth="4" fill="none" strokeDasharray="220" strokeDashoffset={220 * (1 - 0.72)} strokeLinecap="round" />
-                    
-                    <circle cx="50" cy="50" r="25" className="stroke-white/10" strokeWidth="4" fill="none" />
-                    <circle cx="50" cy="50" r="25" className="stroke-blue-500" strokeWidth="4" fill="none" strokeDasharray="157" strokeDashoffset={157 * (1 - 0.94)} strokeLinecap="round" />
-                  </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-3xl font-light text-white">82%</span>
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-widest">Ready</span>
-                  </div>
-                </div>
+                    <TabsContent value="overview" className="mt-4">
+                      <OverviewTab detail={selectedCase} />
+                    </TabsContent>
+                    <TabsContent value="draft" className="mt-4">
+                      <DraftTab detail={selectedCase} onApprove={handleApprove} approving={approving} />
+                    </TabsContent>
+                    <TabsContent value="family" className="mt-4">
+                      <ExplanationTab detail={selectedCase} />
+                    </TabsContent>
+                    <TabsContent value="log" className="mt-4">
+                      <AgentLogTab log={selectedCase.agent_activity_log} />
+                    </TabsContent>
+                  </Tabs>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </div>
 
-                <div className="w-full space-y-3 text-sm">
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground flex items-center gap-2"><Scale className="w-4 h-4 text-accent" /> Eligibility</span>
-                    <span className="text-white font-medium">100%</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground flex items-center gap-2"><FileText className="w-4 h-4 text-emerald-500" /> Documentation</span>
-                    <span className="text-white font-medium">72%</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-blue-500" /> Evidence</span>
-                    <span className="text-white font-medium">94%</span>
-                  </div>
-                  <div className="flex justify-between items-center pt-3 border-t border-white/5">
-                    <span className="text-muted-foreground">Legal Review</span>
-                    <span className="text-amber-500 font-medium">Pending</span>
-                  </div>
-                </div>
-
-                <div className="mt-6 w-full text-center py-2 bg-accent/10 text-accent text-xs font-semibold tracking-widest uppercase rounded">
-                  Nearly Ready For Human Review
-                </div>
-              </div>
-            </section>
-
-          </motion.div>
-        </div>
+        </motion.div>
       </motion.div>
     </div>
   );

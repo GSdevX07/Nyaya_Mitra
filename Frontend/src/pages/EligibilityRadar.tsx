@@ -1,5 +1,4 @@
-import { motion } from "framer-motion";
-import { Search, Filter, AlertCircle, Clock, FileText, ArrowLeft } from "lucide-react";
+import { Search, Filter, Clock, ArrowLeft } from "lucide-react";
 import { MOCK_CASES } from "@/data/mock";
 import { Link } from "react-router-dom";
 

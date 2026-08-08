@@ -3,7 +3,7 @@ llm_client.py — Single choke-point for every LLM call in Nyaya Mitra.
 
 Fault-tolerant 3-Tier Architecture:
   1. Primary Cloud Tier   : Groq API (llama-3.1-8b-instant) [8s timeout]
-  2. Local Edge LLM Tier  : Ollama (granite4.1:8b) [15s timeout]
+  2. Local Edge LLM Tier  : Ollama (granite4.1:8b) [60s timeout]
   3. Deterministic Safety : Pre-baked mock response (demo safety net)
 
 No other file in the codebase should call an LLM API directly.
@@ -21,7 +21,7 @@ load_dotenv()
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "granite4.1:8b")
-OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "15.0"))
+OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "60.0"))
 
 
 # ── Private provider implementations ─────────────────────────────────────────
@@ -51,6 +51,7 @@ def _call_ollama_fallback(prompt: str, system: str) -> str:
     """
     Call local Ollama server running granite4.1:8b model on host machine.
     """
+    print(f"\n[OLLAMA] Sending request to local edge model ({OLLAMA_MODEL})...")
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -70,11 +71,14 @@ def _call_ollama_fallback(prompt: str, system: str) -> str:
     data = response.json()
 
     if "message" in data and "content" in data["message"]:
-        return data["message"]["content"]
+        content = data["message"]["content"]
     elif "response" in data:
-        return data["response"]
+        content = data["response"]
     else:
         raise ValueError(f"Unexpected response payload from Ollama: {data}")
+
+    print(f"[OLLAMA SUCCESS] Generated response using local {OLLAMA_MODEL} ({len(content)} chars)")
+    return content
 
 
 def _call_mock_fallback(prompt: str, system: str) -> str:

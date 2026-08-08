@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { Search, Bell, User, Activity } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CommandPalette } from "@/components/CommandPalette";
+import { NotificationsModal } from "@/components/NotificationsModal";
 
 const navItems = [
   { path: "/dashboard", label: "Command Center" },
@@ -18,39 +19,56 @@ const navItems = [
 export function AppLayout() {
   const location = useLocation();
   const [isHovered, setIsHovered] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+
+  // Auto-scroll to top on page navigation
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [location.pathname]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-accent selection:text-accent-foreground relative overflow-hidden">
+    <div className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-accent selection:text-accent-foreground relative overflow-x-hidden">
       {/* Subtle background grain/noise texture overlay */}
       <div className="pointer-events-none fixed inset-0 z-50 opacity-[0.03] mix-blend-overlay bg-[url('https://grainy-gradients.vercel.app/noise.svg')]" />
-      
-      {/* Global Top Navigation */}
-      <header className="sticky top-0 z-40 w-full border-b border-white/5 bg-background/80 backdrop-blur-md">
-        <div className="flex h-16 items-center px-6">
-          <Link to="/" className="flex items-center gap-2 mr-8 group hover:opacity-90 transition-opacity">
-            <div className="relative flex items-center justify-center w-8 h-8">
-              <div className="absolute inset-0 bg-accent/20 rounded-full animate-ping opacity-75" />
+
+      {/* Global Top Navigation Bar */}
+      <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-background/90 backdrop-blur-xl shadow-xl shadow-black/20">
+        <div className="flex h-16 items-center px-4 md:px-8 max-w-7xl mx-auto justify-between">
+          {/* Logo & Brand */}
+          <Link to="/" className="flex items-center gap-2.5 mr-6 group hover:opacity-90 transition-opacity shrink-0">
+            <div className="relative flex items-center justify-center w-8 h-8 rounded-lg bg-accent/10 border border-accent/20">
+              <div className="absolute inset-0 bg-accent/20 rounded-lg animate-ping opacity-75" />
               <Activity className="w-5 h-5 text-accent relative z-10" />
             </div>
-            <span className="font-semibold text-lg tracking-tight text-white uppercase group-hover:text-accent transition-colors">Nyaya Mitra</span>
+            <span className="font-bold text-lg tracking-tight text-white uppercase group-hover:text-accent transition-colors font-mono">
+              Nyaya Mitra
+            </span>
           </Link>
-          
-          <nav className="flex items-center gap-1 flex-1 overflow-x-auto no-scrollbar">
+
+          {/* Navigation Links */}
+          <nav className="flex items-center gap-1 flex-1 overflow-x-auto no-scrollbar py-1">
             {navItems.map((item) => {
-              const isActive = location.pathname.startsWith(item.path);
+              const isActive =
+                location.pathname === item.path ||
+                (item.path === "/cases" && location.pathname.startsWith("/case/")) ||
+                (item.path !== "/" && location.pathname.startsWith(item.path));
+
               return (
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`relative px-4 py-2 text-sm transition-colors rounded-md hover:bg-white/5 whitespace-nowrap shrink-0 ${
-                    isActive ? "text-white font-medium" : "text-muted-foreground"
+                  className={`relative px-3.5 py-1.5 text-xs md:text-sm transition-all rounded-lg whitespace-nowrap shrink-0 font-medium ${
+                    isActive
+                      ? "text-white bg-white/10 font-semibold"
+                      : "text-muted-foreground hover:text-white hover:bg-white/5"
                   }`}
                 >
                   {item.label}
                   {isActive && (
                     <motion.div
                       layoutId="nav-indicator"
-                      className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent rounded-t-full"
+                      className="absolute bottom-0 left-2 right-2 h-[2px] bg-accent rounded-t-full"
                       initial={false}
                       transition={{ type: "spring", stiffness: 500, damping: 30 }}
                     />
@@ -60,27 +78,42 @@ export function AppLayout() {
             })}
           </nav>
 
-          <div className="flex items-center gap-4 ml-auto pl-4">
-            <button className="text-muted-foreground hover:text-white transition-colors">
-              <Search className="w-5 h-5" />
+          {/* Controls & Profile */}
+          <div className="flex items-center gap-2 md:gap-3 ml-4 shrink-0">
+            <button
+              onClick={() => setIsSearchOpen(true)}
+              className="p-2 text-muted-foreground hover:text-white hover:bg-white/10 rounded-xl transition-colors flex items-center gap-1.5"
+              title="Search cases & actions (Ctrl+K)"
+            >
+              <Search className="w-4 h-4 md:w-5 md:h-5 text-accent" />
+              <span className="text-[10px] hidden lg:inline-block border border-white/10 px-1.5 py-0.5 rounded text-muted-foreground font-mono">
+                ⌘K
+              </span>
             </button>
-            <button className="text-muted-foreground hover:text-white transition-colors relative">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-0 right-0 w-2 h-2 bg-destructive rounded-full" />
+
+            <button
+              onClick={() => setIsNotificationsOpen(true)}
+              className="p-2 text-muted-foreground hover:text-white hover:bg-white/10 rounded-xl transition-colors relative"
+              title="System Alerts"
+            >
+              <Bell className="w-4 h-4 md:w-5 md:h-5" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-destructive rounded-full" />
             </button>
-            <div className="w-px h-5 bg-border mx-2" />
-            <button className="flex items-center gap-2 text-sm text-muted-foreground hover:text-white transition-colors">
-              <div className="w-7 h-7 rounded-full bg-secondary border border-border flex items-center justify-center">
+
+            <div className="w-px h-5 bg-white/10 mx-1" />
+
+            <div className="flex items-center gap-2 text-xs md:text-sm text-muted-foreground">
+              <div className="w-7 h-7 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
                 <User className="w-4 h-4" />
               </div>
-              <span className="hidden md:inline">Officer 104</span>
-            </button>
+              <span className="hidden md:inline font-medium text-white/90">Legal Officer 104</span>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-auto relative z-10">
+      <main className="flex-1 relative z-10">
         <Outlet />
       </main>
 
@@ -89,7 +122,7 @@ export function AppLayout() {
         <motion.div
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
-          className="bg-background/90 backdrop-blur-xl border border-white/10 shadow-2xl shadow-black/50 overflow-hidden cursor-pointer flex flex-col"
+          className="bg-background/95 backdrop-blur-xl border border-white/10 shadow-2xl shadow-black/80 overflow-hidden cursor-pointer flex flex-col"
           initial={false}
           animate={{
             width: isHovered ? 320 : 48,
@@ -122,20 +155,22 @@ export function AppLayout() {
               >
                 <div className="flex items-center gap-2 mb-3">
                   <Activity className="w-4 h-4 text-accent animate-pulse" />
-                  <span className="text-xs font-semibold text-accent uppercase tracking-wider">Nyaya Intelligence</span>
+                  <span className="text-xs font-semibold text-accent uppercase tracking-wider">
+                    Nyaya Intelligence Engine
+                  </span>
                 </div>
                 <ul className="space-y-2 text-xs text-muted-foreground">
                   <li className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-white/20 animate-pulse" />
-                    Analyzing case #TN-2026-00482
+                    Monitoring 5 Undertrial Prisoners
                   </li>
-                  <li className="flex items-center gap-2 text-emerald-500/80">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/50" />
-                    Retrieved BNSS Section 479
+                  <li className="flex items-center gap-2 text-emerald-400">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Section 479 BNSS Rule Engine Active
                   </li>
-                  <li className="flex items-center gap-2 text-amber-500/80">
-                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500/50" />
-                    Missing document detected
+                  <li className="flex items-center gap-2 text-amber-400">
+                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    1 missing charge sheet flagged
                   </li>
                 </ul>
               </motion.div>
@@ -143,7 +178,9 @@ export function AppLayout() {
           </AnimatePresence>
         </motion.div>
       </div>
-      <CommandPalette />
+
+      <CommandPalette isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} />
+      <NotificationsModal isOpen={isNotificationsOpen} onClose={() => setIsNotificationsOpen(false)} />
     </div>
   );
 }

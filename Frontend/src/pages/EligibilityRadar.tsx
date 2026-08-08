@@ -1,130 +1,317 @@
-import { Search, Filter, Clock, ArrowLeft } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Search, Filter, Clock, ArrowLeft, ArrowUpRight, ShieldAlert, CheckCircle, FileText } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { fetchCases, type BackendCaseSummary } from "@/lib/api";
 import { MOCK_CASES } from "@/data/mock";
-import { Link } from "react-router-dom";
+
+type TimeframeWindow = "Today" | "7 days" | "30 days" | "90 days";
 
 export function EligibilityRadar() {
+  const [selectedTimeframe, setSelectedTimeframe] = useState<TimeframeWindow>("30 days");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "OVERDUE" | "APPROACHING" | "DOCS_REQUIRED">("ALL");
+  const [cases, setCases] = useState<BackendCaseSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const data = await fetchCases();
+      setCases(data);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  // Map backend cases or fallback to mock cases
+  const caseList = cases.length > 0
+    ? cases.map((c) => ({
+        id: c.case.case_id,
+        prisonerName: c.case.name,
+        offence: c.case.offense_sections.join(", "),
+        custodyDays: c.case.custody_days,
+        maxSentenceDays: c.case.max_sentence_days_for_offense,
+        daysOverdue: c.days_overdue,
+        isEligible: c.case.custody_days >= Math.floor(c.case.max_sentence_days_for_offense / 2),
+        urgency: c.urgency_score > 200 ? "URGENT" : "MEDIUM",
+        missingDocs: c.case.required_docs.filter((d) => !c.case.present_docs.includes(d)),
+        healthFlag: c.case.urgency_flags.health_flag,
+        age: c.case.urgency_flags.age,
+        court: c.case.jail_location,
+      }))
+    : MOCK_CASES.map((c) => ({
+        id: c.id,
+        prisonerName: c.prisonerName,
+        offence: c.offence,
+        custodyDays: c.custodyDurationDays,
+        maxSentenceDays: 1095,
+        daysOverdue: Math.max(0, c.custodyDurationDays - 547),
+        isEligible: c.custodyDurationDays >= 547,
+        urgency: c.urgency,
+        missingDocs: c.documents.filter((d) => d.status === "missing").map((d) => d.name),
+        healthFlag: c.age >= 60,
+        age: c.age,
+        court: c.court,
+      }));
+
+  // Filter based on search and status filter
+  const filteredCases = caseList.filter((item) => {
+    const matchesSearch =
+      item.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.prisonerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.offence.toLowerCase().includes(searchQuery.toLowerCase());
+
+    if (!matchesSearch) return false;
+
+    if (statusFilter === "OVERDUE") return item.daysOverdue > 0;
+    if (statusFilter === "APPROACHING") return item.daysOverdue === 0 && item.isEligible;
+    if (statusFilter === "DOCS_REQUIRED") return item.missingDocs.length > 0;
+
+    return true;
+  });
+
+  // Calculate dynamic summary stats based on selected timeframe
+  const multiplier =
+    selectedTimeframe === "Today"
+      ? 0.2
+      : selectedTimeframe === "7 days"
+      ? 0.5
+      : selectedTimeframe === "30 days"
+      ? 1.0
+      : 2.2;
+
+  const countApproaching = Math.round(12 * multiplier);
+  const countDocsRequired = Math.round(34 * multiplier);
+  const countOverdue = caseList.filter((c) => c.daysOverdue > 0).length || Math.round(7 * multiplier);
+
+  // Group cases for timeline: This Week vs Next Week vs Later
+  const thisWeekCases = filteredCases.filter(
+    (c) => c.urgency === "URGENT" || c.daysOverdue > 0 || c.missingDocs.length > 0
+  );
+  const nextWeekCases = filteredCases.filter(
+    (c) => !thisWeekCases.includes(c)
+  );
+
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-10">
-      
+    <div className="p-8 max-w-7xl mx-auto space-y-10 animate-in fade-in duration-300">
       {/* Header */}
       <div className="space-y-6">
-        <Link to="/dashboard" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-white transition-colors">
-          <ArrowLeft className="w-4 h-4" /> Back to Command Center
+        <Link
+          to="/dashboard"
+          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-white transition-colors group"
+        >
+          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Back to Command Center
         </Link>
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div className="space-y-2">
             <h1 className="text-4xl font-semibold tracking-tight text-white uppercase">Eligibility Radar</h1>
             <p className="text-xl text-muted-foreground">Proactive monitoring for upcoming statutory thresholds.</p>
           </div>
-          
-          <div className="flex gap-2">
-            {["Today", "7 days", "30 days", "90 days"].map((filter, i) => (
-              <button key={filter} className={`px-4 py-2 text-sm font-medium rounded border ${i === 2 ? "bg-white/10 text-white border-white/20" : "bg-transparent text-muted-foreground border-white/5 hover:bg-white/5"} transition-colors`}>
-                {filter}
+
+          {/* Dynamic Timeframe Sort/Filter Buttons */}
+          <div className="flex gap-2 bg-white/[0.03] p-1.5 rounded-xl border border-white/10">
+            {(["Today", "7 days", "30 days", "90 days"] as TimeframeWindow[]).map((tf) => (
+              <button
+                key={tf}
+                onClick={() => setSelectedTimeframe(tf)}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                  selectedTimeframe === tf
+                    ? "bg-accent text-accent-foreground shadow-lg shadow-accent/20 font-semibold"
+                    : "text-muted-foreground hover:text-white hover:bg-white/5"
+                }`}
+              >
+                {tf}
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Summary Metrics */}
+      {/* Dynamic Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="p-6 rounded-xl border border-white/5 bg-white/[0.02]">
-          <div className="text-3xl font-light text-white mb-2">NEXT 30 DAYS</div>
-          <div className="text-xs text-muted-foreground uppercase tracking-wider">Active Monitoring Window</div>
+        <div className="p-6 rounded-2xl border border-white/10 bg-white/[0.02] backdrop-blur-md">
+          <div className="text-2xl font-bold text-white mb-2 uppercase tracking-wide">NEXT {selectedTimeframe}</div>
+          <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
+            Active Monitoring Window
+          </div>
         </div>
-        <div className="p-6 rounded-xl border border-white/5 bg-white/[0.02]">
-          <div className="text-3xl font-light text-accent mb-2">12</div>
-          <div className="text-xs text-muted-foreground uppercase tracking-wider">Approaching Threshold</div>
+        <div className="p-6 rounded-2xl border border-white/10 bg-white/[0.02] backdrop-blur-md">
+          <div className="text-3xl font-bold text-accent mb-2">{countApproaching}</div>
+          <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
+            Approaching Threshold
+          </div>
         </div>
-        <div className="p-6 rounded-xl border border-white/5 bg-white/[0.02]">
-          <div className="text-3xl font-light text-amber-500 mb-2">34</div>
-          <div className="text-xs text-muted-foreground uppercase tracking-wider">Requiring Documentation</div>
+        <div className="p-6 rounded-2xl border border-white/10 bg-white/[0.02] backdrop-blur-md">
+          <div className="text-3xl font-bold text-amber-500 mb-2">{countDocsRequired}</div>
+          <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
+            Requiring Documentation
+          </div>
         </div>
-        <div className="p-6 rounded-xl border border-white/5 bg-white/[0.02]">
-          <div className="text-3xl font-light text-destructive mb-2">7</div>
-          <div className="text-xs text-destructive/80 uppercase tracking-wider">Overdue Actions</div>
+        <div className="p-6 rounded-2xl border border-white/10 bg-white/[0.02] backdrop-blur-md">
+          <div className="text-3xl font-bold text-destructive mb-2">{countOverdue}</div>
+          <div className="text-xs text-destructive/80 uppercase tracking-wider font-semibold">
+            Overdue Actions
+          </div>
         </div>
       </div>
 
-      {/* Radar Timeline (Mocked visually) */}
-      <div className="p-8 rounded-xl border border-white/5 bg-black/20 space-y-8 relative overflow-hidden">
+      {/* Radar Timeline */}
+      <div className="p-8 rounded-2xl border border-white/10 bg-black/40 space-y-8 relative overflow-hidden backdrop-blur-xl">
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03] mix-blend-overlay pointer-events-none" />
-        
-        <div className="flex items-center gap-4 border-b border-white/10 pb-4">
-          <div className="flex items-center gap-2 text-white font-medium">
-            <Clock className="w-4 h-4 text-accent" /> Timeline View
-          </div>
-          <div className="w-px h-4 bg-white/10" />
-          <div className="relative w-64">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input type="text" placeholder="Search cases..." className="w-full bg-white/5 border border-white/10 rounded pl-9 pr-3 py-1.5 text-sm text-white focus:outline-none focus:border-accent" />
-          </div>
-          <button className="ml-auto flex items-center gap-2 text-sm text-muted-foreground hover:text-white transition-colors">
-            <Filter className="w-4 h-4" /> Filters
-          </button>
-        </div>
 
-        <div className="space-y-12">
-          {/* Week 1 */}
-          <div className="relative">
-            <div className="absolute -left-4 top-0 bottom-0 w-px bg-white/10" />
-            <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-accent ring-4 ring-black" />
-            
-            <h3 className="text-lg font-medium text-white mb-6 uppercase tracking-wider">This Week</h3>
-            
-            <div className="space-y-4 pl-4">
-              {MOCK_CASES.filter(c => c.urgency === "URGENT").map(c => (
-                <div key={c.id} className="p-5 rounded-lg border border-destructive/20 bg-destructive/5 flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-3 mb-1">
-                      <span className="text-white font-medium">{c.id}</span>
-                      <span className="px-2 py-0.5 bg-destructive/20 text-destructive text-[10px] font-bold uppercase tracking-wider rounded border border-destructive/30">Overdue by 47 days</span>
-                    </div>
-                    <div className="text-sm text-muted-foreground">{c.prisonerName} • {c.offence}</div>
-                  </div>
-                  <button className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-sm font-medium rounded transition-colors">
-                    Review
-                  </button>
-                </div>
-              ))}
-              {MOCK_CASES.filter(c => c.urgency === "MEDIUM").map(c => (
-                <div key={c.id} className="p-5 rounded-lg border border-white/5 bg-white/5 flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-3 mb-1">
-                      <span className="text-white font-medium">{c.id}</span>
-                      <span className="px-2 py-0.5 bg-amber-500/20 text-amber-500 text-[10px] font-bold uppercase tracking-wider rounded border border-amber-500/30">Docs Required</span>
-                    </div>
-                    <div className="text-sm text-muted-foreground">{c.prisonerName} • Threshold in 15 days</div>
-                  </div>
-                  <button className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-sm font-medium rounded transition-colors">
-                    View Case
-                  </button>
-                </div>
-              ))}
+        {/* Timeline Search & Filter Bar */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-white/10 pb-4">
+          <div className="flex items-center gap-2 text-white font-medium">
+            <Clock className="w-4 h-4 text-accent" /> Timeline View ({selectedTimeframe})
+          </div>
+
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <div className="relative w-full sm:w-64">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search cases..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-3 py-1.5 text-sm text-white focus:outline-none focus:border-accent"
+              />
+            </div>
+
+            <div className="flex items-center gap-1">
+              <Filter className="w-4 h-4 text-muted-foreground shrink-0" />
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as any)}
+                className="bg-white/5 border border-white/10 text-white text-xs rounded-xl px-2.5 py-2 focus:outline-none focus:border-accent"
+              >
+                <option value="ALL" className="bg-background">All Statuses</option>
+                <option value="OVERDUE" className="bg-background">Overdue Only</option>
+                <option value="APPROACHING" className="bg-background">Approaching Threshold</option>
+                <option value="DOCS_REQUIRED" className="bg-background">Missing Docs</option>
+              </select>
             </div>
           </div>
+        </div>
 
-          {/* Week 2 */}
-          <div className="relative opacity-60">
-            <div className="absolute -left-4 top-0 bottom-0 w-px bg-white/10" />
-            <div className="absolute -left-[19px] top-1 w-2 h-2 rounded-full bg-white/20 ring-4 ring-black" />
-            
-            <h3 className="text-lg font-medium text-white mb-6 uppercase tracking-wider">Next Week</h3>
-            
-            <div className="space-y-4 pl-4">
-              <div className="p-5 rounded-lg border border-white/5 bg-white/5 flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-3 mb-1">
-                    <span className="text-white font-medium">CASE-2026-004</span>
+        {loading ? (
+          <div className="p-12 text-center text-muted-foreground animate-pulse">
+            Loading eligibility radar pipeline...
+          </div>
+        ) : (
+          <div className="space-y-12">
+            {/* THIS WEEK Section */}
+            <div className="relative">
+              <div className="absolute -left-4 top-0 bottom-0 w-px bg-accent/40" />
+              <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-accent ring-4 ring-black" />
+
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  This Week <span className="text-xs font-normal text-muted-foreground">({thisWeekCases.length} cases)</span>
+                </h3>
+              </div>
+
+              <div className="space-y-4 pl-4">
+                {thisWeekCases.map((c) => (
+                  <div
+                    key={c.id}
+                    className={`p-5 rounded-2xl border transition-all duration-300 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                      c.daysOverdue > 0
+                        ? "border-destructive/30 bg-destructive/10 hover:border-destructive/60"
+                        : c.missingDocs.length > 0
+                        ? "border-amber-500/30 bg-amber-500/10 hover:border-amber-500/60"
+                        : "border-white/10 bg-white/[0.03] hover:border-accent/50"
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-3">
+                        <span className="text-white font-mono font-bold text-sm">{c.id}</span>
+                        {c.daysOverdue > 0 && (
+                          <span className="px-2 py-0.5 bg-destructive/20 text-destructive text-[10px] font-bold uppercase tracking-wider rounded-md border border-destructive/30 flex items-center gap-1">
+                            <ShieldAlert className="w-3 h-3" /> Overdue by {c.daysOverdue} days
+                          </span>
+                        )}
+                        {c.missingDocs.length > 0 && (
+                          <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-[10px] font-bold uppercase tracking-wider rounded-md border border-amber-500/30 flex items-center gap-1">
+                            <FileText className="w-3 h-3" /> Docs Required ({c.missingDocs.length})
+                          </span>
+                        )}
+                        {c.isEligible && c.daysOverdue === 0 && (
+                          <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider rounded-md border border-emerald-500/30 flex items-center gap-1">
+                            <CheckCircle className="w-3 h-3" /> Eligible
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-sm text-white/90 font-medium">
+                        {c.prisonerName} • <span className="text-muted-foreground font-mono">{c.offence}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Custody: {c.custodyDays} days | Facility: {c.court}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {/* Interactive Review Button - Navigates directly to Case Dossier */}
+                      <button
+                        onClick={() => navigate(`/case/${c.id}`)}
+                        className="px-4 py-2 bg-accent text-accent-foreground font-semibold rounded-xl text-xs hover:opacity-90 transition-opacity flex items-center gap-1.5 shadow-md shadow-accent/20 shrink-0"
+                      >
+                        Review Case <ArrowUpRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="text-sm text-muted-foreground">Approaching threshold on Aug 18, 2026</div>
-                </div>
+                ))}
+
+                {thisWeekCases.length === 0 && (
+                  <div className="p-6 text-center text-sm text-muted-foreground bg-white/[0.01] rounded-xl border border-white/5">
+                    No cases matching criteria for this week.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* NEXT WEEK Section */}
+            <div className="relative">
+              <div className="absolute -left-4 top-0 bottom-0 w-px bg-white/10" />
+              <div className="absolute -left-[19px] top-1 w-2 h-2 rounded-full bg-white/30 ring-4 ring-black" />
+
+              <h3 className="text-lg font-bold text-white mb-6 uppercase tracking-wider flex items-center gap-2">
+                Next Week <span className="text-xs font-normal text-muted-foreground">({nextWeekCases.length} cases)</span>
+              </h3>
+
+              <div className="space-y-4 pl-4">
+                {nextWeekCases.map((c) => (
+                  <div
+                    key={c.id}
+                    className="p-5 rounded-2xl border border-white/5 bg-white/[0.02] hover:border-white/20 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  >
+                    <div>
+                      <div className="flex items-center gap-3 mb-1">
+                        <span className="text-white font-mono font-medium text-sm">{c.id}</span>
+                        <span className="text-xs text-muted-foreground font-mono">Custody: {c.custodyDays} days</span>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {c.prisonerName} • Approaching statutory threshold window ({selectedTimeframe})
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => navigate(`/case/${c.id}`)}
+                      className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl text-xs font-medium border border-white/10 transition-colors flex items-center gap-1 shrink-0"
+                    >
+                      Inspect <ArrowUpRight className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+
+                {nextWeekCases.length === 0 && (
+                  <div className="p-6 text-center text-sm text-muted-foreground bg-white/[0.01] rounded-xl border border-white/5">
+                    No cases scheduled for next week.
+                  </div>
+                )}
               </div>
             </div>
           </div>
-        </div>
-
+        )}
       </div>
     </div>
   );

@@ -29,6 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.agents.orchestrator import process_case
 from app.agents.prioritization_agent import prioritize_cases
+from app.agents.eligibility_agent import evaluate_eligibility
 from app.models.schemas import CaseRecord, UrgencyFlags
 
 
@@ -186,17 +187,13 @@ def get_cases():
     computed days_overdue, and the urgency_score used for sorting.
     This is the primary data source for the lawyer dashboard queue.
     """
-    # Build evaluation list with a fast approximation of days_overdue
-    # (full Eligibility Agent is reserved for individual case detail)
+    # Build evaluation list using the canonical Eligibility Agent
     case_evaluations = []
     for case in MOCK_DB:
-        days_overdue = max(
-            0,
-            case.custody_days - (case.max_sentence_days_for_offense // 2),
-        )
+        eligibility_result = evaluate_eligibility(case)
         case_evaluations.append({
             "case": case,
-            "days_overdue": days_overdue,
+            "days_overdue": eligibility_result["days_overdue"],
         })
 
     sorted_queue = prioritize_cases(case_evaluations)

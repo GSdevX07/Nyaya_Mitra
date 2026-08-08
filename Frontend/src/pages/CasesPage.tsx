@@ -1,51 +1,35 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Search, Filter, ShieldAlert, ArrowUpRight, CheckCircle, Clock, AlertCircle, RefreshCw } from "lucide-react";
+import { Search, Filter, ShieldAlert, ArrowUpRight, CheckCircle, Clock, AlertCircle, RefreshCw, WifiOff } from "lucide-react";
 import { fetchCases, type BackendCaseSummary } from "@/lib/api";
-import { MOCK_CASES } from "@/data/mock";
 
 export function CasesPage() {
   const [cases, setCases] = useState<BackendCaseSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [backendError, setBackendError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"ALL" | "ELIGIBLE" | "MEDICAL" | "MISSING">("ALL");
 
   const loadData = async () => {
     setLoading(true);
-    const data = await fetchCases();
-    setCases(data);
-    setLoading(false);
+    setBackendError(false);
+    try {
+      const data = await fetchCases();
+      if (data.length === 0) throw new Error("Empty");
+      setCases(data);
+    } catch {
+      setBackendError(true);
+      setCases([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     loadData();
   }, []);
 
-  const displayList = cases.length > 0 ? cases : MOCK_CASES.map(c => {
-    const missingDocsCount = c.documents.filter(d => d.status === "missing").length;
-    return {
-      case: {
-        case_id: c.id,
-        name: c.prisonerName,
-        offense_sections: [c.offence],
-        arrest_date: "2024-01-10",
-        custody_days: c.custodyDurationDays,
-        max_sentence_days_for_offense: 1095,
-        prior_bail_orders: [],
-        required_docs: ["remand_order", "charge_sheet"],
-        present_docs: missingDocsCount === 0 ? ["remand_order", "charge_sheet"] : ["remand_order"],
-        urgency_flags: {
-          age: c.age,
-          health_flag: c.age >= 60,
-          repeat_offender: false
-        },
-        jail_location: c.court,
-        preferred_language: "en"
-      },
-      days_overdue: Math.max(0, c.custodyDurationDays - 547),
-      urgency_score: c.urgency === "URGENT" ? 250 : 120
-    };
-  });
+  const displayList = cases;
 
   const filtered = displayList.filter(item => {
     const c = item.case;
@@ -57,7 +41,8 @@ export function CasesPage() {
     if (!matchesSearch) return false;
 
     if (filterType === "ELIGIBLE") {
-      return c.custody_days >= Math.floor(c.max_sentence_days_for_offense / 2);
+      // Use backend days_overdue as the canonical eligibility signal
+      return item.days_overdue > 0 || (item.urgency_score > 0 && item.days_overdue >= 0);
     }
     if (filterType === "MEDICAL") {
       return c.urgency_flags.health_flag || c.urgency_flags.age >= 60;
@@ -137,12 +122,28 @@ export function CasesPage() {
         <div className="p-16 text-center text-muted-foreground animate-pulse">
           Fetching cases from Nyaya Mitra legal pipeline...
         </div>
+      ) : backendError ? (
+        <div className="flex flex-col items-center justify-center min-h-[40vh] gap-6 text-center">
+          <WifiOff className="w-12 h-12 text-muted-foreground" />
+          <div>
+            <h2 className="text-lg font-semibold text-white mb-2">Backend Connection Lost</h2>
+            <p className="text-sm text-muted-foreground">Live case data unavailable. Ensure the FastAPI server is running on localhost:8000.</p>
+          </div>
+          <button onClick={loadData} className="px-4 py-2 bg-accent text-accent-foreground rounded-xl text-sm font-medium flex items-center gap-2">
+            <RefreshCw className="w-4 h-4" /> Retry Connection
+          </button>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filtered.map(item => {
             const c = item.case;
-            const threshold = Math.floor(c.max_sentence_days_for_offense / 2);
-            const isEligible = c.custody_days >= threshold;
+            // Use backend days_overdue as canonical eligibility signal (comes from EligibilityAgent)
+            const isEligible = item.days_overdue > 0;
+            const isRepeat = c.urgency_flags.repeat_offender;
+            const thresholdLabel = isRepeat ? "1/2 Threshold" : "1/3 Threshold";
+            const thresholdDays = isRepeat
+              ? Math.ceil(c.max_sentence_days_for_offense / 2)
+              : Math.ceil(c.max_sentence_days_for_offense / 3);
             const missingDocs = c.required_docs.filter(d => !c.present_docs.includes(d));
 
             return (
@@ -191,7 +192,7 @@ export function CasesPage() {
                   <div className="space-y-1.5 pt-2">
                     <div className="flex justify-between text-xs text-muted-foreground">
                       <span>Custody: {c.custody_days} days</span>
-                      <span>50% Threshold: {threshold} days</span>
+                      <span>{thresholdLabel}: {thresholdDays} days</span>
                     </div>
                     <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
                       <div
@@ -199,7 +200,7 @@ export function CasesPage() {
                           isEligible ? "bg-emerald-500" : "bg-accent"
                         }`}
                         style={{
-                          width: `${Math.min(100, (c.custody_days / threshold) * 100)}%`,
+                          width: `${Math.min(100, (c.custody_days / thresholdDays) * 100)}%`,
                         }}
                       />
                     </div>

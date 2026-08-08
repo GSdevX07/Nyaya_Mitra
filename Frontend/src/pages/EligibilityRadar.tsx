@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
-import { Search, Filter, Clock, ArrowLeft, ArrowUpRight, ShieldAlert, CheckCircle, FileText } from "lucide-react";
+import { Search, Filter, Clock, ArrowLeft, ArrowUpRight, ShieldAlert, CheckCircle, FileText, WifiOff, RefreshCw } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { fetchCases, type BackendCaseSummary } from "@/lib/api";
-import { MOCK_CASES } from "@/data/mock";
 
 type TimeframeWindow = "Today" | "7 days" | "30 days" | "90 days";
 
@@ -12,48 +11,43 @@ export function EligibilityRadar() {
   const [statusFilter, setStatusFilter] = useState<"ALL" | "OVERDUE" | "APPROACHING" | "DOCS_REQUIRED">("ALL");
   const [cases, setCases] = useState<BackendCaseSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [backendError, setBackendError] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const data = await fetchCases();
-      setCases(data);
-      setLoading(false);
+      setBackendError(false);
+      try {
+        const data = await fetchCases();
+        if (data.length === 0) throw new Error("Empty");
+        setCases(data);
+      } catch {
+        setBackendError(true);
+        setCases([]);
+      } finally {
+        setLoading(false);
+      }
     }
     load();
   }, []);
 
-  // Map backend cases or fallback to mock cases
-  const caseList = cases.length > 0
-    ? cases.map((c) => ({
-        id: c.case.case_id,
-        prisonerName: c.case.name,
-        offence: c.case.offense_sections.join(", "),
-        custodyDays: c.case.custody_days,
-        maxSentenceDays: c.case.max_sentence_days_for_offense,
-        daysOverdue: c.days_overdue,
-        isEligible: c.case.custody_days >= Math.floor(c.case.max_sentence_days_for_offense / 2),
-        urgency: c.urgency_score > 200 ? "URGENT" : "MEDIUM",
-        missingDocs: c.case.required_docs.filter((d) => !c.case.present_docs.includes(d)),
-        healthFlag: c.case.urgency_flags.health_flag,
-        age: c.case.urgency_flags.age,
-        court: c.case.jail_location,
-      }))
-    : MOCK_CASES.map((c) => ({
-        id: c.id,
-        prisonerName: c.prisonerName,
-        offence: c.offence,
-        custodyDays: c.custodyDurationDays,
-        maxSentenceDays: 1095,
-        daysOverdue: Math.max(0, c.custodyDurationDays - 547),
-        isEligible: c.custodyDurationDays >= 547,
-        urgency: c.urgency,
-        missingDocs: c.documents.filter((d) => d.status === "missing").map((d) => d.name),
-        healthFlag: c.age >= 60,
-        age: c.age,
-        court: c.court,
-      }));
+  // Map backend cases — use backend days_overdue as canonical eligibility signal
+  const caseList = cases.map((c) => ({
+    id: c.case.case_id,
+    prisonerName: c.case.name,
+    offence: c.case.offense_sections.join(", "),
+    custodyDays: c.case.custody_days,
+    maxSentenceDays: c.case.max_sentence_days_for_offense,
+    daysOverdue: c.days_overdue,
+    // isEligible = backend days_overdue > 0 (already computed by EligibilityAgent)
+    isEligible: c.days_overdue > 0,
+    urgency: c.urgency_score > 200 ? "URGENT" : "MEDIUM",
+    missingDocs: c.case.required_docs.filter((d) => !c.case.present_docs.includes(d)),
+    healthFlag: c.case.urgency_flags.health_flag,
+    age: c.case.urgency_flags.age,
+    court: c.case.jail_location,
+  }));
 
   // Filter based on search and status filter
   const filteredCases = caseList.filter((item) => {
@@ -71,21 +65,13 @@ export function EligibilityRadar() {
     return true;
   });
 
-  // Calculate dynamic summary stats based on selected timeframe
-  const multiplier =
-    selectedTimeframe === "Today"
-      ? 0.2
-      : selectedTimeframe === "7 days"
-      ? 0.5
-      : selectedTimeframe === "30 days"
-      ? 1.0
-      : 2.2;
+  // Compute real summary stats from actual case data (no multipliers)
+  const countOverdue = caseList.filter((c) => c.daysOverdue > 0).length;
+  const countDocsRequired = caseList.filter((c) => c.missingDocs.length > 0).length;
+  // "Approaching" = eligible (overdue > 0) but docs still missing
+  const countApproaching = caseList.filter((c) => c.isEligible && c.missingDocs.length > 0).length;
 
-  const countApproaching = Math.round(12 * multiplier);
-  const countDocsRequired = Math.round(34 * multiplier);
-  const countOverdue = caseList.filter((c) => c.daysOverdue > 0).length || Math.round(7 * multiplier);
-
-  // Group cases for timeline: This Week vs Next Week vs Later
+  // Group cases for timeline: needs attention vs. standard
   const thisWeekCases = filteredCases.filter(
     (c) => c.urgency === "URGENT" || c.daysOverdue > 0 || c.missingDocs.length > 0
   );
@@ -197,6 +183,17 @@ export function EligibilityRadar() {
         {loading ? (
           <div className="p-12 text-center text-muted-foreground animate-pulse">
             Loading eligibility radar pipeline...
+          </div>
+        ) : backendError ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-6 text-center">
+            <WifiOff className="w-12 h-12 text-muted-foreground" />
+            <div>
+              <h2 className="text-lg font-semibold text-white mb-2">Backend Connection Lost</h2>
+              <p className="text-sm text-muted-foreground">Live case data unavailable. Ensure the FastAPI server is running on localhost:8000.</p>
+            </div>
+            <button onClick={() => window.location.reload()} className="px-4 py-2 bg-accent text-accent-foreground rounded-xl text-sm font-medium flex items-center gap-2">
+              <RefreshCw className="w-4 h-4" /> Retry Connection
+            </button>
           </div>
         ) : (
           <div className="space-y-12">

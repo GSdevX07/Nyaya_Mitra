@@ -69,17 +69,31 @@ def get_case(case_id: str) -> CaseRecord | None:
 def update_case_status(case_id: str, new_status: CaseState) -> bool:
     """Update the status of a case. Returns True if successful."""
     with get_db_connection() as conn:
-        # First read the case
         cursor = conn.execute("SELECT data FROM cases WHERE case_id = ?", (case_id,))
         row = cursor.fetchone()
         if not row:
             return False
-            
-        # Parse, update, and serialize
         case_data = json.loads(row["data"])
         case_data["status"] = new_status.value
-        
-        # Write back
+        conn.execute(
+            "UPDATE cases SET data = ? WHERE case_id = ?",
+            (json.dumps(case_data), case_id)
+        )
+        return True
+
+def update_case_documents(case_id: str, present_docs: list) -> bool:
+    """
+    Persist an updated present_docs list for a case.
+    This is required after document upload so the change survives a page reload.
+    Returns True if successful.
+    """
+    with get_db_connection() as conn:
+        cursor = conn.execute("SELECT data FROM cases WHERE case_id = ?", (case_id,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+        case_data = json.loads(row["data"])
+        case_data["present_docs"] = present_docs
         conn.execute(
             "UPDATE cases SET data = ? WHERE case_id = ?",
             (json.dumps(case_data), case_id)

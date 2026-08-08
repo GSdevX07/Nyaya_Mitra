@@ -1,12 +1,10 @@
 """
 llm_client.py — Single choke-point for every LLM call in Nyaya Mitra.
 
-Stack: Groq cloud (primary) → mock fallback (demo safety net)
-Model: llama3-8b-8192 — blazing fast, free tier, no local GPU needed.
-
-Fault-tolerant architecture:
-  - Primary  : Groq API with 8s hard timeout (fails fast if Wi-Fi dies)
-  - Fallback : Pre-baked mock response so the demo NEVER crashes on stage
+Fault-tolerant 3-Tier Architecture:
+  1. Primary Cloud Tier   : Groq API (llama-3.1-8b-instant) [8s timeout]
+  2. Local Edge LLM Tier  : Ollama (granite4.1:8b) [15s timeout]
+  3. Deterministic Safety : Pre-baked mock response (demo safety net)
 
 No other file in the codebase should call an LLM API directly.
 """
@@ -14,22 +12,25 @@ No other file in the codebase should call an LLM API directly.
 from __future__ import annotations
 
 import os
-
+import requests
 from dotenv import load_dotenv
 from groq import Groq
 
 # Load .env from backend/ directory
 load_dotenv()
 
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "granite4.1:8b")
+OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "15.0"))
+
 
 # ── Private provider implementations ─────────────────────────────────────────
 
 def _call_primary(prompt: str, system: str) -> str:
     """
-    Call the Groq API (Llama 3) for blazing fast inference.
+    Call the Groq API (Llama 3.1) for blazing fast inference.
 
-    Timeout is set to 8s — fails fast if venue Wi-Fi dies so the fallback
-    kicks in before judges notice anything is wrong.
+    Timeout is set to 8s — fails fast if venue Wi-Fi dies so local fallbacks kick in.
     """
     client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
@@ -46,13 +47,39 @@ def _call_primary(prompt: str, system: str) -> str:
     return completion.choices[0].message.content
 
 
-def _call_local_fallback(prompt: str, system: str) -> str:
+def _call_ollama_fallback(prompt: str, system: str) -> str:
     """
-    Mock fallback so the demo NEVER crashes if Wi-Fi drops.
+    Call local Ollama server running granite4.1:8b model on host machine.
+    """
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
 
-    During judging we can point to this architecture and say:
-    'We built a fault-tolerant system with a fallback tier —
-    the cloud model gets 8 seconds, then the edge model takes over.'
+    response = requests.post(
+        OLLAMA_URL,
+        json={
+            "model": OLLAMA_MODEL,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": 0.1},
+        },
+        timeout=OLLAMA_TIMEOUT,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    if "message" in data and "content" in data["message"]:
+        return data["message"]["content"]
+    elif "response" in data:
+        return data["response"]
+    else:
+        raise ValueError(f"Unexpected response payload from Ollama: {data}")
+
+
+def _call_mock_fallback(prompt: str, system: str) -> str:
+    """
+    Mock fallback so the demo NEVER crashes even if cloud and local LLMs fail.
     """
     if "Draft a formal bail application" in prompt:
         return (
@@ -83,23 +110,27 @@ def _call_local_fallback(prompt: str, system: str) -> str:
 
 def generate(prompt: str, system: str = "", _override: str | None = None) -> str:
     """
-    Universal LLM gateway with transparent fallback.
-
-    Args:
-        prompt:    User-turn content.
-        system:    System prompt (role / constraints).
-        _override: Test/cache escape hatch — returns this value immediately
-                   without any API call. Do NOT use outside of tests.
-
-    Returns:
-        Model response string (or fallback string if Groq is unreachable).
+    Universal LLM gateway with 3-tier transparent fallback:
+      1. Primary Cloud Tier (Groq API — llama-3.1-8b-instant)
+      2. Local Edge LLM Tier (Ollama — granite4.1:8b)
+      3. Deterministic Pre-computed Safety Fallback
     """
     if _override is not None:
         return _override
 
+    # Tier 1: Primary Cloud (Groq)
     try:
         return _call_primary(prompt, system)
     except Exception as e:
-        print(f"\n[NETWORK WARNING] Primary LLM failed: {e}")
-        print("Switching to local fallback...\n")
-        return _call_local_fallback(prompt, system)
+        print(f"\n[NETWORK WARNING] Primary Groq LLM failed: {e}")
+        print("Attempting Tier 2 Local Edge Fallback (Ollama granite4.1:8b)...\n")
+
+    # Tier 2: Local Edge LLM (Ollama granite4.1:8b)
+    try:
+        return _call_ollama_fallback(prompt, system)
+    except Exception as e:
+        print(f"\n[OLLAMA WARNING] Local Ollama fallback failed: {e}")
+        print("Switching to Tier 3 Deterministic Safety Fallback...\n")
+
+    # Tier 3: Deterministic Pre-computed Fallback
+    return _call_mock_fallback(prompt, system)

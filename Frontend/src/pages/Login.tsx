@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { Activity, ShieldCheck, Lock } from "lucide-react";
+import { Activity, ShieldCheck, Lock, ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
 
 export function Login() {
@@ -11,16 +11,23 @@ export function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0b] flex">
+    <div className="min-h-screen bg-[#0a0a0b] flex relative">
+      {/* Top Navigation Back Button for mobile / desktop */}
+      <div className="absolute top-6 left-6 z-30">
+        <Link to="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-white transition-colors bg-white/5 border border-white/10 px-4 py-2 rounded-lg backdrop-blur-md">
+          <ArrowLeft className="w-4 h-4" /> Back to Home
+        </Link>
+      </div>
+
       {/* Left side: Branding & Visuals */}
-      <div className="hidden lg:flex flex-1 relative flex-col justify-between p-12 border-r border-white/5 bg-black/40 overflow-hidden">
+      <div className="hidden lg:flex flex-1 relative flex-col justify-between p-12 pt-20 border-r border-white/5 bg-black/40 overflow-hidden">
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay pointer-events-none" />
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-accent/10 blur-[100px] rounded-full pointer-events-none" />
         
-        <div className="relative z-10 flex items-center gap-3">
+        <Link to="/" className="relative z-10 flex items-center gap-3 hover:opacity-80 transition-opacity w-fit cursor-pointer">
           <Activity className="w-6 h-6 text-accent" />
           <span className="font-bold text-2xl tracking-tight text-white uppercase">Nyaya Mitra</span>
-        </div>
+        </Link>
 
         <div className="relative z-10 max-w-md">
           <h2 className="text-3xl font-light text-white mb-4">AI that finds the cases the system forgot.</h2>

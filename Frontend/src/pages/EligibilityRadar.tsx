@@ -1,24 +1,30 @@
 import { motion } from "framer-motion";
-import { Search, Filter, AlertCircle, Clock, FileText } from "lucide-react";
+import { Search, Filter, AlertCircle, Clock, FileText, ArrowLeft } from "lucide-react";
 import { MOCK_CASES } from "@/data/mock";
+import { Link } from "react-router-dom";
 
 export function EligibilityRadar() {
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-10">
       
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div className="space-y-2">
-          <h1 className="text-4xl font-semibold tracking-tight text-white uppercase">Eligibility Radar</h1>
-          <p className="text-xl text-muted-foreground">Proactive monitoring for upcoming statutory thresholds.</p>
-        </div>
-        
-        <div className="flex gap-2">
-          {["Today", "7 days", "30 days", "90 days"].map((filter, i) => (
-            <button key={filter} className={`px-4 py-2 text-sm font-medium rounded border ${i === 2 ? "bg-white/10 text-white border-white/20" : "bg-transparent text-muted-foreground border-white/5 hover:bg-white/5"} transition-colors`}>
-              {filter}
-            </button>
-          ))}
+      <div className="space-y-6">
+        <Link to="/dashboard" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-white transition-colors">
+          <ArrowLeft className="w-4 h-4" /> Back to Command Center
+        </Link>
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div className="space-y-2">
+            <h1 className="text-4xl font-semibold tracking-tight text-white uppercase">Eligibility Radar</h1>
+            <p className="text-xl text-muted-foreground">Proactive monitoring for upcoming statutory thresholds.</p>
+          </div>
+          
+          <div className="flex gap-2">
+            {["Today", "7 days", "30 days", "90 days"].map((filter, i) => (
+              <button key={filter} className={`px-4 py-2 text-sm font-medium rounded border ${i === 2 ? "bg-white/10 text-white border-white/20" : "bg-transparent text-muted-foreground border-white/5 hover:bg-white/5"} transition-colors`}>
+                {filter}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

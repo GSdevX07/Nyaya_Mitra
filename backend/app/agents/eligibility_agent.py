@@ -62,7 +62,30 @@ def evaluate_eligibility(case: CaseRecord) -> dict:
         >>> result["days_overdue"]
         167
     """
-    # ── 1. Determine threshold fraction ─────────────────────────────────────
+    # ── 1. Check Statutory Exclusions (Section 479 Provisos) ─────────────────
+    if case.punishable_by_death_or_life:
+        return {
+            "case_id": case.case_id,
+            "eligible": False,
+            "threshold_fraction": 0.0,
+            "required_custody_days": 0,
+            "custody_days_served": case.custody_days,
+            "days_overdue": 0,
+            "legal_basis": "MANUAL_REVIEW: Offence punishable by death or life imprisonment is excluded from Section 479 BNSS.",
+        }
+
+    if case.multiple_active_cases:
+        return {
+            "case_id": case.case_id,
+            "eligible": False,
+            "threshold_fraction": 0.0,
+            "required_custody_days": 0,
+            "custody_days_served": case.custody_days,
+            "days_overdue": 0,
+            "legal_basis": "MANUAL_REVIEW: Prisoner faces trial in multiple cases. Requires manual sentence aggregation review.",
+        }
+
+    # ── 2. Determine threshold fraction ─────────────────────────────────────
     is_repeat = case.urgency_flags.repeat_offender
 
     if not is_repeat:
@@ -72,17 +95,17 @@ def evaluate_eligibility(case: CaseRecord) -> dict:
         threshold_fraction = _REPEAT_FRACTION
         legal_basis = _LEGAL_BASIS_REPEAT
 
-    # ── 2. Calculate minimum required custody days ───────────────────────────
+    # ── 3. Calculate minimum required custody days ───────────────────────────
     # We use math.ceil() to ensure we never silently round down a legal threshold.
     # Note: The exact interpretation of statutory fractional days should be
     # validated with a legal expert before production deployment.
     required_days = math.ceil(case.max_sentence_days_for_offense * threshold_fraction)
 
-    # ── 3. Evaluate eligibility ──────────────────────────────────────────────
+    # ── 4. Evaluate eligibility ──────────────────────────────────────────────
     is_eligible = case.custody_days >= required_days
     days_overdue = max(0, case.custody_days - required_days)
 
-    # ── 4. Build and return result dict ─────────────────────────────────────
+    # ── 5. Build and return result dict ─────────────────────────────────────
     return {
         "case_id": case.case_id,
         "eligible": is_eligible,
@@ -136,11 +159,33 @@ if __name__ == "__main__":
         preferred_language="ta",
     )
 
+    # ── Test Case C: Excluded offence (Life Imprisonment) ────────────────────
+    # Expected: eligible=False, MANUAL_REVIEW
+    case_c = CaseRecord(
+        case_id="UTP-0027",
+        name="synthetic - not a real person",
+        offense_sections=["BNS 103(1)"], # Murder (death or life imprisonment)
+        arrest_date="2022-01-01",
+        custody_days=1000,
+        max_sentence_days_for_offense=36500, # Conceptually 100 years for life
+        prior_bail_orders=[],
+        required_docs=["remand_order", "charge_sheet"],
+        present_docs=["remand_order", "charge_sheet"],
+        punishable_by_death_or_life=True,
+        urgency_flags=UrgencyFlags(age=45, health_flag=False, repeat_offender=False),
+        jail_location="Central Jail, synthetic",
+        preferred_language="hi",
+    )
+
     print("=" * 60)
     print("ELIGIBILITY AGENT — SMOKE TEST")
     print("=" * 60)
 
-    for label, case in [("Case A (First-Time Offender)", case_a), ("Case B (Repeat Offender)", case_b)]:
+    for label, case in [
+        ("Case A (First-Time Offender)", case_a), 
+        ("Case B (Repeat Offender)", case_b),
+        ("Case C (Excluded - Life Imprisonment)", case_c)
+    ]:
         result = evaluate_eligibility(case)
         print(f"\n{label}")
         print("-" * 40)
@@ -157,6 +202,11 @@ if __name__ == "__main__":
             assert result["eligible"] is False, "UTP-0012 should NOT be eligible"
             assert result["days_overdue"] == 0,  "days_overdue must be 0 when not eligible"
             assert result["threshold_fraction"] == 1 / 2
+            print("  [PASS] All assertions passed")
+
+        if case.case_id == "UTP-0027":
+            assert result["eligible"] is False
+            assert "MANUAL_REVIEW" in result["legal_basis"]
             print("  [PASS] All assertions passed")
 
     print("\n" + "=" * 60)

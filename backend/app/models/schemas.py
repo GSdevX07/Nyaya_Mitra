@@ -7,6 +7,24 @@ No real prisoner names or personal records are referenced anywhere.
 
 from pydantic import BaseModel, Field
 from typing import List
+from enum import Enum
+
+
+class CaseState(str, Enum):
+    """Lifecycle states of a bail application case."""
+    DETECTED = "DETECTED"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+    ELIGIBLE = "ELIGIBLE"
+    DOCUMENTS_MISSING = "DOCUMENTS_MISSING"
+    DOCUMENTS_COMPLETE = "DOCUMENTS_COMPLETE"
+    DRAFT_READY = "DRAFT_READY"
+    LAWYER_REVIEW = "LAWYER_REVIEW"
+    APPROVED = "APPROVED"
+    FILED = "FILED"
+    HEARING_SCHEDULED = "HEARING_SCHEDULED"
+    ORDER_PASSED = "ORDER_PASSED"
+    RELEASED = "RELEASED"
+    CLOSED = "CLOSED"
 
 
 class UrgencyFlags(BaseModel):
@@ -75,6 +93,18 @@ class CaseRecord(BaseModel):
         ),
         ge=0,
     )
+    punishable_by_death_or_life: bool = Field(
+        default=False,
+        description="True if the offense is punishable by death or life imprisonment (excluded from Sec 479).",
+    )
+    multiple_active_cases: bool = Field(
+        default=False,
+        description="True if the prisoner is facing trial in more than one active case / multiple FIRs.",
+    )
+    status: CaseState = Field(
+        default=CaseState.DETECTED,
+        description="Current workflow status of the case.",
+    )
     prior_bail_orders: List[str] = Field(
         default_factory=list,
         description=(
@@ -138,6 +168,9 @@ class CaseRecord(BaseModel):
                     "health_flag": True,
                     "repeat_offender": False,
                 },
+                "punishable_by_death_or_life": False,
+                "multiple_active_cases": False,
+                "status": "DETECTED",
                 "jail_location": "District Jail, synthetic",
                 "preferred_language": "hi",
             }

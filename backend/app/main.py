@@ -30,10 +30,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.agents.orchestrator import process_case
 from app.agents.prioritization_agent import prioritize_cases
 from app.agents.eligibility_agent import evaluate_eligibility
-from app.models.schemas import CaseRecord, UrgencyFlags
+from app.models.schemas import CaseRecord, UrgencyFlags, CaseState
+from app.database import init_db, get_all_cases, get_case, update_case_status
 
 
 # ── App initialisation ────────────────────────────────────────────────────────
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from app.database import init_db
+    init_db()
+    yield
 
 app = FastAPI(
     title="Nyaya Mitra Backend API",
@@ -42,6 +50,7 @@ app = FastAPI(
         "Built with synthetic data only — no real prisoner records are used."
     ),
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # ── CORS (allow all origins for local hackathon dev) ─────────────────────────
@@ -147,19 +156,15 @@ MOCK_DB: list[CaseRecord] = [
     ),
 ]
 
-# Lookup index for O(1) case retrieval by case_id
-_MOCK_DB_INDEX: dict[str, CaseRecord] = {c.case_id: c for c in MOCK_DB}
-
-
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 def _find_case(case_id: str) -> CaseRecord:
     """Return the CaseRecord for case_id or raise a 404 HTTPException."""
-    case = _MOCK_DB_INDEX.get(case_id)
+    case = get_case(case_id)
     if not case:
         raise HTTPException(
             status_code=404,
-            detail=f"Case '{case_id}' not found. Available IDs: {list(_MOCK_DB_INDEX.keys())}",
+            detail=f"Case '{case_id}' not found.",
         )
     return case
 
@@ -189,7 +194,8 @@ def get_cases():
     """
     # Build evaluation list using the canonical Eligibility Agent
     case_evaluations = []
-    for case in MOCK_DB:
+    cases = get_all_cases()
+    for case in cases:
         eligibility_result = evaluate_eligibility(case)
         case_evaluations.append({
             "case": case,
@@ -238,13 +244,18 @@ def approve_case(case_id: str):
       - Record the approving lawyer's ID and timestamp in the database
       - Trigger the Status Tracking Agent to advance state to 'Filed'
       - Notify the Notification Agent to send a confirmation alert
-
-    For the hackathon build, it returns a structured confirmation dict.
     """
     case = _find_case(case_id)
+    
+    # Actually persist the state change in SQLite
+    update_case_status(case_id, CaseState.APPROVED)
+    
+    # In a full system, we might spawn a background task here that
+    # ultimately transitions the status to FILED. For now, we manually set to APPROVED.
+    
     return {
         "case_id": case_id,
-        "status": "Approved by Human Lawyer",
+        "status": "Approved by Human Lawyer (State changed to APPROVED)",
         "next_step": "Status Tracking Agent will monitor court filing.",
         "offense_sections": case.offense_sections,
         "jail_location": case.jail_location,

@@ -34,7 +34,7 @@ from app.agents.explainer_agent import generate_explanation
 from app.agents.notification_agent import trigger_notification
 from app.agents.prioritization_agent import calculate_urgency_score
 from app.agents.retrieval_agent import execute_retrieval
-from app.agents.status_agent import get_mock_status
+from app.agents.status_agent import get_status
 from app.models.schemas import CaseRecord
 
 
@@ -158,8 +158,8 @@ def process_case(case: CaseRecord) -> dict:
     _log_step(activity_log, "ExplainerAgent", "DONE", "Explanation generated for family view")
 
     # ── Step 6: Status Tracking Agent ────────────────────────────────────────
-    _log_step(activity_log, "StatusAgent", "RUNNING", "Fetching simulated court status")
-    status_result = get_mock_status(case.case_id)
+    _log_step(activity_log, "StatusAgent", "RUNNING", "Fetching court status")
+    status_result = get_status(case.case_id)
     _log_step(
         activity_log, "StatusAgent", "DONE",
         f"current_status='{status_result['current_status']}'"

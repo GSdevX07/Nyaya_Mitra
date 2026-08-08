@@ -159,3 +159,161 @@ export const DASHBOARD_METRICS = {
   awaitingReview: 18,
   urgentActions: 7
 };
+
+export const CACHED_DEMO_CASES = [[
+  {
+    "case": {
+      "case_id": "UTP-0015",
+      "name": "synthetic - not a real person",
+      "offense_sections": [
+        "IPC 392"
+      ],
+      "arrest_date": "2023-03-01",
+      "custody_days": 850,
+      "max_sentence_days_for_offense": 1095,
+      "prior_bail_orders": [
+        "BAIL-2022-007"
+      ],
+      "required_docs": [
+        "remand_order",
+        "charge_sheet",
+        "prior_bail_order_if_any"
+      ],
+      "present_docs": [
+        "remand_order",
+        "prior_bail_order_if_any"
+      ],
+      "urgency_flags": {
+        "age": 40,
+        "health_flag": false,
+        "repeat_offender": true
+      },
+      "jail_location": "Central Jail, synthetic",
+      "preferred_language": "kn"
+    },
+    "days_overdue": 303,
+    "urgency_score": 303
+  },
+  {
+    "case": {
+      "case_id": "UTP-0007",
+      "name": "synthetic - not a real person",
+      "offense_sections": [
+        "IPC 379"
+      ],
+      "arrest_date": "2024-11-02",
+      "custody_days": 410,
+      "max_sentence_days_for_offense": 730,
+      "prior_bail_orders": [],
+      "required_docs": [
+        "remand_order",
+        "charge_sheet"
+      ],
+      "present_docs": [
+        "remand_order",
+        "charge_sheet"
+      ],
+      "urgency_flags": {
+        "age": 63,
+        "health_flag": true,
+        "repeat_offender": false
+      },
+      "jail_location": "District Jail, synthetic",
+      "preferred_language": "hi"
+    },
+    "days_overdue": 45,
+    "urgency_score": 145
+  },
+  {
+    "case": {
+      "case_id": "UTP-0021",
+      "name": "synthetic - not a real person",
+      "offense_sections": [
+        "IPC 420"
+      ],
+      "arrest_date": "2024-06-20",
+      "custody_days": 320,
+      "max_sentence_days_for_offense": 730,
+      "prior_bail_orders": [],
+      "required_docs": [
+        "remand_order",
+        "charge_sheet"
+      ],
+      "present_docs": [
+        "remand_order",
+        "charge_sheet"
+      ],
+      "urgency_flags": {
+        "age": 67,
+        "health_flag": true,
+        "repeat_offender": false
+      },
+      "jail_location": "District Jail, synthetic",
+      "preferred_language": "te"
+    },
+    "days_overdue": 0,
+    "urgency_score": 100
+  },
+  {
+    "case": {
+      "case_id": "UTP-0001",
+      "name": "synthetic - not a real person",
+      "offense_sections": [
+        "IPC 323"
+      ],
+      "arrest_date": "2025-01-10",
+      "custody_days": 200,
+      "max_sentence_days_for_offense": 365,
+      "prior_bail_orders": [],
+      "required_docs": [
+        "remand_order",
+        "charge_sheet"
+      ],
+      "present_docs": [
+        "remand_order",
+        "charge_sheet"
+      ],
+      "urgency_flags": {
+        "age": 28,
+        "health_flag": false,
+        "repeat_offender": false
+      },
+      "jail_location": "Sub-Jail, synthetic",
+      "preferred_language": "en"
+    },
+    "days_overdue": 18,
+    "urgency_score": 38
+  },
+  {
+    "case": {
+      "case_id": "UTP-0012",
+      "name": "synthetic - not a real person",
+      "offense_sections": [
+        "IPC 302"
+      ],
+      "arrest_date": "2023-06-15",
+      "custody_days": 400,
+      "max_sentence_days_for_offense": 1825,
+      "prior_bail_orders": [
+        "BAIL-2021-004"
+      ],
+      "required_docs": [
+        "remand_order",
+        "charge_sheet",
+        "prior_bail_order_if_any"
+      ],
+      "present_docs": [
+        "remand_order"
+      ],
+      "urgency_flags": {
+        "age": 34,
+        "health_flag": false,
+        "repeat_offender": true
+      },
+      "jail_location": "Central Jail, synthetic",
+      "preferred_language": "ta"
+    },
+    "days_overdue": 0,
+    "urgency_score": 0
+  }
+]]

@@ -29,6 +29,7 @@ export interface BackendCaseSummary {
     permanent_address?: string;
     assignment_status?: string;
     assigned_lawyer_id?: string;
+    status?: string;
   };
   days_overdue: number;
   urgency_score: number;

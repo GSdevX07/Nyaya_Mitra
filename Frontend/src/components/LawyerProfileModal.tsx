@@ -12,7 +12,6 @@ import {
   Check,
   Lock,
 } from "lucide-react";
-import { fetchLawyerProfile } from "@/lib/api";
 
 interface LawyerProfileModalProps {
   isOpen: boolean;
@@ -32,11 +31,18 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
     organization: "Delhi Legal Services Authority (DLSA)",
   });
   const [copied, setCopied] = useState(false);
+  const [filedCases, setFiledCases] = useState<any[]>([]);
 
   useEffect(() => {
     if (isOpen) {
-      fetchLawyerProfile().then((data) => {
-        if (data) setProfile(data);
+      import("@/lib/api").then(({ fetchLawyerProfile, fetchCases }) => {
+        fetchLawyerProfile().then((data) => {
+          if (data) setProfile(data);
+        });
+        fetchCases().then((allCases) => {
+          const filed = allCases.filter(c => c.case.assignment_status === "ASSIGNED" && c.case.status === "FILED");
+          setFiledCases(filed);
+        }).catch(err => console.error(err));
       });
     }
   }, [isOpen]);
@@ -195,7 +201,7 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
               </div>
             </div>
 
-            {/* Access & Privileges Banner */}
+          {/* Access & Privileges Banner */}
             <div className="p-3.5 rounded bg-accent/[0.04] border border-border flex items-start gap-3">
               <div className="p-1 rounded bg-muted text-foreground mt-0.5">
                 <Lock className="w-3.5 h-3.5" />
@@ -205,6 +211,36 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
                   Direct access to statutory Section 479 BNSS automated bail drafting, parent contact verification system, and DLSA priority filings.
                 </p>
+              </div>
+            </div>
+
+            {/* Recently Filed Cases */}
+            <div className="rounded bg-card shadow-sm border border-border overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-border bg-card shadow-sm flex items-center justify-between">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Recently Filed Cases
+                </span>
+                <span className="text-[11px] font-mono text-muted-foreground">
+                  {filedCases.length} cases
+                </span>
+              </div>
+              <div className="p-4 space-y-3">
+                {filedCases.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center">No recently filed cases.</p>
+                ) : (
+                  filedCases.slice(0, 5).map((fc: any, i) => (
+                    <div key={i} className="flex flex-col gap-1 p-3 rounded bg-secondary/30 border border-border">
+                      <div className="flex justify-between items-start">
+                        <span className="font-semibold text-primary text-sm">{fc.case.name}</span>
+                        <span className="font-mono text-[10px] text-muted-foreground">{fc.case.case_id}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <span className="px-1.5 py-0.5 rounded bg-accent/20 text-accent border border-accent/20 text-[10px] font-mono uppercase">FILED</span>
+                        <span className="text-[10px] text-muted-foreground">{fc.case.offense_sections.join(", ")}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>

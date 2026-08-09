@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { Search, Filter, Clock, ArrowLeft, ArrowUpRight, ShieldAlert, CheckCircle, FileText, WifiOff, RefreshCw } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { fetchCases, type BackendCaseSummary } from "@/lib/api";
-
 type TimeframeWindow = "Today" | "7 days" | "30 days" | "90 days";
 
 export function EligibilityRadar() {
@@ -20,8 +19,7 @@ export function EligibilityRadar() {
       setBackendError(false);
       try {
         const data = await fetchCases();
-        if (data.length === 0) throw new Error("Empty");
-        setCases(data);
+        setCases(data || []);
       } catch {
         setBackendError(true);
         setCases([]);
@@ -79,7 +77,6 @@ export function EligibilityRadar() {
   const countOverdue = caseList.filter((c) => c.daysOverdue > 0).length;
   const countDocsRequired = caseList.filter((c) => c.missingDocs.length > 0).length;
   // "Approaching" = threshold NOT yet crossed (days_overdue <= 0) but within ~90 days of crossing
-  // A case that is already OVERDUE is not "approaching" — it has already crossed the threshold.
   const APPROACHING_WINDOW_DAYS = selectedTimeframe === "Today" ? 1 : selectedTimeframe === "7 days" ? 7 : selectedTimeframe === "30 days" ? 30 : 90;
   const countApproaching = caseList.filter((c) => {
     if (c.daysOverdue > 0) return false; // already overdue, not approaching
@@ -94,6 +91,29 @@ export function EligibilityRadar() {
   const nextWeekCases = filteredCases.filter(
     (c) => !thisWeekCases.includes(c)
   );
+=======
+  const thresholdWindow = 
+    selectedTimeframe === "Today" ? 1
+    : selectedTimeframe === "7 days" ? 7
+    : selectedTimeframe === "30 days" ? 30
+    : 90;
+
+  // Calculate REAL stats
+  const countApproaching = filteredCases.filter(c => {
+    const daysUntil = (c.maxSentenceDays / 2) - c.custodyDays;
+    return daysUntil > 0 && daysUntil <= thresholdWindow;
+  }).length;
+  const countDocsRequired = filteredCases.filter(c => c.missingDocs.length > 0).length;
+  const countOverdue = filteredCases.filter(c => c.daysOverdue > 0).length;
+
+  // Group cases for timeline
+  const activeWindowCases = filteredCases.filter(c => {
+    const daysUntil = (c.maxSentenceDays / 2) - c.custodyDays;
+    return c.daysOverdue > 0 || c.missingDocs.length > 0 || (daysUntil > 0 && daysUntil <= thresholdWindow);
+  });
+  
+  const futureCases = filteredCases.filter(c => !activeWindowCases.includes(c));
+>>>>>>> origin/Sathwik
 
   return (
     <div className="p-4 md:p-8 w-full space-y-10 animate-in fade-in duration-300">
@@ -220,12 +240,12 @@ export function EligibilityRadar() {
 
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                  This Week <span className="text-xs font-normal text-muted-foreground">({thisWeekCases.length} cases)</span>
+                  Active Window <span className="text-xs font-normal text-muted-foreground">({activeWindowCases.length} cases)</span>
                 </h3>
               </div>
 
               <div className="space-y-4 pl-4">
-                {thisWeekCases.map((c) => (
+                {activeWindowCases.map((c) => (
                   <div
                     key={c.id}
                     className={`p-5 rounded-2xl border transition-all duration-300 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
@@ -265,17 +285,17 @@ export function EligibilityRadar() {
 
                     <div className="flex items-center gap-3">
                       {/* Interactive Review Button - Navigates directly to Case Dossier */}
-                      <button
-                        onClick={() => navigate(`/case/${c.id}`)}
+                      <Link
+                        to={`/case/${c.id}`}
                         className="px-4 py-2 bg-accent text-accent-foreground font-semibold rounded-xl text-xs hover:opacity-90 transition-opacity flex items-center gap-1.5 shadow-md shadow-accent/20 shrink-0"
                       >
                         Review Case <ArrowUpRight className="w-3.5 h-3.5" />
-                      </button>
+                      </Link>
                     </div>
                   </div>
                 ))}
 
-                {thisWeekCases.length === 0 && (
+                {activeWindowCases.length === 0 && (
                   <div className="p-6 text-center text-sm text-muted-foreground bg-white/[0.01] rounded-xl border border-white/5">
                     No cases matching criteria for this week.
                   </div>
@@ -289,11 +309,11 @@ export function EligibilityRadar() {
               <div className="absolute -left-[19px] top-1 w-2 h-2 rounded-full bg-white/30 ring-4 ring-black" />
 
               <h3 className="text-lg font-bold text-white mb-6 uppercase tracking-wider flex items-center gap-2">
-                Next Week <span className="text-xs font-normal text-muted-foreground">({nextWeekCases.length} cases)</span>
+                Future / Safe <span className="text-xs font-normal text-muted-foreground">({futureCases.length} cases)</span>
               </h3>
 
               <div className="space-y-4 pl-4">
-                {nextWeekCases.map((c) => (
+                {futureCases.map((c) => (
                   <div
                     key={c.id}
                     className="p-5 rounded-2xl border border-white/5 bg-white/[0.02] hover:border-white/20 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
@@ -307,18 +327,18 @@ export function EligibilityRadar() {
                         {c.prisonerName} • Approaching statutory threshold window ({selectedTimeframe})
                       </div>
                     </div>
-                    <button
-                      onClick={() => navigate(`/case/${c.id}`)}
+                    <Link
+                      to={`/case/${c.id}`}
                       className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl text-xs font-medium border border-white/10 transition-colors flex items-center gap-1 shrink-0"
                     >
                       Inspect <ArrowUpRight className="w-3 h-3" />
-                    </button>
+                    </Link>
                   </div>
                 ))}
 
-                {nextWeekCases.length === 0 && (
+                {futureCases.length === 0 && (
                   <div className="p-6 text-center text-sm text-muted-foreground bg-white/[0.01] rounded-xl border border-white/5">
-                    No cases scheduled for next week.
+                    No future cases scheduled.
                   </div>
                 )}
               </div>

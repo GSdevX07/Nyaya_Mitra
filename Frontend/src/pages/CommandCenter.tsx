@@ -102,6 +102,8 @@ const COURT_STATUS_COLORS: Record<string, string> = {
   "Released":           "text-emerald-500",
 };
 
+import { InkStamp } from "@/components/ui/InkStamp";
+
 // ── Subcomponents ─────────────────────────────────────────────────────────────
 
 function QueueCard({
@@ -117,58 +119,72 @@ function QueueCard({
 }) {
   const { case: c, days_overdue, urgency_score } = entry;
   const isHigh = urgency_score > 100;
+  // Urgency thread opacity scaled by overdue days severity
+  const threadOpacity = Math.min(1, 0.4 + (days_overdue / 300) * 0.6);
 
   return (
     <motion.div variants={fadeUp}>
       <Card
         onClick={onClick}
-        className={`cursor-pointer transition-all duration-200 border relative overflow-hidden
+        className={`cursor-pointer transition-all duration-200 border relative overflow-hidden dog-ear-fold
           ${isSelected
-            ? "border-blue-500/50 bg-blue-500/5 shadow-lg shadow-blue-500/10"
-            : "border-white/8 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]"
+            ? "border-amber-500/50 bg-[#141B26] shadow-lg shadow-black/40"
+            : "border-white/10 bg-[#0F141C]/80 hover:border-white/20 hover:bg-[#141A24]"
           }`}
       >
-        {/* left accent bar */}
-        <div className={`absolute left-0 top-0 bottom-0 w-0.5 ${isHigh ? "bg-red-500" : "bg-blue-500/40"}`} />
+        {/* Red urgency thread on left edge */}
+        <div
+          className="absolute left-0 top-0 bottom-0 w-[3px] bg-[#B4453A] transition-opacity"
+          style={{ opacity: threadOpacity }}
+        />
 
         <CardContent className="p-4 pl-5">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap mb-1">
-                <span className="text-xs font-mono text-muted-foreground">{c.case_id}</span>
+                <span className="text-xs font-mono text-muted-foreground font-semibold tracking-wide">
+                  {c.case_id}
+                </span>
                 {isHigh && (
-                  <Badge variant="destructive" className="text-[10px] px-1.5 py-0">HIGH PRIORITY</Badge>
+                  <InkStamp text="HIGH PRIORITY" variant="red" />
                 )}
               </div>
-              <p className="text-sm font-medium text-white truncate">{c.name}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{c.offense_sections.join(", ")}</p>
+              <p className="text-base font-serif font-semibold text-white tracking-tight truncate">
+                {c.name}
+              </p>
+              <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                IPC {c.offense_sections.join(", ")}
+              </p>
             </div>
             <div className="text-right shrink-0">
-              <div className={`text-lg font-bold ${isHigh ? "text-red-400" : "text-white/70"}`}>
-                {days_overdue}d
+              <InkStamp
+                text={`${days_overdue}D OVERDUE`}
+                variant={days_overdue > 100 ? "red" : "ochre"}
+                doubleRing={isHigh}
+              />
+              <div className="text-[10px] text-muted-foreground font-mono mt-1">
+                Score: {urgency_score}
               </div>
-              <div className="text-[10px] text-muted-foreground uppercase tracking-wider">overdue</div>
-              <div className="text-[10px] text-muted-foreground mt-1">Score: {urgency_score}</div>
             </div>
           </div>
 
           {/* flags row */}
-          <div className="flex items-center gap-2 mt-2 flex-wrap">
+          <div className="flex items-center gap-2 mt-3 flex-wrap">
             {c.urgency_flags.health_flag && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">Health Flag</span>
+              <InkStamp text="HEALTH FLAG" variant="red" />
             )}
             {c.urgency_flags.age > 60 && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Elderly ({c.urgency_flags.age})</span>
+              <InkStamp text={`ELDERLY (${c.urgency_flags.age})`} variant="ochre" />
             )}
             {!c.urgency_flags.repeat_offender && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">First-Time</span>
+              <InkStamp text="FIRST-TIME" variant="sage" />
             )}
           </div>
         </CardContent>
 
         {isSelected && isLoading && (
-          <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-            <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center">
+            <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
           </div>
         )}
       </Card>
@@ -408,13 +424,13 @@ export function CommandCenter() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto h-full">
+    <div className="p-4 md:p-6 w-full h-full">
       <motion.div initial="hidden" animate="show" variants={stagger} className="space-y-6">
 
         {/* Header */}
         <motion.div variants={fadeUp} className="space-y-1">
-          <h1 className="text-3xl font-semibold tracking-tight text-white">Lawyer Command Centre</h1>
-          <p className="text-muted-foreground text-sm">
+          <h1 className="text-3xl font-serif font-semibold tracking-tight text-white">Lawyer Command Centre</h1>
+          <p className="text-muted-foreground text-sm font-sans">
             Prioritized undertrial queue — powered by the Nyaya Mitra agent pipeline.
           </p>
         </motion.div>

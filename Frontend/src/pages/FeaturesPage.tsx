@@ -47,7 +47,7 @@ export function FeaturesPage() {
       {/* Background Ambients */}
       <div className="absolute top-0 right-1/4 w-96 h-96 bg-emerald-500/10 blur-[150px] rounded-full pointer-events-none" />
 
-      <div className="max-w-6xl mx-auto space-y-12 relative z-10">
+      <div className="w-full space-y-12 relative z-10">
         
         {/* Navigation Bar */}
         <div className="flex items-center justify-between border-b border-white/10 pb-6">

@@ -59,7 +59,7 @@ export function HowItWorks() {
       {/* Background Glows */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-96 bg-accent/10 blur-[150px] rounded-full pointer-events-none" />
 
-      <div className="max-w-6xl mx-auto space-y-12 relative z-10">
+      <div className="w-full space-y-12 relative z-10">
         
         {/* Navigation Bar */}
         <div className="flex items-center justify-between border-b border-white/10 pb-6">

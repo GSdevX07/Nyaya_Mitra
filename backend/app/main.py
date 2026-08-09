@@ -29,7 +29,7 @@ import json
 import datetime
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, File, UploadFile, Body
+from fastapi import FastAPI, HTTPException, File, UploadFile, Body, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -41,7 +41,9 @@ from app.database import (
     init_db, get_all_cases, get_case, update_case_status, update_case_documents,
     add_evidence, get_all_evidence, get_evidence_item, get_all_notifications
 )
-from app.document_pipeline import execute_full_document_pipeline, DocumentPipelineResult
+from app.document_pipeline import DocumentPipelineError, DocumentPipelineResult, execute_full_document_pipeline
+from app.rag.legal_ingestion import LegalIngestionError, ingest_legal_pdf
+from app.rag.vector_store import VectorStoreUnavailable, corpus_status
 
 
 # ── App initialisation ────────────────────────────────────────────────────────
@@ -59,7 +61,7 @@ app = FastAPI(
         "Agentic AI Legal Operations API for Undertrial Prisoners. "
         "Built with synthetic data only — no real prisoner records are used."
     ),
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -212,7 +214,7 @@ def root():
     return {
         "status": "online",
         "service": "Nyaya Mitra API",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "docs_url": "/docs",
         "total_cases_in_db": len(get_all_cases()),  # Live count from SQLite
     }
@@ -299,12 +301,54 @@ def assess_legal_document(payload: Optional[AssessDocumentPayload] = Body(defaul
     """
     doc_name = payload.document_name if payload else "scanned_handwritten_remand.pdf"
     text_content = payload.provided_text if payload else None
-    result = execute_full_document_pipeline(
-        file_bytes=None,
-        document_name=doc_name,
-        provided_text=text_content
-    )
-    return result
+    try:
+        return execute_full_document_pipeline(
+            file_bytes=None,
+            document_name=doc_name,
+            provided_text=text_content,
+        )
+    except DocumentPipelineError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/documents/assess", tags=["Document AI Pipeline"], response_model=DocumentPipelineResult)
+async def assess_uploaded_document(file: UploadFile = File(...)):
+    """Assess an uploaded PDF or image using the configured extraction/OCR service."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=422, detail="The uploaded document is empty.")
+    document_name = file.filename or "uploaded-document"
+    try:
+        return execute_full_document_pipeline(file_bytes=content, document_name=document_name)
+    except DocumentPipelineError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/rag/legal-pdfs", tags=["RAG Training"])
+async def upload_legal_pdf_for_rag(
+    document_id: str = Form(...),
+    source_name: str = Form(...),
+    source_url: Optional[str] = Form(default=None),
+    file: UploadFile = File(...),
+):
+    """Ingest an authorised legal PDF through DPK preparation into Chroma."""
+    if file.content_type not in {"application/pdf", "application/x-pdf"}:
+        raise HTTPException(status_code=415, detail="Only PDF legal sources may be indexed by this endpoint.")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=422, detail="The uploaded legal PDF is empty.")
+    try:
+        return ingest_legal_pdf(document_id, source_name, content, source_url)
+    except (LegalIngestionError, VectorStoreUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/rag/status", tags=["RAG Training"])
+def get_rag_status():
+    try:
+        return corpus_status()
+    except VectorStoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.get("/cases/sample-documents", tags=["Document AI Pipeline"])

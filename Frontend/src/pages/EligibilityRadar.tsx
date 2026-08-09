@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Search, Filter, Clock, ArrowLeft, ArrowUpRight, ShieldAlert, CheckCircle, FileText } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { fetchCases, type BackendCaseSummary } from "@/lib/api";
 type TimeframeWindow = "Today" | "7 days" | "30 days" | "90 days";
 
@@ -10,7 +10,6 @@ export function EligibilityRadar() {
   const [statusFilter, setStatusFilter] = useState<"ALL" | "OVERDUE" | "APPROACHING" | "DOCS_REQUIRED">("ALL");
   const [cases, setCases] = useState<BackendCaseSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
 
   useEffect(() => {
     async function load() {

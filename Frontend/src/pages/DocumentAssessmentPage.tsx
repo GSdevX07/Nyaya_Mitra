@@ -12,7 +12,7 @@ import {
   Search,
   BookOpen,
 } from "lucide-react";
-import { assessDocument, fetchSampleDocuments } from "@/lib/api";
+import { assessDocument, assessUploadedDocument, fetchSampleDocuments } from "@/lib/api";
 import { InkStamp } from "@/components/ui/InkStamp";
 
 interface SampleDoc {
@@ -69,6 +69,7 @@ export function DocumentAssessmentPage() {
   const [samples, setSamples] = useState<SampleDoc[]>([]);
   const [selectedSampleId, setSelectedSampleId] = useState<string>("sample-1");
   const [customText, setCustomText] = useState<string>("");
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [useCustomInput, setUseCustomInput] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [activeStep, setActiveStep] = useState<number>(6); // Default all completed
@@ -99,7 +100,12 @@ export function DocumentAssessmentPage() {
 
     try {
       const currentSample = samples.find((s) => s.id === selectedSampleId);
-      const nameToAssess = docName || (useCustomInput ? "Custom_Uploaded_Document.pdf" : currentSample?.document_name);
+      if (uploadedFile) {
+        const res = await assessUploadedDocument(uploadedFile);
+        setResult(res);
+        return;
+      }
+      const nameToAssess = docName || (useCustomInput ? "Pasted_Legal_Document.txt" : currentSample?.document_name);
       const textToAssess = textContent || (useCustomInput ? customText : currentSample?.preview_text);
 
       const res = await assessDocument(nameToAssess, textToAssess);
@@ -115,8 +121,10 @@ export function DocumentAssessmentPage() {
 
   // Initial auto-assessment on first load
   useEffect(() => {
-    handleRunAssessment();
-  }, [selectedSampleId]);
+    if (!useCustomInput && !uploadedFile && samples.length > 0) {
+      handleRunAssessment();
+    }
+  }, [selectedSampleId, samples, useCustomInput, uploadedFile]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -302,6 +310,7 @@ export function DocumentAssessmentPage() {
                 key={sample.id}
                 onClick={() => {
                   setUseCustomInput(false);
+                  setUploadedFile(null);
                   setSelectedSampleId(sample.id);
                 }}
                 className={`w-full text-left p-3.5 rounded-xl border transition-all ${
@@ -324,7 +333,10 @@ export function DocumentAssessmentPage() {
               <FileText className="w-4 h-4 text-accent" /> Custom Legal Document Input
             </h3>
             <button
-              onClick={() => setUseCustomInput(!useCustomInput)}
+              onClick={() => {
+                setUseCustomInput(!useCustomInput);
+                setUploadedFile(null);
+              }}
               className={`text-xs px-3 py-1 rounded-lg border transition-all ${
                 useCustomInput ? "bg-accent text-accent-foreground border-accent font-semibold" : "bg-white/5 border-white/10 text-muted-foreground"
               }`}
@@ -334,12 +346,25 @@ export function DocumentAssessmentPage() {
           </div>
 
           <textarea
-            disabled={!useCustomInput}
+            disabled={!useCustomInput || uploadedFile !== null}
             value={useCustomInput ? customText : samples.find((s) => s.id === selectedSampleId)?.preview_text || ""}
             onChange={(e) => setCustomText(e.target.value)}
             placeholder="Paste raw handwritten/scanned legal remand order or FIR text here..."
             className="w-full h-36 p-3.5 rounded-xl bg-black/40 border border-white/10 text-xs font-mono text-slate-300 focus:outline-none focus:border-accent disabled:opacity-60 resize-none"
           />
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 text-xs">
+            <input
+              type="file"
+              accept="application/pdf,image/png,image/jpeg,image/tiff,image/webp,image/bmp"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                setUploadedFile(file);
+                if (file) setUseCustomInput(false);
+              }}
+              className="block w-full text-xs text-muted-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-accent/20 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-accent hover:file:bg-accent/30"
+            />
+            {uploadedFile && <span className="text-emerald-300 shrink-0">Ready: {uploadedFile.name}</span>}
+          </div>
         </div>
       </div>
 

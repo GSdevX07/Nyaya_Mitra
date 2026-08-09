@@ -3,7 +3,7 @@
  * Connects directly to FastAPI backend running on http://localhost:8000
  */
 
-const API_BASE_URL = "http://localhost:8000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 export interface BackendCaseSummary {
   case: {
@@ -261,5 +261,19 @@ export async function assessDocument(documentName?: string, providedText?: strin
     console.error("Error in assessDocument:", err);
     throw err;
   }
+}
+
+export async function assessUploadedDocument(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE_URL}/documents/assess`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => null);
+    throw new Error(error?.detail || "Document assessment API error");
+  }
+  return res.json();
 }
 

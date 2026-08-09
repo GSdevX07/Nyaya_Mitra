@@ -16,12 +16,6 @@ from app.rag.vector_store import retrieve_legal_text
 
 
 # ── Query key mapping ────────────────────────────────────────────────────────
-# Centralise which statute keys are relevant for eligible cases.
-# Extend this list as more statutes / precedents are indexed.
-
-ELIGIBLE_QUERY_KEYS: list[str] = ["BNSS_479", "PRECEDENT_DELAY"]
-
-
 # ── Retrieval function ───────────────────────────────────────────────────────
 
 def execute_retrieval(case: CaseRecord, is_eligible: bool) -> dict:
@@ -61,7 +55,8 @@ def execute_retrieval(case: CaseRecord, is_eligible: bool) -> dict:
             "retrieved_statutes": "",
         }
 
-    retrieved_text = retrieve_legal_text(query_keys=ELIGIBLE_QUERY_KEYS)
+    retrieval_query = ["BNSS Section 479", "undertrial bail", "Article 21", *case.offense_sections]
+    retrieved_text = retrieve_legal_text(query_keys=retrieval_query)
 
     return {
         "case_id": case.case_id,

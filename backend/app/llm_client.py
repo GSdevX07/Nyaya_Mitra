@@ -1,161 +1,126 @@
-"""
-llm_client.py — Single choke-point for every LLM call in Nyaya Mitra.
+"""The single, configuration-driven gateway for Nyaya Mitra model calls.
 
-Fault-tolerant 3-Tier Architecture:
-  1. Primary Cloud Tier   : Groq API (llama-3.1-8b-instant) [8s timeout]
-  2. Local Edge LLM Tier  : Ollama (granite4.1:8b) [60s timeout]
-  3. Deterministic Safety : Pre-baked mock response (demo safety net)
-
-No other file in the codebase should call an LLM API directly.
+Every response reports the provider that actually generated it.  If no model is
+available, the gateway returns only a review-required operational notice; it
+never substitutes pre-written legal advice or translations for an AI response.
 """
 
 from __future__ import annotations
 
 import os
+from typing import Callable
+
 import requests
 from dotenv import load_dotenv
 from groq import Groq
 
-# Load .env from backend/ directory
 load_dotenv()
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "granite4.1:8b")
-OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "60.0"))
-
-
-# ── Private provider implementations ─────────────────────────────────────────
-
-def _call_primary(prompt: str, system: str) -> str:
-    """
-    Call the Groq API (Llama 3.1) for blazing fast inference.
-
-    Timeout is set to 8s — fails fast if venue Wi-Fi dies so local fallbacks kick in.
-    """
-    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-
-    completion = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user",   "content": prompt},
-        ],
-        temperature=0.1,   # Low temperature for legal exactness
-        timeout=8.0,       # Fails fast if Wi-Fi dies
-    )
-
-    return completion.choices[0].message.content
-
-
-def _call_ollama_fallback(prompt: str, system: str) -> str:
-    """
-    Call local Ollama server running granite4.1:8b model on host machine.
-    """
-    print(f"\n[OLLAMA] Sending request to local edge model ({OLLAMA_MODEL})...")
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-
-    response = requests.post(
-        OLLAMA_URL,
-        json={
-            "model": OLLAMA_MODEL,
-            "messages": messages,
-            "stream": False,
-            "options": {"temperature": 0.1},
-        },
-        timeout=OLLAMA_TIMEOUT,
-    )
-    response.raise_for_status()
-    data = response.json()
-
-    if "message" in data and "content" in data["message"]:
-        content = data["message"]["content"]
-    elif "response" in data:
-        content = data["response"]
-    else:
-        raise ValueError(f"Unexpected response payload from Ollama: {data}")
-
-    print(f"[OLLAMA SUCCESS] Generated response using local {OLLAMA_MODEL} ({len(content)} chars)")
-    return content
-
-
-def _call_mock_fallback(prompt: str, system: str) -> str:
-    """
-    Mock fallback so the demo NEVER crashes even if cloud and local LLMs fail.
-    """
-    if "Draft a formal bail application" in prompt:
-        return (
-            "BAIL APPLICATION DRAFT\n"
-            "IN THE COURT OF SESSIONS, SYNTHETIC JURISDICTION\n\n"
-            "Subject: Application for Bail under Section 479 of the Bharatiya Nagarik Suraksha Sanhita (BNSS).\n\n"
-            "May it please the Hon'ble Court,\n"
-            "1. The applicant has been in custody as an undertrial prisoner.\n"
-            "2. Under Section 479 BNSS, having served the requisite statutory threshold of the maximum sentence without conclusion of trial, the applicant is entitled to be released on bail.\n"
-            "3. The applicant undertakes to comply with all conditions imposed by this Hon'ble Court.\n\n"
-            "PRAYER:\n"
-            "It is therefore most respectfully prayed that this Hon'ble Court may be pleased to grant bail to the applicant in the interest of justice."
-        )
-    elif "Target Language: hi" in prompt:
-        return "आपके मामले की स्थिति: आप धारा 479 BNSS के तहत जमानत के पात्र हैं क्योंकि आपने अपनी अधिकतम सजा का आवश्यक हिस्सा पूरा कर लिया है। कानूनी सहायता वकील आपकी रिहाई के लिए जमानत अर्जी दायर करेंगे।"
-    elif "Target Language: kn" in prompt:
-        return "ನಿಮ್ಮ ಪ್ರಕರಣದ ಸ್ಥಿತಿ: ಸೆಕ್ಷನ್ 479 BNSS ಅಡಿಯಲ್ಲಿ ನೀವು ಜಾಮೀನಿಗೆ ಅರ್ಹರಾಗಿದ್ದೀರಿ, ಏಕೆಂದರೆ ನೀವು ನಿಮ್ಮ ಗರಿಷ್ಠ ಶಿಕ್ಷೆಯ ಅಗತ್ಯ ಭಾಗವನ್ನು ಪೂರೈಸಿದ್ದೀರಿ. ಕಾನೂನು ನೆರವು ವಕೀಲರು ನಿಮ್ಮ ಬಿಡುಗಡೆಗಾಗಿ ಜಾಮೀನು ಅರ್ಜಿಯನ್ನು ಸಲ್ಲಿಸುತ್ತಾರೆ."
-    elif "Target Language: ta" in prompt:
-        return "உங்கள் வழக்கின் நிலை: நீங்கள் அதிகபட்ச தண்டனையின் தேவையான பகுதியை நிறைவு செய்துள்ளதால், பிரிவு 479 BNSS-ன் கீழ் பிணை பெற தகுதியுடையவர். சட்ட உதவி வழக்கறிஞர் உங்கள் விடுதலைக்காக பிணை மனு தாக்கல் செய்வார்."
-    elif "Target Language: te" in prompt:
-        return "మీ కేసు స్థితి: మీరు గరిష్ట శిక్షలో అవసరమైన భాగాన్ని పూర్తి చేసినందున, సెక్షన్ 479 BNSS కింద బెయిల్‌కు అర్హులు. న్యాయ సహాయ న్యాయవాది మీ విడుదల కోసం బెయిల్ దరఖాస్తు దాఖలు చేస్తారు."
-    else:
-        # Default English fallback
-        return "Case Status: You are eligible for bail under Section 479 BNSS, having served the required portion of your maximum sentence. A legal-aid lawyer will file a bail application on your behalf."
-
-
-# ── Public interface — the ONLY function the rest of the codebase imports ─────
-
-# Module-level tracker: set by the most recent generate() call
-# This lets the orchestrator retrieve which provider served the last request.
-_last_provider: str = "unknown"
+_last_provider = "not-called"
 
 
 def get_last_provider() -> str:
-    """Return which LLM provider served the most recent generate() call."""
     return _last_provider
 
 
+def _call_watsonx(prompt: str, system: str) -> str:
+    api_key = os.getenv("WATSONX_API_KEY")
+    project_id = os.getenv("WATSONX_PROJECT_ID")
+    model_id = os.getenv("WATSONX_MODEL_ID")
+    endpoint = os.getenv("WATSONX_URL")
+    if not all((api_key, project_id, model_id, endpoint)):
+        raise RuntimeError("watsonx requires WATSONX_API_KEY, WATSONX_PROJECT_ID, WATSONX_MODEL_ID, and WATSONX_URL")
+
+    token_response = requests.post(
+        "https://iam.cloud.ibm.com/identity/token",
+        data={"grant_type": "urn:ibm:params:oauth:grant-type:apikey", "apikey": api_key},
+        headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+        timeout=float(os.getenv("WATSONX_TIMEOUT_SECONDS", "30")),
+    )
+    token_response.raise_for_status()
+    access_token = token_response.json()["access_token"]
+    messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
+    response = requests.post(
+        f"{endpoint.rstrip('/')}/ml/v1/text/chat",
+        params={"version": os.getenv("WATSONX_API_VERSION", "2024-05-31")},
+        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json", "Accept": "application/json"},
+        json={
+            "model_id": model_id,
+            "project_id": project_id,
+            "messages": messages,
+            "parameters": {"temperature": float(os.getenv("LLM_TEMPERATURE", "0.1"))},
+        },
+        timeout=float(os.getenv("WATSONX_TIMEOUT_SECONDS", "30")),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    content = payload.get("choices", [{}])[0].get("message", {}).get("content")
+    if isinstance(content, list):
+        content = "".join(item.get("text", "") for item in content if isinstance(item, dict))
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("watsonx response did not contain generated text")
+    return content.strip()
+
+
+def _call_groq(prompt: str, system: str) -> str:
+    api_key = os.getenv("GROQ_API_KEY")
+    model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+    if not api_key:
+        raise RuntimeError("Groq requires GROQ_API_KEY")
+    completion = Groq(api_key=api_key).chat.completions.create(
+        model=model,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+        temperature=float(os.getenv("LLM_TEMPERATURE", "0.1")),
+        timeout=float(os.getenv("GROQ_TIMEOUT_SECONDS", "15")),
+    )
+    content = completion.choices[0].message.content
+    if not content:
+        raise RuntimeError("Groq response did not contain generated text")
+    return content
+
+
+def _call_ollama(prompt: str, system: str) -> str:
+    model = os.getenv("OLLAMA_MODEL")
+    if not model:
+        raise RuntimeError("Ollama requires OLLAMA_MODEL")
+    messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
+    response = requests.post(
+        os.getenv("OLLAMA_URL", "http://localhost:11434/api/chat"),
+        json={"model": model, "messages": messages, "stream": False, "options": {"temperature": float(os.getenv("LLM_TEMPERATURE", "0.1"))}},
+        timeout=float(os.getenv("OLLAMA_TIMEOUT", "60")),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    content = payload.get("message", {}).get("content") or payload.get("response")
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("Ollama response did not contain generated text")
+    return content.strip()
+
+
 def generate(prompt: str, system: str = "", _override: str | None = None) -> str:
-    """
-    Universal LLM gateway with 3-tier transparent fallback:
-      1. Primary Cloud Tier (Groq API — llama-3.1-8b-instant)
-      2. Local Edge LLM Tier (Ollama — granite4.1:8b)
-      3. Deterministic Pre-computed Safety Fallback
-
-    After calling this function, call get_last_provider() to see which
-    tier actually served the response.
-    """
+    """Generate through the configured provider order: watsonx, Groq, then Ollama."""
     global _last_provider
-
     if _override is not None:
-        _last_provider = "override"
+        _last_provider = "test override"
         return _override
 
-    # Tier 1: Primary Cloud (Groq)
-    try:
-        result = _call_primary(prompt, system)
-        _last_provider = "Groq — llama-3.1-8b-instant"
-        return result
-    except Exception as e:
-        print(f"\n[NETWORK WARNING] Primary Groq LLM failed: {e}")
-        print("Attempting Tier 2 Local Edge Fallback (Ollama granite4.1:8b)...\n")
+    providers: dict[str, Callable[[str, str], str]] = {
+        "watsonx": _call_watsonx,
+        "groq": _call_groq,
+        "ollama": _call_ollama,
+    }
+    errors: list[str] = []
+    for name in (item.strip().lower() for item in os.getenv("LLM_PROVIDER_ORDER", "watsonx,groq,ollama").split(",")):
+        call = providers.get(name)
+        if call is None:
+            errors.append(f"unknown provider '{name}'")
+            continue
+        try:
+            content = call(prompt, system)
+            _last_provider = name if name != "ollama" else f"ollama:{os.getenv('OLLAMA_MODEL')}"
+            return content
+        except Exception as exc:
+            errors.append(f"{name}: {exc}")
 
-    # Tier 2: Local Edge LLM (Ollama granite4.1:8b)
-    try:
-        result = _call_ollama_fallback(prompt, system)
-        _last_provider = f"Ollama — {OLLAMA_MODEL} (local edge fallback)"
-        return result
-    except Exception as e:
-        print(f"\n[OLLAMA WARNING] Local Ollama fallback failed: {e}")
-        print("Switching to Tier 3 Deterministic Safety Fallback...\n")
-
-    # Tier 3: Deterministic Pre-computed Fallback
-    _last_provider = "Deterministic Safety Fallback (Tier 3)"
-    return _call_mock_fallback(prompt, system)
+    _last_provider = "unavailable"
+    return os.getenv("LLM_UNAVAILABLE_MESSAGE", "AI generation is unavailable. A qualified human reviewer must complete this step.")

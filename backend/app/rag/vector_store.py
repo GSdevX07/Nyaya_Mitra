@@ -1,78 +1,95 @@
-"""
-vector_store.py — Lightweight mock knowledge base for Nyaya Mitra RAG layer.
+"""Chroma-backed legal corpus for retrieval augmented generation.
 
-Design note (from Nyaya_Mitra_Master_Roadmap_v2.md §8, Step 1.5):
-  In production this module would be backed by ChromaDB with real embeddings.
-  For the hackathon build, it is a plain Python dict of public-domain statute
-  text — the retrieval logic (retrieve_legal_text) is identical in both cases,
-  so swapping the backend only requires changing how STATUTE_DB is populated,
-  not how it is queried.
-
-  All statute text is sourced from public-domain government legislation.
-  No synthetic or fabricated law is used here — this is a core RAG ground rule.
+The corpus is populated only from authorised uploads.  Legal text is never
+embedded in this module; every retrieval result retains its source metadata.
 """
 
 from __future__ import annotations
 
-
-# ── Knowledge base ───────────────────────────────────────────────────────────
-# Keys map 1-to-1 with the query keys used by the Retrieval Agent.
-# Add more entries here as the statute corpus grows.
-
-STATUTE_DB: dict[str, str] = {
-    "BNSS_479": (
-        "Section 479 of the Bharatiya Nagarik Suraksha Sanhita, 2023: "
-        "Where a person has, during the period of investigation, inquiry or trial "
-        "under this Sanhita of an offence under any law (not being an offence for "
-        "which the punishment of death or life imprisonment has been specified as "
-        "one of the punishments under that law) undergone detention for a period "
-        "extending up to one-half of the maximum period of imprisonment specified "
-        "for that offence under that law, he shall be released by the Court on bail: "
-        "Provided that where such person is a first-time offender... he shall be "
-        "released on bond by the Court, if he has undergone detention for the period "
-        "extending up to one-third of the maximum period of imprisonment."
-    ),
-
-    "PRECEDENT_DELAY": (
-        "Supreme Court ruling: Prolonged incarceration during pendency of trial "
-        "violates Article 21 of the Constitution."
-    ),
-}
+import os
+import re
+from pathlib import Path
+from typing import Any
 
 
-# ── Retrieval function ───────────────────────────────────────────────────────
+class VectorStoreUnavailable(RuntimeError):
+    pass
+
+
+def _collection():
+    try:
+        import chromadb
+    except ImportError as exc:
+        raise VectorStoreUnavailable("ChromaDB is not installed. Run pip install -r requirements.txt.") from exc
+    directory = Path(os.getenv("RAG_VECTOR_DIR", Path(__file__).resolve().parents[2] / "data" / "legal_vectors"))
+    directory.mkdir(parents=True, exist_ok=True)
+    client = chromadb.PersistentClient(path=str(directory))
+    return client.get_or_create_collection(name=os.getenv("RAG_COLLECTION_NAME", "legal_corpus"))
+
+
+def chunk_text(text: str, max_characters: int = 1200, overlap: int = 180) -> list[str]:
+    """Create overlapping retrieval chunks without splitting paragraphs where possible."""
+    normalised = re.sub(r"\r\n?", "\n", text).strip()
+    if not normalised:
+        return []
+    units = [item.strip() for item in re.split(r"\n{2,}|(?<=[.!?])\s+", normalised) if item.strip()]
+    chunks: list[str] = []
+    current = ""
+    for unit in units:
+        candidate = f"{current}\n\n{unit}".strip()
+        if len(candidate) <= max_characters:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+            current = f"{current[-overlap:]}\n\n{unit}".strip()
+        while len(current) > max_characters:
+            chunks.append(current[:max_characters])
+            current = current[max_characters - overlap :].strip()
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def index_legal_text(document_id: str, source_name: str, text: str, source_url: str | None = None) -> int:
+    """Upsert an authorised legal source into the persistent vector database."""
+    if not document_id.strip() or not source_name.strip():
+        raise ValueError("document_id and source_name are required")
+    chunks = chunk_text(text)
+    if not chunks:
+        raise ValueError("The uploaded legal document contains no indexable text")
+    collection = _collection()
+    ids = [f"{document_id}:{position}" for position in range(len(chunks))]
+    collection.upsert(
+        ids=ids,
+        documents=chunks,
+        metadatas=[{"document_id": document_id, "source_name": source_name, "source_url": source_url or "", "chunk_index": position} for position in range(len(chunks))],
+    )
+    return len(chunks)
+
+
+def retrieve_legal_chunks(query: str, limit: int = 4) -> list[dict[str, Any]]:
+    if not query.strip() or limit < 1:
+        return []
+    collection = _collection()
+    if collection.count() == 0:
+        return []
+    result = collection.query(query_texts=[query], n_results=min(limit, collection.count()), include=["documents", "metadatas", "distances"])
+    documents = result.get("documents", [[]])[0]
+    metadata = result.get("metadatas", [[]])[0]
+    distances = result.get("distances", [[]])[0]
+    return [
+        {"content": content, "source": source or {}, "distance": distance}
+        for content, source, distance in zip(documents, metadata, distances)
+    ]
+
 
 def retrieve_legal_text(query_keys: list[str]) -> str:
-    """
-    Retrieve and concatenate statute/precedent text for the given keys.
+    """Compatibility interface used by the existing retrieval agent."""
+    chunks = retrieve_legal_chunks(" ".join(query_keys))
+    return "\n\n".join(chunk["content"] for chunk in chunks)
 
-    In the current mock implementation this is a direct dictionary lookup.
-    In production, replace this function body with a vector similarity search
-    against ChromaDB — the return type and call signature stay identical.
 
-    Args:
-        query_keys: List of STATUTE_DB keys to retrieve, e.g.
-                    ["BNSS_479", "PRECEDENT_DELAY"].
-
-    Returns:
-        A single string with each matching entry joined by double newlines.
-        Keys that do not exist in STATUTE_DB are silently skipped (logged
-        at WARNING level so missing entries are detectable without crashing).
-
-    Example:
-        >>> text = retrieve_legal_text(["BNSS_479"])
-        >>> "Section 479" in text
-        True
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-
-    chunks: list[str] = []
-    for key in query_keys:
-        text = STATUTE_DB.get(key)
-        if text:
-            chunks.append(text)
-        else:
-            logger.warning("retrieve_legal_text: key '%s' not found in STATUTE_DB", key)
-
-    return "\n\n".join(chunks)
+def corpus_status() -> dict[str, int]:
+    collection = _collection()
+    return {"chunks": collection.count()}

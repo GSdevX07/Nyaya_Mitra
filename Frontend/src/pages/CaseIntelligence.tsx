@@ -320,7 +320,7 @@ export function CaseIntelligence() {
                       {source.relevance_score ? `${(source.relevance_score * 100).toFixed(0)}% RELEVANCE` : "HIGH RELEVANCE"}
                     </div>
                   </div>
-                  <div className="p-4 bg-primary rounded-sm border border-border text-sm text-muted-foreground font-serif leading-relaxed italic">
+                  <div className="p-4 bg-muted rounded-sm border border-border text-sm text-muted-foreground font-serif leading-relaxed italic">
                     "{source.passage || source.content}"
                   </div>
                   {source.reasoning && (
@@ -395,7 +395,7 @@ export function CaseIntelligence() {
                 </div>
               )}
 
-              <div className="p-6 rounded border border-border bg-primary space-y-3">
+              <div className="p-6 rounded border border-border bg-card shadow-sm space-y-3">
                 {agentLog.map((entry: any, idx: number) => (
                   <div key={idx} className="flex items-center gap-4 text-sm">
                     <span className={`w-16 text-xs font-bold uppercase text-right shrink-0 ${
@@ -530,7 +530,7 @@ export function CaseIntelligence() {
                 </div>
               ) : (
                 <>
-                  <div className="p-3 bg-primary border border-border rounded text-xs text-muted-foreground leading-relaxed text-center">
+                  <div className="p-3 bg-muted border border-border rounded text-xs text-muted-foreground leading-relaxed text-center">
                     "I confirm that I have reviewed the supporting documents and legal basis."
                   </div>
                   <div className="space-y-2">

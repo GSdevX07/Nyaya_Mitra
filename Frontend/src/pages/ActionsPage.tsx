@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Play, Clock, ArrowRight } from "lucide-react";
+import { Play, Clock, ArrowRight, CheckCircle2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { fetchActions, triggerAction } from "@/lib/api";
 
@@ -17,6 +17,7 @@ export function ActionsPage() {
   const [actions, setActions] = useState<ActionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
+  const [executedIds, setExecutedIds] = useState<Set<string>>(new Set());
 
   const loadActions = async () => {
     setLoading(true);
@@ -33,7 +34,7 @@ export function ActionsPage() {
     setTriggeringId(id);
     try {
       await triggerAction(id);
-      await loadActions();
+      setExecutedIds(prev => new Set(prev).add(id));
     } catch (err) {
       console.error(err);
     } finally {
@@ -93,15 +94,25 @@ export function ActionsPage() {
 
                 <button
                   onClick={() => handleTrigger(act.id)}
-                  disabled={triggeringId === act.id}
-                  className="px-4 py-2 bg-accent text-accent-foreground font-semibold rounded text-xs hover:opacity-90 transition-opacity flex items-center gap-2 shadow-md shadow-accent/20"
+                  disabled={triggeringId === act.id || executedIds.has(act.id)}
+                  className={`px-4 py-2 font-semibold rounded text-xs flex items-center gap-2 shadow-md transition-all ${
+                    executedIds.has(act.id)
+                      ? "bg-secondary text-primary cursor-not-allowed opacity-80"
+                      : "bg-accent text-accent-foreground hover:opacity-90 shadow-accent/20"
+                  }`}
                 >
-                  {triggeringId === act.id ? (
+                  {executedIds.has(act.id) ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  ) : triggeringId === act.id ? (
                     <Clock className="w-4 h-4 animate-spin" />
                   ) : (
                     <Play className="w-4 h-4" />
                   )}
-                  {triggeringId === act.id ? "Executing..." : "Execute Action"}
+                  {executedIds.has(act.id)
+                    ? "Executed"
+                    : triggeringId === act.id
+                    ? "Executing..."
+                    : "Execute Action"}
                 </button>
               </div>
             </div>

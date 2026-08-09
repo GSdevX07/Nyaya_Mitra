@@ -116,6 +116,30 @@ class CaseRecord(BaseModel):
         ),
         examples=["hi", "ta", "en"],
     )
+    relative_name: str = Field(
+        default="Not Specified",
+        description="Full name of accused prisoner's parent, spouse, or guardian.",
+    )
+    relative_relation: str = Field(
+        default="Parent/Relative",
+        description="Relationship of contact person to the undertrial prisoner.",
+    )
+    relative_phone: str = Field(
+        default="+91 98765 43210",
+        description="Contact phone number of parent or relative.",
+    )
+    permanent_address: str = Field(
+        default="Synthetic Address, District Detention Zone",
+        description="Permanent home address of accused prisoner or family.",
+    )
+    assignment_status: str = Field(
+        default="AVAILABLE",
+        description="Status of case assignment: 'AVAILABLE', 'ASSIGNED', or 'DECLINED'.",
+    )
+    assigned_lawyer_id: Optional[str] = Field(
+        default=None,
+        description="ID of lawyer assigned to take up the case.",
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -140,6 +164,26 @@ class CaseRecord(BaseModel):
                 },
                 "jail_location": "District Jail, synthetic",
                 "preferred_language": "hi",
+                "relative_name": "Sunita Devi (Wife)",
+                "relative_relation": "Spouse",
+                "relative_phone": "+91 98765 77007",
+                "permanent_address": "Flat 12B, Old City Suburb, Jaipur, RJ - 302001",
+                "assignment_status": "AVAILABLE",
+                "assigned_lawyer_id": None,
             }
         }
     }
+
+
+class LawyerProfile(BaseModel):
+    """Profile model for active lawyer/legal officer."""
+
+    id: str = Field(..., description="Unique Lawyer ID, e.g. 'Legal Officer 104'.")
+    full_name: str = Field(..., description="Full legal name of the advocate.")
+    bar_association_id: str = Field(..., description="State Bar Association Registration ID.")
+    email: str = Field(..., description="Primary email address.")
+    phone: str = Field(..., description="Contact mobile number.")
+    specialization: str = Field(..., description="Legal practice specialization.")
+    cases_taken: int = Field(default=0, description="Total cases currently assigned/taken.")
+    status: str = Field(default="Active", description="Lawyer account status.")
+

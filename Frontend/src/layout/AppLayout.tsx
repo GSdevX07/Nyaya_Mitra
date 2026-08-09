@@ -4,10 +4,12 @@ import { Search, Bell, User, Activity } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CommandPalette } from "@/components/CommandPalette";
 import { NotificationsModal } from "@/components/NotificationsModal";
+import { LawyerProfileModal } from "@/components/LawyerProfileModal";
 
 const navItems = [
   { path: "/dashboard", label: "Command Center" },
   { path: "/cases", label: "Cases" },
+  { path: "/assessment", label: "AI Assessment Pipeline" },
   { path: "/radar", label: "Eligibility Radar" },
   { path: "/documents", label: "Documents" },
   { path: "/evidence", label: "Evidence" },
@@ -21,6 +23,7 @@ export function AppLayout() {
   const [isHovered, setIsHovered] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   // Auto-scroll to top on page navigation
   useEffect(() => {
@@ -102,12 +105,16 @@ export function AppLayout() {
 
             <div className="w-px h-5 bg-white/10 mx-1" />
 
-            <div className="flex items-center gap-2 text-xs md:text-sm text-muted-foreground">
-              <div className="w-7 h-7 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
-                <User className="w-4 h-4" />
+            <button
+              onClick={() => setIsProfileOpen(true)}
+              className="flex items-center gap-2 text-xs md:text-sm text-muted-foreground hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-all cursor-pointer"
+              title="View Lawyer Profile & Credentials"
+            >
+              <div className="w-7 h-7 rounded-full bg-accent/20 border border-accent/40 flex items-center justify-center text-accent font-semibold text-xs font-mono">
+                RS
               </div>
               <span className="hidden md:inline font-medium text-white/90">Legal Officer 104</span>
-            </div>
+            </button>
           </div>
         </div>
       </header>
@@ -162,7 +169,7 @@ export function AppLayout() {
                 <ul className="space-y-2 text-xs text-muted-foreground">
                   <li className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-white/20 animate-pulse" />
-                    Monitoring 5 Undertrial Prisoners
+                    Monitoring Undertrial Prisoner Records
                   </li>
                   <li className="flex items-center gap-2 text-emerald-400">
                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
@@ -170,7 +177,7 @@ export function AppLayout() {
                   </li>
                   <li className="flex items-center gap-2 text-amber-400">
                     <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                    1 missing charge sheet flagged
+                    Parent Contact Verification Ready
                   </li>
                 </ul>
               </motion.div>
@@ -181,6 +188,8 @@ export function AppLayout() {
 
       <CommandPalette isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} />
       <NotificationsModal isOpen={isNotificationsOpen} onClose={() => setIsNotificationsOpen(false)} />
+      <LawyerProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
     </div>
   );
 }
+

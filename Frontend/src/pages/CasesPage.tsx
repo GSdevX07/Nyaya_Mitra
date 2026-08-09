@@ -1,19 +1,140 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Search, Filter, ShieldAlert, ArrowUpRight, CheckCircle, Clock, AlertCircle, RefreshCw } from "lucide-react";
-import { fetchCases, type BackendCaseSummary } from "@/lib/api";
+import { 
+  Search, 
+  Filter, 
+  ShieldAlert, 
+  ArrowUpRight, 
+  CheckCircle, 
+  Clock, 
+  AlertCircle, 
+  RefreshCw, 
+  UserCheck, 
+  Sparkles, 
+  Phone, 
+  MapPin, 
+  Eye, 
+  Check, 
+  Briefcase 
+} from "lucide-react";
+import { 
+  fetchCases, 
+  fetchAvailableCases, 
+  takeUpCase, 
+  declineCase, 
+  type BackendCaseSummary 
+} from "@/lib/api";
 import { MOCK_CASES } from "@/data/mock";
+import { AvailableCaseModal } from "@/components/AvailableCaseModal";
 
 export function CasesPage() {
-  const [cases, setCases] = useState<BackendCaseSummary[]>([]);
+  const [activeMainTab, setActiveMainTab] = useState<"MY_CASES" | "AVAILABLE_CASES">("MY_CASES");
+  
+  const [myCases, setMyCases] = useState<BackendCaseSummary[]>([]);
+  const [availableCases, setAvailableCases] = useState<BackendCaseSummary[]>([]);
+  
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"ALL" | "ELIGIBLE" | "MEDICAL" | "MISSING">("ALL");
 
+  // Selected case for Available Case modal review
+  const [selectedAvailableCase, setSelectedAvailableCase] = useState<BackendCaseSummary | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Load local approved/declined overrides from localStorage
+  const getApprovedFromStorage = (): string[] => {
+    try {
+      return JSON.parse(localStorage.getItem("approved_case_ids") || "[]");
+    } catch {
+      return [];
+    }
+  };
+
+  const getDeclinedFromStorage = (): string[] => {
+    try {
+      return JSON.parse(localStorage.getItem("declined_case_ids") || "[]");
+    } catch {
+      return [];
+    }
+  };
+
+  const saveApprovedToStorage = (id: string) => {
+    const list = getApprovedFromStorage();
+    if (!list.includes(id)) {
+      localStorage.setItem("approved_case_ids", JSON.stringify([...list, id]));
+    }
+  };
+
+  const saveDeclinedToStorage = (id: string) => {
+    const list = getDeclinedFromStorage();
+    if (!list.includes(id)) {
+      localStorage.setItem("declined_case_ids", JSON.stringify([...list, id]));
+    }
+  };
+
   const loadData = async () => {
     setLoading(true);
-    const data = await fetchCases();
-    setCases(data);
+
+    const approvedIds = getApprovedFromStorage();
+    const declinedIds = getDeclinedFromStorage();
+
+    // Fetch all cases & available cases from backend
+    const [allData, availData] = await Promise.all([fetchCases(), fetchAvailableCases()]);
+
+    let assignedList: BackendCaseSummary[] = [];
+    let unassignedList: BackendCaseSummary[] = [];
+
+    if (allData.length > 0) {
+      // Backend returned data
+      assignedList = allData.filter(item => item.case.assignment_status === "ASSIGNED" || approvedIds.includes(item.case.case_id));
+      unassignedList = allData.filter(item => 
+        (item.case.assignment_status === "AVAILABLE" || !item.case.assignment_status) &&
+        !approvedIds.includes(item.case.case_id) &&
+        !declinedIds.includes(item.case.case_id)
+      );
+    } else {
+      // Fallback to MOCK_CASES
+      const formattedMock = MOCK_CASES.map(c => {
+        const missingDocsCount = c.documents.filter(d => d.status === "missing").length;
+        return {
+          case: {
+            case_id: c.id,
+            name: c.prisonerName,
+            offense_sections: [c.offence],
+            arrest_date: "2024-01-10",
+            custody_days: c.custodyDurationDays,
+            max_sentence_days_for_offense: 1095,
+            prior_bail_orders: [],
+            required_docs: ["remand_order", "charge_sheet"],
+            present_docs: missingDocsCount === 0 ? ["remand_order", "charge_sheet"] : ["remand_order"],
+            urgency_flags: {
+              age: c.age,
+              health_flag: c.age >= 60,
+              repeat_offender: false,
+            },
+            jail_location: c.court,
+            preferred_language: "en",
+            relative_name: c.relativeName || "Ramesh Kumar",
+            relative_relation: c.relativeRelation || "Father",
+            relative_phone: c.relativePhone || "+91 98765 11001",
+            permanent_address: c.permanentAddress || "Plot 42, Gandhi Nagar, Sector 4, Chennai, TN - 600001",
+            assignment_status: c.assignmentStatus || "AVAILABLE",
+          },
+          days_overdue: Math.max(0, c.custodyDurationDays - 547),
+          urgency_score: c.urgency === "URGENT" ? 250 : 120,
+        };
+      });
+
+      assignedList = formattedMock.filter(item => item.case.assignment_status === "ASSIGNED" || approvedIds.includes(item.case.case_id));
+      unassignedList = formattedMock.filter(item => 
+        (item.case.assignment_status === "AVAILABLE" || !item.case.assignment_status) &&
+        !approvedIds.includes(item.case.case_id) &&
+        !declinedIds.includes(item.case.case_id)
+      );
+    }
+
+    setMyCases(assignedList);
+    setAvailableCases(unassignedList);
     setLoading(false);
   };
 
@@ -21,35 +142,51 @@ export function CasesPage() {
     loadData();
   }, []);
 
-  const displayList = cases.length > 0 ? cases : MOCK_CASES.map(c => {
-    const missingDocsCount = c.documents.filter(d => d.status === "missing").length;
-    return {
-      case: {
-        case_id: c.id,
-        name: c.prisonerName,
-        offense_sections: [c.offence],
-        arrest_date: "2024-01-10",
-        custody_days: c.custodyDurationDays,
-        max_sentence_days_for_offense: 1095,
-        prior_bail_orders: [],
-        required_docs: ["remand_order", "charge_sheet"],
-        present_docs: missingDocsCount === 0 ? ["remand_order", "charge_sheet"] : ["remand_order"],
-        urgency_flags: {
-          age: c.age,
-          health_flag: c.age >= 60,
-          repeat_offender: false
-        },
-        jail_location: c.court,
-        preferred_language: "en"
-      },
-      days_overdue: Math.max(0, c.custodyDurationDays - 547),
-      urgency_score: c.urgency === "URGENT" ? 250 : 120
-    };
-  });
+  // Handle Approve Case (after mandatory scroll review)
+  const handleApproveCase = async (caseId: string) => {
+    try {
+      await takeUpCase(caseId);
+    } catch {
+      // Backend offline fallback
+    }
+    saveApprovedToStorage(caseId);
 
-  const filtered = displayList.filter(item => {
+    // Find the item and move from available to myCases
+    const target = availableCases.find(i => i.case.case_id === caseId);
+    if (target) {
+      const updatedItem = {
+        ...target,
+        case: { ...target.case, assignment_status: "ASSIGNED" },
+      };
+      setMyCases(prev => [updatedItem, ...prev]);
+      setAvailableCases(prev => prev.filter(i => i.case.case_id !== caseId));
+    }
+
+    setIsModalOpen(false);
+    setSelectedAvailableCase(null);
+    setActiveMainTab("MY_CASES");
+  };
+
+  // Handle Decline Case (hides case permanently)
+  const handleDeclineCase = async (caseId: string) => {
+    try {
+      await declineCase(caseId);
+    } catch {
+      // Backend offline fallback
+    }
+    saveDeclinedToStorage(caseId);
+
+    // Remove from availableCases list
+    setAvailableCases(prev => prev.filter(i => i.case.case_id !== caseId));
+    setIsModalOpen(false);
+    setSelectedAvailableCase(null);
+  };
+
+  const currentList = activeMainTab === "MY_CASES" ? myCases : availableCases;
+
+  const filtered = currentList.filter(item => {
     const c = item.case;
-    const matchesSearch = 
+    const matchesSearch =
       c.case_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.offense_sections.some(s => s.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -76,13 +213,13 @@ export function CasesPage() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-accent/10 text-accent border border-accent/20">
-              Live Case Registry
+              Live Advocate Queue
             </span>
             <span className="text-xs text-muted-foreground font-mono">Synced with FastAPI Backend</span>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Undertrial Cases Directory</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-white">Undertrial Cases Management</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Real-time monitoring of Section 479 BNSS eligibility, medical priorities, and legal document completeness.
+            Review pro bono undertrial cases, verify parents/relative contacts & address, scroll-approve to take cases into your active queue.
           </p>
         </div>
 
@@ -90,18 +227,48 @@ export function CasesPage() {
           onClick={loadData}
           className="self-start md:self-auto px-4 py-2 bg-white/5 border border-white/10 text-white hover:bg-white/10 rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Refresh Registry
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Refresh Cases
         </button>
       </div>
 
-      {/* Controls Bar */}
+      {/* Main Tab Navigation: My Cases vs Available Cases */}
+      <div className="flex items-center gap-3 border-b border-white/10 pb-4">
+        <button
+          onClick={() => setActiveMainTab("MY_CASES")}
+          className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 ${
+            activeMainTab === "MY_CASES"
+              ? "bg-accent text-accent-foreground shadow-lg shadow-accent/20"
+              : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
+          }`}
+        >
+          <Briefcase className="w-4 h-4" />
+          My Assigned Cases ({myCases.length})
+        </button>
+
+        <button
+          onClick={() => setActiveMainTab("AVAILABLE_CASES")}
+          className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 relative ${
+            activeMainTab === "AVAILABLE_CASES"
+              ? "bg-accent text-accent-foreground shadow-lg shadow-accent/20"
+              : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-emerald-400" />
+          Available Cases to Take Up ({availableCases.length})
+          {availableCases.length > 0 && (
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping absolute -top-1 -right-1" />
+          )}
+        </button>
+      </div>
+
+      {/* Controls Bar: Search & Sub-Filter Pills */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
         {/* Search */}
         <div className="relative w-full sm:w-96">
           <Search className="w-4 h-4 text-muted-foreground absolute left-3.5 top-3" />
           <input
             type="text"
-            placeholder="Filter cases by ID, name, IPC section..."
+            placeholder="Filter by ID, prisoner name, IPC section..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-white/[0.03] border border-white/10 rounded-xl text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-accent transition-colors"
@@ -112,9 +279,9 @@ export function CasesPage() {
         <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto no-scrollbar">
           <Filter className="w-4 h-4 text-muted-foreground shrink-0 hidden sm:inline" />
           {[
-            { id: "ALL", label: "All Cases" },
+            { id: "ALL", label: "All" },
             { id: "ELIGIBLE", label: "BNSS 479 Eligible" },
-            { id: "MEDICAL", label: "Medical & Senior" },
+            { id: "MEDICAL", label: "Medical Flags" },
             { id: "MISSING", label: "Missing Docs" },
           ].map(tab => (
             <button
@@ -122,7 +289,7 @@ export function CasesPage() {
               onClick={() => setFilterType(tab.id as any)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all shrink-0 ${
                 filterType === tab.id
-                  ? "bg-accent text-accent-foreground shadow-lg shadow-accent/20"
+                  ? "bg-white/20 text-white font-bold"
                   : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
               }`}
             >
@@ -132,10 +299,19 @@ export function CasesPage() {
         </div>
       </div>
 
-      {/* Cases Grid */}
+      {/* Grid Display */}
       {loading ? (
         <div className="p-16 text-center text-muted-foreground animate-pulse">
           Fetching cases from Nyaya Mitra legal pipeline...
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="p-16 text-center bg-white/[0.01] border border-white/5 rounded-2xl space-y-2">
+          <div className="text-lg font-semibold text-white">No cases match your filters</div>
+          <p className="text-sm text-muted-foreground">
+            {activeMainTab === "AVAILABLE_CASES"
+              ? "All available cases have been taken up or reviewed. Check back soon!"
+              : "No assigned cases match the active search parameters."}
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -144,14 +320,15 @@ export function CasesPage() {
             const threshold = Math.floor(c.max_sentence_days_for_offense / 2);
             const isEligible = c.custody_days >= threshold;
             const missingDocs = c.required_docs.filter(d => !c.present_docs.includes(d));
+            const isAvailableTab = activeMainTab === "AVAILABLE_CASES";
 
             return (
               <div
                 key={c.case_id}
-                className="group relative bg-white/[0.02] border border-white/10 hover:border-accent/40 rounded-2xl p-6 transition-all duration-300 backdrop-blur-md flex flex-col justify-between hover:shadow-xl hover:shadow-accent/5"
+                className="group relative bg-white/[0.02] border border-white/10 hover:border-accent/40 rounded-2xl p-6 transition-all duration-300 backdrop-blur-md flex flex-col justify-between hover:shadow-xl hover:shadow-accent/5 space-y-5"
               >
                 <div className="space-y-4">
-                  {/* Top Bar */}
+                  {/* Card Header */}
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <span className="font-mono text-xs font-semibold text-accent tracking-wider">
@@ -187,11 +364,11 @@ export function CasesPage() {
                     )}
                   </div>
 
-                  {/* Sentence Threshold Progress */}
-                  <div className="space-y-1.5 pt-2">
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Custody: {c.custody_days} days</span>
-                      <span>50% Threshold: {threshold} days</span>
+                  {/* Custody Threshold Progress */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex justify-between text-xs text-muted-foreground font-mono">
+                      <span>Custody: {c.custody_days}d</span>
+                      <span>Threshold: {threshold}d</span>
                     </div>
                     <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
                       <div
@@ -205,6 +382,22 @@ export function CasesPage() {
                     </div>
                   </div>
 
+                  {/* FAMILY CONTACT PREVIEW */}
+                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1 text-xs">
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <UserCheck className="w-3 h-3 text-accent" /> {c.relative_relation || "Parent/Relative"}:
+                      </span>
+                      <span className="font-semibold text-white">{c.relative_name || "Ramesh Kumar"}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-emerald-400 font-mono">
+                      <span className="flex items-center gap-1">
+                        <Phone className="w-3 h-3 text-emerald-400" /> Mobile:
+                      </span>
+                      <span>{c.relative_phone || "+91 98765 11001"}</span>
+                    </div>
+                  </div>
+
                   {/* Document Warning */}
                   {missingDocs.length > 0 && (
                     <div className="p-2.5 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2">
@@ -214,23 +407,48 @@ export function CasesPage() {
                   )}
                 </div>
 
-                {/* Footer link */}
-                <div className="pt-6 mt-4 border-t border-white/5 flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground truncate max-w-[180px]">
+                {/* Card Action Footer */}
+                <div className="pt-4 border-t border-white/5 flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground truncate max-w-[160px]">
                     {c.jail_location}
                   </span>
-                  <Link
-                    to={`/case/${c.case_id}`}
-                    className="text-xs font-semibold text-white group-hover:text-accent flex items-center gap-1 transition-colors"
-                  >
-                    Analyze Case <ArrowUpRight className="w-3.5 h-3.5" />
-                  </Link>
+
+                  {isAvailableTab ? (
+                    <button
+                      onClick={() => {
+                        setSelectedAvailableCase(item);
+                        setIsModalOpen(true);
+                      }}
+                      className="px-3.5 py-1.5 bg-accent/10 hover:bg-accent/20 border border-accent/30 text-accent rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> Review & Take Case
+                    </button>
+                  ) : (
+                    <Link
+                      to={`/case/${c.case_id}`}
+                      className="text-xs font-semibold text-white group-hover:text-accent flex items-center gap-1 transition-colors"
+                    >
+                      Analyze Case <ArrowUpRight className="w-3.5 h-3.5" />
+                    </Link>
+                  )}
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      {/* Available Case Scroll-Approval Modal */}
+      <AvailableCaseModal
+        item={selectedAvailableCase}
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false);
+          setSelectedAvailableCase(null);
+        }}
+        onApprove={handleApproveCase}
+        onDecline={handleDeclineCase}
+      />
     </div>
   );
 }

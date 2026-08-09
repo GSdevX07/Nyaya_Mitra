@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Search, Filter, Clock, ArrowLeft, ArrowUpRight, ShieldAlert, CheckCircle, FileText, WifiOff, RefreshCw } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { fetchCases, type BackendCaseSummary } from "@/lib/api";
 type TimeframeWindow = "Today" | "7 days" | "30 days" | "90 days";
 
@@ -11,7 +11,6 @@ export function EligibilityRadar() {
   const [cases, setCases] = useState<BackendCaseSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [backendError, setBackendError] = useState(false);
-  const navigate = useNavigate();
 
   useEffect(() => {
     async function load() {
@@ -84,36 +83,14 @@ export function EligibilityRadar() {
     return daysUntilThreshold >= 0 && daysUntilThreshold <= APPROACHING_WINDOW_DAYS;
   }).length;
 
-  // Group cases for timeline: needs attention vs. standard
-  const thisWeekCases = filteredCases.filter(
+  // Group cases for timeline: active window vs. future/safe
+  const activeWindowCases = filteredCases.filter(
     (c) => c.urgency === "URGENT" || c.daysOverdue > 0 || c.missingDocs.length > 0
   );
-  const nextWeekCases = filteredCases.filter(
-    (c) => !thisWeekCases.includes(c)
+  const futureCases = filteredCases.filter(
+    (c) => !activeWindowCases.includes(c)
   );
-=======
-  const thresholdWindow = 
-    selectedTimeframe === "Today" ? 1
-    : selectedTimeframe === "7 days" ? 7
-    : selectedTimeframe === "30 days" ? 30
-    : 90;
 
-  // Calculate REAL stats
-  const countApproaching = filteredCases.filter(c => {
-    const daysUntil = (c.maxSentenceDays / 2) - c.custodyDays;
-    return daysUntil > 0 && daysUntil <= thresholdWindow;
-  }).length;
-  const countDocsRequired = filteredCases.filter(c => c.missingDocs.length > 0).length;
-  const countOverdue = filteredCases.filter(c => c.daysOverdue > 0).length;
-
-  // Group cases for timeline
-  const activeWindowCases = filteredCases.filter(c => {
-    const daysUntil = (c.maxSentenceDays / 2) - c.custodyDays;
-    return c.daysOverdue > 0 || c.missingDocs.length > 0 || (daysUntil > 0 && daysUntil <= thresholdWindow);
-  });
-  
-  const futureCases = filteredCases.filter(c => !activeWindowCases.includes(c));
->>>>>>> origin/Sathwik
 
   return (
     <div className="p-4 md:p-8 w-full space-y-10 animate-in fade-in duration-300">

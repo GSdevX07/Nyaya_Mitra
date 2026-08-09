@@ -30,6 +30,7 @@ interface CaseRecord {
   jail_location: string;
   preferred_language: string;
   prior_bail_orders: string[];
+  assignment_status?: string;
 }
 
 interface QueueEntry {

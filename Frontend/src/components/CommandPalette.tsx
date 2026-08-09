@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { Search, FileText, Activity } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { fetchCases, type BackendCaseSummary } from "@/lib/api";
+
 interface CommandPaletteProps {
   isOpen?: boolean;
   onClose?: () => void;
@@ -9,6 +11,7 @@ interface CommandPaletteProps {
 export function CommandPalette({ isOpen: externalIsOpen, onClose }: CommandPaletteProps) {
   const [internalIsOpen, setInternalIsOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [cases, setCases] = useState<BackendCaseSummary[]>([]);
   const navigate = useNavigate();
 
   const isPaletteOpen = externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
@@ -20,6 +23,12 @@ export function CommandPalette({ isOpen: externalIsOpen, onClose }: CommandPalet
       setInternalIsOpen(false);
     }
   };
+
+  useEffect(() => {
+    if (isPaletteOpen) {
+      fetchCases().then((data) => setCases(data || []));
+    }
+  }, [isPaletteOpen]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -43,11 +52,11 @@ export function CommandPalette({ isOpen: externalIsOpen, onClose }: CommandPalet
   };
 
   const results = query
-    ? [].filter(
+    ? cases.filter(
         (c) =>
-          c.id.toLowerCase().includes(query.toLowerCase()) ||
-          c.prisonerName.toLowerCase().includes(query.toLowerCase()) ||
-          c.offence.toLowerCase().includes(query.toLowerCase())
+          c.case.case_id.toLowerCase().includes(query.toLowerCase()) ||
+          c.case.name.toLowerCase().includes(query.toLowerCase()) ||
+          c.case.offense_sections.some((s) => s.toLowerCase().includes(query.toLowerCase()))
       )
     : [];
 
@@ -80,20 +89,20 @@ export function CommandPalette({ isOpen: externalIsOpen, onClose }: CommandPalet
             <div className="px-3 py-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
               Matching Cases ({results.length})
             </div>
-            {results.map((c) => (
+            {results.map((item) => (
               <button
-                key={c.id}
-                onClick={() => handleSelect(c.id)}
+                key={item.case.case_id}
+                onClick={() => handleSelect(item.case.case_id)}
                 className="w-full text-left flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-white/5 transition-colors group"
               >
                 <div
                   className={`p-2 rounded bg-white/5 ${
-                    c.urgency === "URGENT"
+                    item.urgency_score > 200
                       ? "text-destructive group-hover:bg-destructive/10"
                       : "text-accent group-hover:bg-accent/10"
                   }`}
                 >
-                  {c.urgency === "URGENT" ? (
+                  {item.urgency_score > 200 ? (
                     <Activity className="w-4 h-4" />
                   ) : (
                     <FileText className="w-4 h-4" />
@@ -101,10 +110,10 @@ export function CommandPalette({ isOpen: externalIsOpen, onClose }: CommandPalet
                 </div>
                 <div>
                   <div className="text-white font-medium text-sm">
-                    {c.id} — {c.prisonerName}
+                    {item.case.case_id} — {item.case.name}
                   </div>
                   <div className="text-xs text-muted-foreground font-mono">
-                    Offense: {c.offence} | Days in Custody: {c.custodyDurationDays}
+                    Offense: {item.case.offense_sections.join(", ")} | Days in Custody: {item.case.custody_days}
                   </div>
                 </div>
               </button>

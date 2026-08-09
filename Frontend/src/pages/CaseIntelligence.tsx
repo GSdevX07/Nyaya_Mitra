@@ -1,7 +1,8 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, FileText, CheckCircle2, AlertTriangle, AlertCircle, Scale, Calculator, Link as LinkIcon, Download, PenTool, Check, X, Activity, Loader2, RefreshCw } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
-import { fetchCaseById, approveCaseInBackend, uploadDocument } from "@/lib/api";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { fetchCaseById, approveCaseInBackend, uploadDocumentFile } from "@/lib/api";
+import { jsPDF } from "jspdf";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,9 @@ export function CaseIntelligence() {
   const [approving, setApproving] = useState(false);
   const [approvalDone, setApprovalDone] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [pendingDocType, setPendingDocType] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -54,15 +58,47 @@ export function CaseIntelligence() {
     }
   };
 
-  const handleUploadDoc = async (docType: string) => {
+  const handleUploadDoc = (docType: string) => {
     if (!id) return;
-    setUploadingDoc(docType);
+    setPendingDocType(docType);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !pendingDocType || !id) return;
+    
+    setUploadingDoc(pendingDocType);
     try {
-      await uploadDocument(id, docType);
+      await uploadDocumentFile(id, pendingDocType, file);
       await load(); // Re-run orchestrator to get updated completeness
+    } catch (err: any) {
+      alert("Failed to upload document: " + err.message);
     } finally {
       setUploadingDoc(null);
+      setPendingDocType(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  };
+
+  const generatePDF = () => {
+    if (!c.case_id) return;
+    const doc = new jsPDF();
+    doc.setFont("helvetica", "bold");
+    doc.text(`REQUEST FOR MISSING DOCUMENTS`, 20, 20);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Case ID: ${c.case_id}`, 20, 30);
+    doc.text(`Date: ${new Date().toLocaleDateString()}`, 20, 40);
+    doc.text(`The following documents are missing and required to proceed:`, 20, 50);
+    
+    let y = 60;
+    (caseData?.completeness?.missing_docs || []).forEach((docName: string, index: number) => {
+      doc.text(`${index + 1}. ${docName.replace(/_/g, " ")}`, 25, y);
+      y += 10;
+    });
+    
+    doc.text("Please submit these documents to the system immediately.", 20, y + 10);
+    doc.save(`Missing_Docs_Request_${c.case_id}.pdf`);
   };
 
   // ── Loading / Error states ────────────────────────────────────────────────
@@ -317,8 +353,21 @@ export function CaseIntelligence() {
                 <Activity className="w-5 h-5 text-accent" /> Family Explanation
                 <span className="text-xs font-normal text-muted-foreground normal-case ml-2">Language: {c.preferred_language}</span>
               </h2>
-              <div className="p-6 rounded border border-border bg-card shadow-sm text-primary leading-relaxed">
-                {explanation.explanation as string}
+              <div className="space-y-4">
+                <div className="p-6 rounded border border-border bg-card shadow-sm text-foreground leading-relaxed">
+                  {explanation.explanation as string}
+                </div>
+                
+                {explanation.english_translation && explanation.english_translation !== explanation.explanation && (
+                  <div className="p-5 rounded border border-border bg-muted text-muted-foreground leading-relaxed relative">
+                    <div className="absolute -top-2.5 left-4 px-2 py-0.5 bg-background border border-border rounded text-[10px] uppercase tracking-widest text-accent font-medium">
+                      English Translation
+                    </div>
+                    <div className="pt-2 text-sm">
+                      {explanation.english_translation as string}
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
           )}
@@ -369,6 +418,15 @@ export function CaseIntelligence() {
           {/* Document Readiness */}
           <section className="p-6 rounded border border-border bg-card shadow-sm space-y-6">
             <h2 className="text-lg font-medium tracking-tight uppercase text-primary">Document Readiness</h2>
+
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              style={{ display: 'none' }} 
+              accept=".pdf,image/png,image/jpeg,image/jpg" 
+              onChange={handleFileChange} 
+            />
+
             <div className="space-y-3">
               {(c.required_docs || []).map((doc: string) => {
                 const isPresent = (c.present_docs || []).includes(doc);
@@ -403,7 +461,10 @@ export function CaseIntelligence() {
               <div className="mt-4 p-4 bg-accent/5 border border-accent/10 rounded-sm">
                 <div className="text-xs font-medium text-accent uppercase tracking-wider mb-2">Action Required</div>
                 <p className="text-xs text-muted-foreground mb-3">Upload missing documents to trigger the Completeness Agent and unlock the drafting pipeline.</p>
-                <button className="w-full py-2 bg-secondary/50 hover:bg-secondary text-primary text-xs font-medium rounded transition-colors flex items-center justify-center gap-2">
+                <button 
+                  onClick={generatePDF}
+                  className="w-full py-2 bg-secondary/50 hover:bg-secondary text-primary text-xs font-medium rounded transition-colors flex items-center justify-center gap-2"
+                >
                   <Download className="w-3 h-3" /> Generate Request PDF
                 </button>
               </div>

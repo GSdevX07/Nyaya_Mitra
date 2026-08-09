@@ -69,7 +69,7 @@ interface CaseDetail {
   notification: { alert_level: string; dispatched_message: string };
   retrieval: { retrieved_statutes: string };
   draft: { drafted_document: string };
-  explanation: { explanation: string; language: string };
+  explanation: { explanation: string; language: string; english_translation?: string };
   status_tracking: { current_status: string; last_updated: string };
   draft_ready: boolean;
   agent_activity_log: LogEntry[];
@@ -331,11 +331,26 @@ function ExplanationTab({ detail }: { detail: CaseDetail }) {
         <Languages className="w-3.5 h-3.5" />
         Language code: <span className="text-primary font-mono">{explanation.language}</span>
       </div>
-      <div className="p-5 rounded bg-card shadow-sm border border-border">
-        <p className="text-primary leading-relaxed text-sm whitespace-pre-wrap">
-          {explanation.explanation}
-        </p>
+      
+      <div className="space-y-4">
+        <div className="p-5 rounded bg-card shadow-sm border border-border">
+          <p className="text-primary leading-relaxed text-sm whitespace-pre-wrap">
+            {explanation.explanation}
+          </p>
+        </div>
+
+        {explanation.english_translation && explanation.english_translation !== explanation.explanation && (
+          <div className="p-5 rounded border border-border bg-muted text-muted-foreground leading-relaxed relative">
+            <div className="absolute -top-2.5 left-4 px-2 py-0.5 bg-background border border-border rounded text-[10px] uppercase tracking-widest text-accent font-medium">
+              English Translation
+            </div>
+            <p className="pt-2 text-sm whitespace-pre-wrap">
+              {explanation.english_translation}
+            </p>
+          </div>
+        )}
       </div>
+
       <p className="text-xs text-muted-foreground">
         This explanation is generated in the prisoner's preferred language and is suitable for reading aloud to family members.
       </p>

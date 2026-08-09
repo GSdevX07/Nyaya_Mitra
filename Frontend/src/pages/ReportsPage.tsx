@@ -66,15 +66,15 @@ export function ReportsPage() {
   return (
     <div className="p-4 md:p-8 w-full space-y-8 animate-in fade-in duration-300">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/5 pb-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border pb-6">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-accent/10 text-accent border border-accent/20">
+            <span className="px-2.5 py-0.5 rounded-sm text-xs font-semibold bg-accent/10 text-accent border border-accent/20">
               Legal Operations Intelligence
             </span>
             <span className="text-xs text-muted-foreground font-mono">System Analytics & DLSA Impact</span>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Legal Analytics & Population Reports</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-primary">Legal Analytics & Population Reports</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Impact metrics covering Section 479 BNSS relief, detention reduction, and DLSA legal aid speedup.
           </p>
@@ -83,43 +83,43 @@ export function ReportsPage() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 space-y-2">
+        <div className="p-6 rounded bg-card shadow-sm border border-border space-y-2">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-xs">Total Undertrials</span>
             <Users className="w-4 h-4 text-accent" />
           </div>
-          <div className="text-3xl font-bold text-white">{overview.total_undertrials_monitored}</div>
-          <div className="text-xs text-emerald-400 font-medium flex items-center gap-1">
+          <div className="text-3xl font-bold text-primary">{overview.total_undertrials_monitored}</div>
+          <div className="text-xs text-foreground font-medium flex items-center gap-1">
             <TrendingUp className="w-3 h-3" /> 100% Synthetic Monitored
           </div>
         </div>
 
-        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 space-y-2">
+        <div className="p-6 rounded bg-card shadow-sm border border-border space-y-2">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-xs">BNSS 479 Eligible</span>
-            <Shield className="w-4 h-4 text-emerald-400" />
+            <Shield className="w-4 h-4 text-foreground" />
           </div>
-          <div className="text-3xl font-bold text-white">{overview.bnss_479_eligible}</div>
+          <div className="text-3xl font-bold text-primary">{overview.bnss_479_eligible}</div>
           <div className="text-xs text-muted-foreground">
             {Math.round((overview.bnss_479_eligible / overview.total_undertrials_monitored) * 100)}% ready for bail motion
           </div>
         </div>
 
-        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 space-y-2">
+        <div className="p-6 rounded bg-card shadow-sm border border-border space-y-2">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-xs">Avg Custody Duration</span>
-            <Clock className="w-4 h-4 text-amber-400" />
+            <Clock className="w-4 h-4 text-muted-foreground" />
           </div>
-          <div className="text-3xl font-bold text-white">{overview.average_custody_days} <span className="text-sm font-normal text-muted-foreground">days</span></div>
+          <div className="text-3xl font-bold text-primary">{overview.average_custody_days} <span className="text-sm font-normal text-muted-foreground">days</span></div>
           <div className="text-xs text-muted-foreground">Across all facilities</div>
         </div>
 
-        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 space-y-2">
+        <div className="p-6 rounded bg-card shadow-sm border border-border space-y-2">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-xs">Legal Time Saved</span>
             <Award className="w-4 h-4 text-accent" />
           </div>
-          <div className="text-3xl font-bold text-white">{overview.estimated_hours_saved_by_ai} <span className="text-sm font-normal text-muted-foreground">hrs</span></div>
+          <div className="text-3xl font-bold text-primary">{overview.estimated_hours_saved_by_ai} <span className="text-sm font-normal text-muted-foreground">hrs</span></div>
           <div className="text-xs text-accent font-medium">Automated petition drafting</div>
         </div>
       </div>
@@ -127,21 +127,21 @@ export function ReportsPage() {
       {/* Analytics Breakdown Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Card 1: Facility Breakdown */}
-        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 space-y-4 backdrop-blur-md">
+        <div className="p-6 rounded bg-card shadow-sm border border-border space-y-4 backdrop-blur-md">
           <div className="flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-accent" />
-            <h3 className="text-base font-semibold text-white">Facility Inmate Breakdown</h3>
+            <h3 className="text-base font-semibold text-primary">Facility Inmate Breakdown</h3>
           </div>
           <div className="space-y-3">
             {court_jurisdiction_breakdown.map(item => (
               <div key={item.jail} className="space-y-1">
                 <div className="flex justify-between text-xs">
-                  <span className="text-white font-medium">{item.jail}</span>
+                  <span className="text-primary font-medium">{item.jail}</span>
                   <span className="text-muted-foreground">{item.count} cases</span>
                 </div>
-                <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                <div className="w-full h-2 bg-secondary/50 rounded-sm overflow-hidden">
                   <div
-                    className="h-full bg-accent rounded-full"
+                    className="h-full bg-accent rounded-sm"
                     style={{
                       width: `${(item.count / overview.total_undertrials_monitored) * 100}%`,
                     }}
@@ -153,21 +153,21 @@ export function ReportsPage() {
         </div>
 
         {/* Card 2: Eligibility Category Distribution */}
-        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 space-y-4 backdrop-blur-md">
+        <div className="p-6 rounded bg-card shadow-sm border border-border space-y-4 backdrop-blur-md">
           <div className="flex items-center gap-2">
             <PieChart className="w-5 h-5 text-accent" />
-            <h3 className="text-base font-semibold text-white">Eligibility Status Breakdown</h3>
+            <h3 className="text-base font-semibold text-primary">Eligibility Status Breakdown</h3>
           </div>
           <div className="space-y-3">
             {eligibility_distribution.map(item => (
               <div key={item.category} className="space-y-1">
                 <div className="flex justify-between text-xs">
-                  <span className="text-white font-medium">{item.category}</span>
+                  <span className="text-primary font-medium">{item.category}</span>
                   <span className="text-muted-foreground">{item.count} cases</span>
                 </div>
-                <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                <div className="w-full h-2 bg-secondary/50 rounded-sm overflow-hidden">
                   <div
-                    className="h-full bg-emerald-500 rounded-full"
+                    className="h-full bg-accent rounded-sm"
                     style={{
                       width: `${(item.count / overview.total_undertrials_monitored) * 100}%`,
                     }}

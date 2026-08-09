@@ -45,10 +45,10 @@ export function InkStamp({
   }, [text, variant]);
 
   const variantStyles = {
-    red: "text-[#A85043] border-[#A85043]/80 bg-[#A85043]/10 shadow-[0_0_10px_rgba(168,80,67,0.1)]",
-    sage: "text-[#8CA189] border-[#8CA189]/80 bg-[#8CA189]/10 shadow-[0_0_10px_rgba(140,161,137,0.1)]",
-    ochre: "text-[#BB8A34] border-[#BB8A34]/80 bg-[#BB8A34]/10 shadow-[0_0_10px_rgba(187,138,52,0.1)]",
-    navy: "text-[#3B82F6] border-[#3B82F6]/80 bg-[#3B82F6]/10 shadow-[0_0_10px_rgba(59,130,246,0.1)]",
+    red: "text-primary border-primary/50 bg-secondary shadow-sm",
+    sage: "text-muted-foreground border-muted bg-secondary/30 shadow-sm",
+    ochre: "text-accent border-accent/45 bg-muted/20 shadow-sm",
+    navy: "text-foreground border-foreground/30 bg-muted shadow-sm",
   };
 
   return (

@@ -17,11 +17,15 @@ from app.models.schemas import CaseRecord, CaseState, UrgencyFlags
 
 # Load environment variables
 load_dotenv()
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://placeholder-project.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "placeholder-key")
 
 # Initialize Supabase Client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+except Exception as e:
+    print(f"Warning: Could not connect to Supabase ({e}). Ensure SUPABASE_URL and SUPABASE_SERVICE_KEY are set in backend/.env.")
+    supabase = None
 
 
 def init_db():

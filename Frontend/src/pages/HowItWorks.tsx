@@ -55,24 +55,24 @@ const pipelineSteps = [
 
 export function HowItWorks() {
   return (
-    <div className="min-h-screen bg-[#0a0a0b] text-foreground font-sans relative overflow-hidden p-6 md:p-12">
+    <div className="min-h-screen bg-background text-foreground font-sans relative overflow-hidden p-6 md:p-12">
       {/* Background Glows */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-96 bg-accent/10 blur-[150px] rounded-full pointer-events-none" />
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-96 bg-accent/10 blur-[150px] rounded-sm pointer-events-none" />
 
       <div className="w-full space-y-12 relative z-10">
         
         {/* Navigation Bar */}
-        <div className="flex items-center justify-between border-b border-white/10 pb-6">
+        <div className="flex items-center justify-between border-b border-border pb-6">
           <div className="flex items-center gap-4">
             <Link
               to="/"
-              className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-white transition-colors bg-white/5 border border-white/10 px-4 py-2 rounded-lg"
+              className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors bg-secondary/50 border border-border px-4 py-2 rounded-sm"
             >
               <ArrowLeft className="w-4 h-4" /> Back to Home
             </Link>
             <Link
               to="/dashboard"
-              className="inline-flex items-center gap-2 text-sm text-accent hover:text-accent/80 transition-colors bg-accent/10 border border-accent/20 px-4 py-2 rounded-lg font-medium"
+              className="inline-flex items-center gap-2 text-sm text-accent hover:text-accent/80 transition-colors bg-accent/10 border border-accent/20 px-4 py-2 rounded-sm font-medium"
             >
               Command Center
             </Link>
@@ -84,10 +84,10 @@ export function HowItWorks() {
 
         {/* Hero Banner */}
         <div className="text-center space-y-4 max-w-3xl mx-auto pt-6">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-accent/20 bg-accent/10 text-accent text-xs font-semibold tracking-widest uppercase">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-sm border border-accent/20 bg-accent/10 text-accent text-xs font-semibold tracking-widest uppercase">
             <Activity className="w-4 h-4 animate-pulse" /> End-to-End Operational Pipeline
           </div>
-          <h1 className="text-4xl md:text-6xl font-bold tracking-tight text-white">
+          <h1 className="text-4xl md:text-6xl font-bold tracking-tight text-primary">
             How Nyaya Mitra Works
           </h1>
           <p className="text-lg text-muted-foreground leading-relaxed">
@@ -103,11 +103,11 @@ export function HowItWorks() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.1, duration: 0.5 }}
-              className="p-8 rounded-2xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.04] hover:border-accent/40 transition-all group relative flex flex-col justify-between"
+              className="p-8 rounded border border-border bg-card shadow-sm hover:bg-card/80 hover:border-accent/40 transition-all group relative flex flex-col justify-between"
             >
               <div className="space-y-4">
                 <div className="flex justify-between items-start">
-                  <div className="w-12 h-12 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent group-hover:bg-accent/20 transition-colors">
+                  <div className="w-12 h-12 rounded bg-accent/10 border border-accent/20 flex items-center justify-center text-accent group-hover:bg-accent/20 transition-colors">
                     <step.icon className="w-6 h-6" />
                   </div>
                   <span className="text-2xl font-mono font-bold text-white/20 group-hover:text-accent transition-colors">
@@ -118,7 +118,7 @@ export function HowItWorks() {
                   <span className="text-[10px] font-bold text-accent uppercase tracking-widest bg-accent/10 border border-accent/20 px-2 py-0.5 rounded">
                     {step.badge}
                   </span>
-                  <h3 className="text-xl font-bold text-white mt-3 mb-2">{step.title}</h3>
+                  <h3 className="text-xl font-bold text-primary mt-3 mb-2">{step.title}</h3>
                   <p className="text-sm text-muted-foreground leading-relaxed">{step.desc}</p>
                 </div>
               </div>
@@ -127,18 +127,18 @@ export function HowItWorks() {
         </div>
 
         {/* Bottom Call to Action */}
-        <div className="p-8 rounded-2xl border border-white/10 bg-gradient-to-r from-accent/10 via-white/[0.02] to-transparent text-center space-y-6">
-          <h2 className="text-2xl font-bold text-white">Ready to explore the live dashboard?</h2>
+        <div className="p-8 rounded border border-border bg-gradient-to-r from-accent/10 via-white/[0.02] to-transparent text-center space-y-6">
+          <h2 className="text-2xl font-bold text-primary">Ready to explore the live dashboard?</h2>
           <div className="flex flex-wrap items-center justify-center gap-4">
             <Link
               to="/dashboard"
-              className="px-8 py-3.5 bg-white text-black font-semibold rounded-xl hover:bg-white/90 transition-all inline-flex items-center gap-2 text-sm shadow-lg shadow-white/5"
+              className="px-8 py-3.5 bg-card text-black font-semibold rounded hover:bg-card transition-all inline-flex items-center gap-2 text-sm shadow-lg shadow-primary/3"
             >
               Open Command Center <ArrowRight className="w-4 h-4" />
             </Link>
             <Link
               to="/"
-              className="px-8 py-3.5 bg-white/5 border border-white/10 text-white font-medium rounded-xl hover:bg-white/10 transition-all text-sm"
+              className="px-8 py-3.5 bg-secondary/50 border border-border text-primary font-medium rounded hover:bg-secondary transition-all text-sm"
             >
               Return to Landing Page
             </Link>

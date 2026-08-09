@@ -90,17 +90,17 @@ const stagger: Variants = {
 // ── Status badge colours ──────────────────────────────────────────────────────
 
 const STATUS_COLORS: Record<string, string> = {
-  RUNNING:  "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  DONE:     "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  SKIPPED:  "bg-white/5 text-muted-foreground border-white/10",
+  RUNNING:  "bg-blue-500/15 text-muted-foreground border-blue-500/30",
+  DONE:     "bg-accent/15 text-foreground border-emerald-500/30",
+  SKIPPED:  "bg-secondary/50 text-muted-foreground border-border",
 };
 
 const COURT_STATUS_COLORS: Record<string, string> = {
-  "Pending Review":     "text-amber-400",
-  "Filed":              "text-blue-400",
+  "Pending Review":     "text-muted-foreground",
+  "Filed":              "text-muted-foreground",
   "Hearing Scheduled":  "text-purple-400",
-  "Order Passed":       "text-emerald-400",
-  "Released":           "text-emerald-500",
+  "Order Passed":       "text-foreground",
+  "Released":           "text-foreground",
 };
 
 import { InkStamp } from "@/components/ui/InkStamp";
@@ -129,8 +129,8 @@ function QueueCard({
         onClick={onClick}
         className={`cursor-pointer transition-all duration-200 border relative overflow-hidden dog-ear-fold
           ${isSelected
-            ? "border-amber-500/50 bg-[#141B26] shadow-lg shadow-black/40"
-            : "border-white/10 bg-[#0F141C]/80 hover:border-white/20 hover:bg-[#141A24]"
+            ? "border-amber-500/50 bg-[#141B26] shadow-lg shadow-primary/5"
+            : "border-border bg-[#0F141C]/80 hover:border-border hover:bg-[#141A24]"
           }`}
       >
         {/* Red urgency thread on left edge */}
@@ -150,7 +150,7 @@ function QueueCard({
                   <InkStamp text="HIGH PRIORITY" variant="red" />
                 )}
               </div>
-              <p className="text-base font-serif font-semibold text-white tracking-tight truncate">
+              <p className="text-base font-serif font-semibold text-primary tracking-tight truncate">
                 {c.name}
               </p>
               <p className="text-xs text-muted-foreground font-mono mt-0.5">
@@ -184,8 +184,8 @@ function QueueCard({
         </CardContent>
 
         {isSelected && isLoading && (
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center">
-            <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
+          <div className="absolute inset-0 bg-primary backdrop-blur-xs flex items-center justify-center">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
           </div>
         )}
       </Card>
@@ -199,18 +199,18 @@ function OverviewTab({ detail }: { detail: CaseDetail }) {
   return (
     <div className="space-y-4">
       {/* Eligibility */}
-      <Card className="border-white/8 bg-white/[0.02]">
+      <Card className="border-border bg-card shadow-sm">
         <CardHeader className="pb-2 pt-4 px-4">
           <CardTitle className="text-sm flex items-center gap-2">
-            <Scale className="w-4 h-4 text-blue-400" /> Eligibility — Section 479 BNSS
+            <Scale className="w-4 h-4 text-muted-foreground" /> Eligibility — Section 479 BNSS
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4 space-y-2">
           <div className="flex items-center gap-2">
             {elig.eligible
-              ? <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-              : <XCircle className="w-5 h-5 text-red-400" />}
-            <span className={`font-semibold ${elig.eligible ? "text-emerald-400" : "text-red-400"}`}>
+              ? <CheckCircle2 className="w-5 h-5 text-foreground" />
+              : <XCircle className="w-5 h-5 text-destructive" />}
+            <span className={`font-semibold ${elig.eligible ? "text-foreground" : "text-destructive"}`}>
               {elig.eligible ? "ELIGIBLE" : "NOT YET ELIGIBLE"}
             </span>
           </div>
@@ -221,8 +221,8 @@ function OverviewTab({ detail }: { detail: CaseDetail }) {
               { label: "Required", value: elig.required_custody_days },
               { label: "Overdue", value: elig.days_overdue, highlight: elig.days_overdue > 0 },
             ].map(({ label, value, highlight }) => (
-              <div key={label} className="p-2 rounded-lg bg-white/[0.03] text-center">
-                <div className={`text-lg font-bold ${highlight ? "text-red-400" : "text-white"}`}>{value}</div>
+              <div key={label} className="p-2 rounded-sm bg-card/70 text-center">
+                <div className={`text-lg font-bold ${highlight ? "text-destructive" : "text-primary"}`}>{value}</div>
                 <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</div>
               </div>
             ))}
@@ -231,25 +231,25 @@ function OverviewTab({ detail }: { detail: CaseDetail }) {
       </Card>
 
       {/* Completeness */}
-      <Card className="border-white/8 bg-white/[0.02]">
+      <Card className="border-border bg-card shadow-sm">
         <CardHeader className="pb-2 pt-4 px-4">
           <CardTitle className="text-sm flex items-center gap-2">
-            <FileText className="w-4 h-4 text-amber-400" /> Document Completeness
+            <FileText className="w-4 h-4 text-muted-foreground" /> Document Completeness
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
           {comp.is_complete ? (
-            <div className="flex items-center gap-2 text-emerald-400 text-sm">
+            <div className="flex items-center gap-2 text-foreground text-sm">
               <CheckCircle2 className="w-4 h-4" /> All required documents are present.
             </div>
           ) : (
             <div className="space-y-2">
-              <p className="text-sm text-amber-400 flex items-center gap-2">
+              <p className="text-sm text-muted-foreground flex items-center gap-2">
                 <AlertCircle className="w-4 h-4" /> Missing documents:
               </p>
               <ul className="space-y-1">
                 {comp.missing_docs.map((doc) => (
-                  <li key={doc} className="text-xs px-3 py-1.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 font-mono">
+                  <li key={doc} className="text-xs px-3 py-1.5 rounded bg-muted border border-border text-muted-foreground font-mono">
                     {doc}
                   </li>
                 ))}
@@ -261,10 +261,10 @@ function OverviewTab({ detail }: { detail: CaseDetail }) {
 
       {/* Status & Notification */}
       <div className="grid grid-cols-2 gap-4">
-        <Card className="border-white/8 bg-white/[0.02]">
+        <Card className="border-border bg-card shadow-sm">
           <CardContent className="p-4">
             <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1"><Gavel className="w-3 h-3" /> Court Status</div>
-            <div className={`font-semibold text-sm ${COURT_STATUS_COLORS[st.current_status] ?? "text-white"}`}>
+            <div className={`font-semibold text-sm ${COURT_STATUS_COLORS[st.current_status] ?? "text-primary"}`}>
               {st.current_status}
             </div>
             <div className="text-[10px] text-muted-foreground mt-1">
@@ -272,7 +272,7 @@ function OverviewTab({ detail }: { detail: CaseDetail }) {
             </div>
           </CardContent>
         </Card>
-        <Card className="border-white/8 bg-white/[0.02]">
+        <Card className="border-border bg-card shadow-sm">
           <CardContent className="p-4">
             <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Alert Level</div>
             <Badge
@@ -294,15 +294,15 @@ function DraftTab({ detail, onApprove, approving }: { detail: CaseDetail; onAppr
     <div className="space-y-4">
       {detail.draft_ready ? (
         <>
-          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/8">
-            <pre className="whitespace-pre-wrap text-sm text-white/80 font-mono leading-relaxed">
+          <div className="p-4 rounded bg-card shadow-sm border border-border">
+            <pre className="whitespace-pre-wrap text-sm text-muted-foreground font-mono leading-relaxed">
               {detail.draft?.drafted_document?.replaceAll("**", "")}
             </pre>
           </div>
           <button
             onClick={onApprove}
             disabled={approving}
-            className="w-full py-3 px-6 rounded-xl bg-emerald-500/90 hover:bg-emerald-500 text-white font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="w-full py-3 px-6 rounded bg-accent/90 hover:bg-accent text-primary font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {approving
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Filing...</>
@@ -311,11 +311,11 @@ function DraftTab({ detail, onApprove, approving }: { detail: CaseDetail; onAppr
           </button>
         </>
       ) : (
-        <div className="p-8 text-center rounded-xl border border-white/8 bg-white/[0.02]">
+        <div className="p-8 text-center rounded border border-border bg-card shadow-sm">
           <XCircle className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
           <p className="text-muted-foreground text-sm">
-            Draft not available. Case must be <span className="text-white">eligible</span> and{" "}
-            <span className="text-white">documents complete</span> before a bail application can be drafted.
+            Draft not available. Case must be <span className="text-primary">eligible</span> and{" "}
+            <span className="text-primary">documents complete</span> before a bail application can be drafted.
           </p>
         </div>
       )}
@@ -329,10 +329,10 @@ function ExplanationTab({ detail }: { detail: CaseDetail }) {
     <div className="space-y-4">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Languages className="w-3.5 h-3.5" />
-        Language code: <span className="text-white font-mono">{explanation.language}</span>
+        Language code: <span className="text-primary font-mono">{explanation.language}</span>
       </div>
-      <div className="p-5 rounded-xl bg-white/[0.02] border border-white/8">
-        <p className="text-white/90 leading-relaxed text-sm whitespace-pre-wrap">
+      <div className="p-5 rounded bg-card shadow-sm border border-border">
+        <p className="text-primary leading-relaxed text-sm whitespace-pre-wrap">
           {explanation.explanation}
         </p>
       </div>
@@ -352,14 +352,14 @@ function AgentLogTab({ log }: { log: LogEntry[] }) {
           initial={{ opacity: 0, x: -8 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: i * 0.04 }}
-          className="flex items-start gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/5"
+          className="flex items-start gap-3 p-3 rounded-sm bg-card shadow-sm border border-border"
         >
-          <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border font-mono uppercase tracking-wider ${STATUS_COLORS[entry.status] ?? "bg-white/5 text-white border-white/10"}`}>
+          <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border font-mono uppercase tracking-wider ${STATUS_COLORS[entry.status] ?? "bg-secondary/50 text-primary border-border"}`}>
             {entry.status}
           </span>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium text-white">{entry.agent}</span>
+              <span className="text-sm font-medium text-primary">{entry.agent}</span>
               <span className="text-[10px] text-muted-foreground font-mono shrink-0">
                 {new Date(entry.timestamp).toLocaleTimeString()}
               </span>
@@ -430,7 +430,7 @@ export function CommandCenter() {
 
         {/* Header */}
         <motion.div variants={fadeUp} className="space-y-1">
-          <h1 className="text-3xl font-serif font-semibold tracking-tight text-white">Lawyer Command Centre</h1>
+          <h1 className="text-3xl font-serif font-semibold tracking-tight text-primary">Lawyer Command Centre</h1>
           <p className="text-muted-foreground text-sm font-sans">
             Prioritized undertrial queue — powered by the Nyaya Mitra agent pipeline.
           </p>
@@ -478,9 +478,9 @@ export function CommandCenter() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="h-full flex flex-col items-center justify-center text-center p-12 rounded-xl border border-dashed border-white/10 bg-white/[0.01]"
+                  className="h-full flex flex-col items-center justify-center text-center p-12 rounded border border-2 border-dashed border-border bg-card shadow-sm"
                 >
-                  <Scale className="w-10 h-10 text-muted-foreground/40 mb-4" />
+                  <Scale className="w-10 h-10 text-muted-foreground mb-4" />
                   <p className="text-muted-foreground text-sm max-w-xs">
                     Select a case from the queue to view the full agent pipeline report.
                   </p>
@@ -491,11 +491,11 @@ export function CommandCenter() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="h-full flex flex-col items-center justify-center gap-4 rounded-xl border border-white/8 bg-white/[0.02]"
+                  className="h-full flex flex-col items-center justify-center gap-4 rounded border border-border bg-card shadow-sm"
                 >
-                  <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
+                  <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
                   <p className="text-muted-foreground text-sm">Running agent pipeline…</p>
-                  <div className="flex flex-col gap-1.5 text-xs text-muted-foreground/60">
+                  <div className="flex flex-col gap-1.5 text-xs text-foreground/75">
                     {["EligibilityAgent", "CompletenessAgent", "PrioritizationAgent", "DraftingAgent", "ExplainerAgent"].map((a) => (
                       <span key={a} className="flex items-center gap-1.5">
                         <Bot className="w-3 h-3" /> {a}
@@ -534,7 +534,7 @@ export function CommandCenter() {
                         initial={{ opacity: 0, y: -8 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0 }}
-                        className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-sm flex items-center gap-2"
+                        className="p-3 rounded-sm bg-muted border border-emerald-500/30 text-foreground text-sm flex items-center gap-2"
                       >
                         <ShieldCheck className="w-4 h-4 shrink-0" /> {approveMsg}
                       </motion.div>
@@ -543,7 +543,7 @@ export function CommandCenter() {
 
                   {/* Tabbed detail */}
                   <Tabs defaultValue="overview" className="w-full">
-                    <TabsList className="w-full grid grid-cols-4 bg-white/[0.04] border border-white/8">
+                    <TabsList className="w-full grid grid-cols-4 bg-card/80 border border-border">
                       <TabsTrigger value="overview" className="text-xs gap-1.5">
                         <Scale className="w-3.5 h-3.5" /> Overview
                       </TabsTrigger>

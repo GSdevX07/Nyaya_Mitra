@@ -290,22 +290,32 @@ function OverviewTab({ detail }: { detail: CaseDetail }) {
 }
 
 function DraftTab({ detail, onApprove, approving }: { detail: CaseDetail; onApprove: () => void; approving: boolean }) {
+  const [editableText, setEditableText] = useState(detail.draft?.drafted_document?.replaceAll("**", "") || "");
+
+  useEffect(() => {
+    setEditableText(detail.draft?.drafted_document?.replaceAll("**", "") || "");
+  }, [detail.draft?.drafted_document]);
+
   return (
     <div className="space-y-4">
       {detail.draft_ready ? (
         <>
           <div className="p-4 rounded bg-card shadow-sm border border-border">
-            <pre className="whitespace-pre-wrap text-sm text-muted-foreground font-mono leading-relaxed">
-              {detail.draft?.drafted_document?.replaceAll("**", "")}
-            </pre>
+            <textarea
+              value={editableText}
+              onChange={(e) => setEditableText(e.target.value)}
+              className="w-full h-[400px] whitespace-pre-wrap text-sm text-muted-foreground font-mono leading-relaxed bg-transparent focus:outline-none focus:ring-1 focus:ring-accent resize-y"
+            />
           </div>
           <button
             onClick={onApprove}
-            disabled={approving}
+            disabled={approving || detail.status_tracking.current_status === "FILED"}
             className="w-full py-3 px-6 rounded bg-accent/90 hover:bg-accent text-primary font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {approving
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Filing...</>
+              : detail.status_tracking.current_status === "FILED" 
+              ? <><ShieldCheck className="w-4 h-4" /> Filed Successfully</>
               : <><ShieldCheck className="w-4 h-4" /> Approve &amp; File</>
             }
           </button>

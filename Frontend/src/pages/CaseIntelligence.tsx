@@ -26,6 +26,7 @@ export function CaseIntelligence() {
   const [approvalDone, setApprovalDone] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
   const [editableDraft, setEditableDraft] = useState<string>("");
+  const [rejectStatus, setRejectStatus] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [pendingDocType, setPendingDocType] = useState<string | null>(null);
@@ -560,11 +561,27 @@ export function CaseIntelligence() {
                       <p className="text-xs text-destructive text-center">Upload all missing documents before approving.</p>
                     )}
                     <div className="grid grid-cols-2 gap-2">
-                      <button className="py-2 bg-secondary/50 hover:bg-secondary text-primary font-medium rounded transition-colors text-xs flex justify-center items-center gap-2">
-                        <PenTool className="w-3 h-3" /> Request Changes
+                      <button 
+                        onClick={() => setRejectStatus("CHANGES_REQUESTED")}
+                        disabled={rejectStatus !== null || approvalDone || currentStatus === "FILED" || currentStatus === "APPROVED"}
+                        className={`py-2 font-medium rounded transition-colors text-xs flex justify-center items-center gap-2 ${
+                          rejectStatus === "CHANGES_REQUESTED" 
+                            ? "bg-secondary text-primary cursor-not-allowed" 
+                            : "bg-secondary/50 hover:bg-secondary text-primary disabled:opacity-40 disabled:cursor-not-allowed"
+                        }`}
+                      >
+                        <PenTool className="w-3 h-3" /> {rejectStatus === "CHANGES_REQUESTED" ? "Changes Requested" : "Request Changes"}
                       </button>
-                      <button className="py-2 bg-destructive/10 hover:bg-destructive/20 text-destructive font-medium rounded transition-colors text-xs flex justify-center items-center gap-2">
-                        <X className="w-3 h-3" /> Reject
+                      <button 
+                        onClick={() => setRejectStatus("REJECTED")}
+                        disabled={rejectStatus !== null || approvalDone || currentStatus === "FILED" || currentStatus === "APPROVED"}
+                        className={`py-2 font-medium rounded transition-colors text-xs flex justify-center items-center gap-2 ${
+                          rejectStatus === "REJECTED" 
+                            ? "bg-destructive text-destructive-foreground cursor-not-allowed" 
+                            : "bg-destructive/10 hover:bg-destructive/20 text-destructive disabled:opacity-40 disabled:cursor-not-allowed"
+                        }`}
+                      >
+                        <X className="w-3 h-3" /> {rejectStatus === "REJECTED" ? "Rejected" : "Reject"}
                       </button>
                     </div>
                   </div>

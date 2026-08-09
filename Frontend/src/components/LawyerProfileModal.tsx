@@ -252,7 +252,7 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
             </span>
             <button
               onClick={onClose}
-              className="px-5 py-2 rounded bg-primary text-primary-foreground font-semibold text-xs hover:bg-amber-400 transition-all shadow-md shadow-amber-500/10"
+              className="px-5 py-2 rounded bg-primary text-primary-foreground font-semibold text-xs hover:bg-primary/90 transition-all shadow-md shadow-amber-500/10"
             >
               Done
             </button>

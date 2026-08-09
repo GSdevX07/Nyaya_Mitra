@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.models.schemas import CaseRecord
+from app.database import add_notification
 
 
 # ── Alert level thresholds ───────────────────────────────────────────────────
@@ -73,8 +74,13 @@ def trigger_notification(case: CaseRecord, urgency_score: int) -> dict:
     print(f"  To:      DLSA Lawyer Dashboard")
     print(f"  Message: {message}")
     print("------------------------------")
+    
+    # ── 4. Save to database ──────────────────────────────────────────────────
+    notif_type = "urgent" if alert_level == "HIGH" else "info"
+    title = "High Priority Bail Eligibility Flagged" if alert_level == "HIGH" else "Standard Update"
+    add_notification(case.case_id, title, message, notif_type)
 
-    # ── 4. Build and return structured log record ────────────────────────────
+    # ── 5. Build and return structured log record ────────────────────────────
     timestamp = datetime.now(tz=timezone.utc).isoformat()
 
     return {

@@ -46,6 +46,17 @@ def init_db():
                 created_at TEXT NOT NULL
             )
         ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS notifications (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                message TEXT NOT NULL,
+                type TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                is_read INTEGER DEFAULT 0
+            )
+        ''')
         
         # Check if we need to seed
         cursor = conn.execute("SELECT COUNT(*) as count FROM cases")
@@ -76,6 +87,13 @@ def _seed_db(conn):
             conn.execute(
                 "INSERT INTO evidence (evidence_id, case_id, document_type, file_name, stored_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 (evidence_id, case.case_id, doc, file_name, stored_hash, datetime.datetime.now(datetime.timezone.utc).isoformat())
+            )
+            
+        # Add a mock notification for UTP-0007 if present
+        if case.case_id == "UTP-0007":
+            conn.execute(
+                "INSERT INTO notifications (id, case_id, title, message, type, timestamp, is_read) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (f"NOTIF-{case.case_id}-mock", case.case_id, "High Priority Bail Eligibility Flagged", f"{case.case_id} has exceeded the sentence threshold.", "urgent", datetime.datetime.now(datetime.timezone.utc).isoformat(), 0)
             )
 
 def get_all_cases() -> List[CaseRecord]:
@@ -155,3 +173,20 @@ def get_evidence_item(evidence_id: str) -> dict | None:
         if row:
             return dict(row)
     return None
+
+def add_notification(case_id: str, title: str, message: str, type: str) -> str:
+    """Insert a new notification and return its generated ID."""
+    notif_id = f"NOTIF-{case_id}-{datetime.datetime.now(datetime.timezone.utc).strftime('%H%M%S')}"
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    with get_db_connection() as conn:
+        conn.execute(
+            "INSERT INTO notifications (id, case_id, title, message, type, timestamp, is_read) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (notif_id, case_id, title, message, type, timestamp, 0)
+        )
+    return notif_id
+
+def get_all_notifications() -> List[dict]:
+    """Retrieve all notifications sorted by newest first."""
+    with get_db_connection() as conn:
+        cursor = conn.execute("SELECT * FROM notifications ORDER BY timestamp DESC")
+        return [dict(row) for row in cursor.fetchall()]

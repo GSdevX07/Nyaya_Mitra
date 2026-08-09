@@ -37,7 +37,7 @@ from app.agents.eligibility_agent import evaluate_eligibility
 from app.models.schemas import CaseRecord, UrgencyFlags, CaseState
 from app.database import (
     init_db, get_all_cases, get_case, update_case_status, update_case_documents,
-    add_evidence, get_all_evidence, get_evidence_item
+    add_evidence, get_all_evidence, get_evidence_item, get_all_notifications
 )
 
 
@@ -576,44 +576,17 @@ def get_reports():
 
 @app.get("/notifications", tags=["Notifications"])
 def get_notifications():
-    """Retrieve system-wide alerts and notification feed."""
-    notifications = [
-        {
-            "id": "NOTIF-01",
-            "title": "High Priority Bail Eligibility Flagged",
-            "message": "UTP-0007 (Senior Citizen, 63 yrs) has served 410 days — exceeds 1/3 threshold (244 days). BNSS 479 eligible.",
-            "timestamp": "10 mins ago",
-            "type": "urgent",
-            "case_id": "UTP-0007",
-            "read": False,
-        },
-        {
-            "id": "NOTIF-02",
-            "title": "Medical Priority Alert",
-            "message": "UTP-0021 has documented health flag and requires immediate bail motion review.",
-            "timestamp": "25 mins ago",
-            "type": "warning",
-            "case_id": "UTP-0021",
-            "read": False,
-        },
-        {
-            "id": "NOTIF-03",
-            "title": "Missing Charge Sheet Notice",
-            "message": "UTP-0015 is eligible under BNSS 479 but missing Charge Sheet document.",
-            "timestamp": "1 hour ago",
-            "type": "info",
-            "case_id": "UTP-0015",
-            "read": True,
-        },
-        {
-            "id": "NOTIF-04",
-            "title": "Bail Hearing Scheduled",
-            "message": "Hearing for UTP-0001 scheduled on 2026-08-14 at Chief Judicial Magistrate Court.",
-            "timestamp": "2 hours ago",
-            "type": "success",
-            "case_id": "UTP-0001",
-            "read": True,
-        },
-    ]
+    """Retrieve system-wide alerts and notification feed from SQLite."""
+    rows = get_all_notifications()
+    notifications = []
+    for row in rows:
+        notifications.append({
+            "id": row["id"],
+            "title": row["title"],
+            "message": row["message"],
+            "timestamp": row["timestamp"],
+            "type": row["type"],
+            "case_id": row["case_id"],
+            "read": bool(row["is_read"])
+        })
     return notifications
-

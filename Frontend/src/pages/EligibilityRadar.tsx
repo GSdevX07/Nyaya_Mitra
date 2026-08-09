@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { Search, Filter, Clock, ArrowLeft, ArrowUpRight, ShieldAlert, CheckCircle, FileText, WifiOff, RefreshCw } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Search, Filter, Clock, ArrowLeft, ArrowUpRight, ShieldAlert, CheckCircle, FileText } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { fetchCases, type BackendCaseSummary } from "@/lib/api";
 type TimeframeWindow = "Today" | "7 days" | "30 days" | "90 days";
 
@@ -10,64 +10,34 @@ export function EligibilityRadar() {
   const [statusFilter, setStatusFilter] = useState<"ALL" | "OVERDUE" | "APPROACHING" | "DOCS_REQUIRED">("ALL");
   const [cases, setCases] = useState<BackendCaseSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [backendError, setBackendError] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     async function load() {
       setLoading(true);
-      setBackendError(false);
-      try {
-        const data = await fetchCases();
-        setCases(data || []);
-      } catch {
-        setBackendError(true);
-        setCases([]);
-      } finally {
-        setLoading(false);
-      }
+      const data = await fetchCases();
+      // Only show cases assigned to this lawyer
+      setCases(data.filter((c: any) => c.case.assignment_status === "ASSIGNED"));
+      setLoading(false);
     }
     load();
   }, []);
 
-  // Map backend cases — compute exact BNSS §479 threshold, days overdue, and days until threshold
-  const caseList = cases.map((c) => {
-    const isRepeat = c.case.urgency_flags?.repeat_offender;
-    const requiredDays = isRepeat
-      ? Math.ceil(c.case.max_sentence_days_for_offense / 2)
-      : Math.ceil(c.case.max_sentence_days_for_offense / 3);
-
-    const calculatedOverdue = c.case.custody_days - requiredDays;
-    const daysOverdue = c.days_overdue > 0 ? c.days_overdue : Math.max(0, calculatedOverdue);
-    const daysUntilThreshold = Math.max(0, requiredDays - c.case.custody_days);
-    const isEligible = c.days_overdue > 0 || c.case.custody_days >= requiredDays;
-
-    return {
-      id: c.case.case_id,
-      prisonerName: c.case.name,
-      offence: c.case.offense_sections.join(", "),
-      custodyDays: c.case.custody_days,
-      maxSentenceDays: c.case.max_sentence_days_for_offense,
-      requiredDays,
-      daysOverdue,
-      daysUntilThreshold,
-      isEligible,
-      urgencyScore: c.urgency_score,
-      urgency: c.urgency_score > 200 ? "URGENT" : "MEDIUM",
-      missingDocs: c.case.required_docs.filter((d) => !c.case.present_docs.includes(d)),
-      healthFlag: c.case.urgency_flags?.health_flag,
-      age: c.case.urgency_flags?.age,
-      court: c.case.jail_location,
-    };
-  });
-
-  const windowDays =
-    selectedTimeframe === "Today"
-      ? 1
-      : selectedTimeframe === "7 days"
-      ? 7
-      : selectedTimeframe === "30 days"
-      ? 30
-      : 90;
+  // Map backend cases
+  const caseList = cases.map((c) => ({
+    id: c.case.case_id,
+    prisonerName: c.case.name,
+    offence: c.case.offense_sections.join(", "),
+    custodyDays: c.case.custody_days,
+    maxSentenceDays: c.case.max_sentence_days_for_offense,
+    daysOverdue: c.days_overdue,
+    isEligible: c.case.custody_days >= Math.floor(c.case.max_sentence_days_for_offense / 2),
+    urgency: c.urgency_score > 200 ? "URGENT" : "MEDIUM",
+    missingDocs: c.case.required_docs.filter((d) => !c.case.present_docs.includes(d)),
+    healthFlag: c.case.urgency_flags.health_flag,
+    age: c.case.urgency_flags.age,
+    court: c.case.jail_location,
+  }));
 
   // Filter based on search and status filter
   const filteredCases = caseList.filter((item) => {
@@ -78,48 +48,37 @@ export function EligibilityRadar() {
 
     if (!matchesSearch) return false;
 
-    if (statusFilter === "OVERDUE") return item.isEligible;
-    if (statusFilter === "APPROACHING") {
-      return !item.isEligible && item.daysUntilThreshold <= windowDays;
-    }
+    if (statusFilter === "OVERDUE") return item.daysOverdue > 0;
+    if (statusFilter === "APPROACHING") return item.daysOverdue === 0 && item.isEligible;
     if (statusFilter === "DOCS_REQUIRED") return item.missingDocs.length > 0;
 
     return true;
   });
 
-  // Compute real summary stats from actual case data
-  const countOverdue = caseList.filter((c) => c.isEligible).length;
-  const countDocsRequired = caseList.filter((c) => c.missingDocs.length > 0).length;
-  const countApproaching = caseList.filter(
-    (c) => !c.isEligible && c.daysUntilThreshold > 0 && c.daysUntilThreshold <= windowDays
-  ).length;
+  const thresholdWindow = 
+    selectedTimeframe === "Today" ? 1
+    : selectedTimeframe === "7 days" ? 7
+    : selectedTimeframe === "30 days" ? 30
+    : 90;
 
-  // Group cases for timeline: active window (matching selected timeframe) vs. future/safe
-  const activeWindowCases = filteredCases.filter((c) => {
-    if (statusFilter === "APPROACHING") {
-      return c.daysUntilThreshold <= windowDays;
-    }
-    if (statusFilter === "OVERDUE") {
-      return c.isEligible;
-    }
-    if (statusFilter === "DOCS_REQUIRED") {
-      return c.missingDocs.length > 0;
-    }
-    // "ALL": show cases active within selected windowDays or high priority
-    return (
-      (!c.isEligible && c.daysUntilThreshold <= windowDays) ||
-      (c.isEligible && c.daysOverdue <= windowDays * 3) ||
-      c.missingDocs.length > 0
-    );
+  // Calculate REAL stats
+  const countApproaching = filteredCases.filter(c => {
+    const daysUntil = (c.maxSentenceDays / 2) - c.custodyDays;
+    return daysUntil > 0 && daysUntil <= thresholdWindow;
+  }).length;
+  const countDocsRequired = filteredCases.filter(c => c.missingDocs.length > 0).length;
+  const countOverdue = filteredCases.filter(c => c.daysOverdue > 0).length;
+
+  // Group cases for timeline
+  const activeWindowCases = filteredCases.filter(c => {
+    const daysUntil = (c.maxSentenceDays / 2) - c.custodyDays;
+    return c.daysOverdue > 0 || c.missingDocs.length > 0 || (daysUntil > 0 && daysUntil <= thresholdWindow);
   });
-
-  const futureCases = filteredCases.filter(
-    (c) => !activeWindowCases.includes(c)
-  );
-
+  
+  const futureCases = filteredCases.filter(c => !activeWindowCases.includes(c));
 
   return (
-    <div className="p-4 md:p-8 w-full space-y-10 animate-in fade-in duration-300">
+    <div className="p-8 max-w-7xl mx-auto space-y-10 animate-in fade-in duration-300">
       {/* Header */}
       <div className="space-y-6">
         <Link
@@ -222,17 +181,6 @@ export function EligibilityRadar() {
         {loading ? (
           <div className="p-12 text-center text-muted-foreground animate-pulse">
             Loading eligibility radar pipeline...
-          </div>
-        ) : backendError ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-6 text-center">
-            <WifiOff className="w-12 h-12 text-muted-foreground" />
-            <div>
-              <h2 className="text-lg font-semibold text-white mb-2">Backend Connection Lost</h2>
-              <p className="text-sm text-muted-foreground">Live case data unavailable. Ensure the FastAPI server is running on localhost:8000.</p>
-            </div>
-            <button onClick={() => window.location.reload()} className="px-4 py-2 bg-accent text-accent-foreground rounded-xl text-sm font-medium flex items-center gap-2">
-              <RefreshCw className="w-4 h-4" /> Retry Connection
-            </button>
           </div>
         ) : (
           <div className="space-y-12">

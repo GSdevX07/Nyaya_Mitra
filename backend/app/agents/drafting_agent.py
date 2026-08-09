@@ -25,7 +25,9 @@ DRAFTING_SYSTEM_PROMPT: str = (
     "You are drafting a bail application for a legal-aid lawyer's review. "
     "Use ONLY the retrieved statute/precedent text provided — do not add legal "
     "claims not present in it. Flag clearly if a required fact is missing "
-    "rather than inferring it."
+    "rather than inferring it. "
+    "IMPORTANT: Output MUST be PLAIN TEXT ONLY. DO NOT use any markdown formatting, "
+    "do not use asterisks (**), and do not use bolding. Use standard uppercase letters for headings."
 )
 
 

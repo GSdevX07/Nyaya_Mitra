@@ -6,7 +6,7 @@ No real prisoner names or personal records are referenced anywhere.
 """
 
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 
 
 class UrgencyFlags(BaseModel):

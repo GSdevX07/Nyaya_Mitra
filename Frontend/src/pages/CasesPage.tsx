@@ -24,7 +24,6 @@ import {
   declineCase, 
   type BackendCaseSummary 
 } from "@/lib/api";
-import { MOCK_CASES } from "@/data/mock";
 import { AvailableCaseModal } from "@/components/AvailableCaseModal";
 
 export function CasesPage() {
@@ -93,8 +92,8 @@ export function CasesPage() {
         !declinedIds.includes(item.case.case_id)
       );
     } else {
-      // Fallback to MOCK_CASES
-      const formattedMock = MOCK_CASES.map(c => {
+      // Fallback to []
+      const formattedMock = [].map(c => {
         const missingDocsCount = c.documents.filter(d => d.status === "missing").length;
         return {
           case: {

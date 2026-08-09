@@ -1,11 +1,10 @@
 import { useParams, Link } from "react-router-dom";
-import { MOCK_CASES } from "@/data/mock";
 import { ArrowLeft, FileText, CheckCircle2, AlertTriangle, AlertCircle, Scale, Calculator, Link as LinkIcon, Download, PenTool, Check, X, Activity } from "lucide-react";
 import { useState } from "react";
 
 export function CaseIntelligence() {
   const { id } = useParams();
-  const caseData = MOCK_CASES.find(c => c.id === id) || MOCK_CASES[0];
+  const caseData = [].find(c => c.id === id) || [][0];
   const [selectedEvidence, setSelectedEvidence] = useState(caseData.evidenceChain[1] || null);
 
   return (

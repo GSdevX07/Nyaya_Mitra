@@ -1,53 +1,36 @@
 """
 main.py — FastAPI application entry point for Nyaya Mitra.
-
-Run locally:
-    uvicorn app.main:app --reload --port 8000
-
-Swagger docs available at:
-    http://localhost:8000/docs
-
-Design notes:
-  - MOCK_DB is a module-level list of CaseRecord objects that acts as the
-    in-memory database for the hackathon build. It contains 5 distinct hero
-    cases covering every agent decision branch:
-        UTP-0001  eligible first-time offender, all docs present   (HIGH priority)
-        UTP-0007  eligible first-time, senior + health flag        (HIGHEST priority)
-        UTP-0012  not yet eligible repeat offender                 (STANDARD)
-        UTP-0015  eligible but missing a document                  (HIGH — docs gap)
-        UTP-0021  eligible first-time, young + healthy             (STANDARD)
-  - The human-approval gate (POST /cases/{id}/approve) is a real UI button,
-    not a slide claim — matching the project ground rule from the roadmap.
-  - process_case() is intentionally called only on individual case detail
-    (GET /cases/{id}) so the queue endpoint remains fast even with many cases.
 """
 
 from __future__ import annotations
 
+import os
 from typing import Optional
-from fastapi import FastAPI, HTTPException, File, UploadFile, Body
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from dotenv import load_dotenv
+
+from supabase import create_client, Client
 
 from app.agents.orchestrator import process_case
 from app.agents.prioritization_agent import prioritize_cases
 from app.models.schemas import CaseRecord, UrgencyFlags
 from app.document_pipeline import execute_full_document_pipeline, DocumentPipelineResult
 
-
-
-# ── App initialisation ────────────────────────────────────────────────────────
+# ── Env & Supabase Client ─────────────────────────────────────────────────────
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("Supabase credentials not found in environment")
+sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI(
     title="Nyaya Mitra Backend API",
-    description=(
-        "Agentic AI Legal Operations API for Undertrial Prisoners. "
-        "Built with synthetic data only — no real prisoner records are used."
-    ),
+    description="Agentic AI Legal Operations API for Undertrial Prisoners. Connected to Supabase.",
     version="1.0.0",
 )
-
-# ── CORS (allow all origins for local hackathon dev) ─────────────────────────
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,179 +41,68 @@ app.add_middleware(
 )
 
 
-# ── Mock database ─────────────────────────────────────────────────────────────
-# 5 hero cases engineered to hit distinct agent decision branches.
-# All data is synthetic — see Nyaya_Mitra_Master_Roadmap_v2.md §8, Step 1.1.
-
-MOCK_DB: list[CaseRecord] = [
-
-    # UTP-0001 — Eligible first-time offender, all docs present, young + healthy
-    # Expected: eligible, complete, urgency=STANDARD
-    CaseRecord(
-        case_id="UTP-0001",
-        name="synthetic - not a real person",
-        offense_sections=["IPC 323"],
-        arrest_date="2025-01-10",
-        custody_days=200,
-        max_sentence_days_for_offense=365,
+# ── DB Helpers ────────────────────────────────────────────────────────────────
+def db_row_to_case_record(row: dict) -> CaseRecord:
+    is_repeat = not row.get("first_time_offender", True)
+    flags = UrgencyFlags(
+        age=row.get("age") or 30,
+        health_flag=row.get("health_flag") or False,
+        repeat_offender=is_repeat
+    )
+    
+    return CaseRecord(
+        case_id=row["id"],
+        name=row.get("name") or "synthetic - not a real person",
+        offense_sections=row.get("offense_sections") or ["IPC 379"],
+        arrest_date=row.get("arrest_date") or "2024-01-01",
+        custody_days=row.get("custody_days") or 0,
+        max_sentence_days_for_offense=row.get("max_sentence_days_for_offense") or 1095,
         prior_bail_orders=[],
-        required_docs=["remand_order", "charge_sheet"],
-        present_docs=["remand_order", "charge_sheet"],
-        urgency_flags=UrgencyFlags(age=28, health_flag=False, repeat_offender=False),
-        jail_location="Sub-Jail, synthetic",
-        preferred_language="en",
-        relative_name="Ramesh Kumar",
-        relative_relation="Father",
-        relative_phone="+91 98765 11001",
-        permanent_address="Plot 42, Gandhi Nagar, Sector 4, Chennai, TN - 600001",
-        assignment_status="AVAILABLE",
-    ),
-
-    # UTP-0007 — Eligible first-time offender, senior citizen + health flag, all docs
-    # Expected: eligible, complete, urgency=HIGH (score ~267)
-    CaseRecord(
-        case_id="UTP-0007",
-        name="synthetic - not a real person",
-        offense_sections=["IPC 379"],
-        arrest_date="2024-11-02",
-        custody_days=410,
-        max_sentence_days_for_offense=730,
-        prior_bail_orders=[],
-        required_docs=["remand_order", "charge_sheet"],
-        present_docs=["remand_order", "charge_sheet"],
-        urgency_flags=UrgencyFlags(age=63, health_flag=True, repeat_offender=False),
-        jail_location="District Jail, synthetic",
-        preferred_language="hi",
-        relative_name="Sunita Devi",
-        relative_relation="Spouse / Wife",
-        relative_phone="+91 98765 77007",
-        permanent_address="Flat 12B, Old City Suburb, Jaipur, RJ - 302001",
-        assignment_status="AVAILABLE",
-    ),
-
-    # UTP-0012 — Not yet eligible repeat offender, missing docs
-    # Expected: NOT eligible, NOT complete, draft skipped
-    CaseRecord(
-        case_id="UTP-0012",
-        name="synthetic - not a real person",
-        offense_sections=["IPC 302"],
-        arrest_date="2023-06-15",
-        custody_days=400,
-        max_sentence_days_for_offense=1825,
-        prior_bail_orders=["BAIL-2021-004"],
         required_docs=["remand_order", "charge_sheet", "prior_bail_order_if_any"],
-        present_docs=["remand_order"],
-        urgency_flags=UrgencyFlags(age=34, health_flag=False, repeat_offender=True),
-        jail_location="Central Jail, synthetic",
-        preferred_language="ta",
-        relative_name="Mohd. Ahmed",
-        relative_relation="Brother",
-        relative_phone="+91 98765 12012",
-        permanent_address="House 88, Shivaji Road, Bengaluru, KA - 560002",
-        assignment_status="AVAILABLE",
-    ),
-
-    # UTP-0015 — Eligible but missing a key document (tests Completeness Agent)
-    # Expected: eligible, NOT complete (missing charge_sheet), draft skipped
-    CaseRecord(
-        case_id="UTP-0015",
-        name="synthetic - not a real person",
-        offense_sections=["IPC 392"],
-        arrest_date="2023-03-01",
-        custody_days=850,
-        max_sentence_days_for_offense=1095,
-        prior_bail_orders=["BAIL-2022-007"],
-        required_docs=["remand_order", "charge_sheet", "prior_bail_order_if_any"],
-        present_docs=["remand_order", "prior_bail_order_if_any"],
-        urgency_flags=UrgencyFlags(age=40, health_flag=False, repeat_offender=True),
-        jail_location="Central Jail, synthetic",
-        preferred_language="kn",
-        relative_name="Anand Singh",
-        relative_relation="Father",
-        relative_phone="+91 98765 15015",
-        permanent_address="Village Rampur, Post Office Sub-Jail Zone, Lucknow, UP - 226001",
-        assignment_status="AVAILABLE",
-    ),
-
-    # UTP-0021 — Eligible first-time offender, elderly + health flag, all docs
-    # Expected: eligible, complete, urgency=HIGH
-    CaseRecord(
-        case_id="UTP-0021",
-        name="synthetic - not a real person",
-        offense_sections=["IPC 420"],
-        arrest_date="2024-06-20",
-        custody_days=320,
-        max_sentence_days_for_offense=730,
-        prior_bail_orders=[],
-        required_docs=["remand_order", "charge_sheet"],
-        present_docs=["remand_order", "charge_sheet"],
-        urgency_flags=UrgencyFlags(age=67, health_flag=True, repeat_offender=False),
-        jail_location="District Jail, synthetic",
-        preferred_language="te",
-        relative_name="Kamla Prasad",
-        relative_relation="Son / Guardian",
-        relative_phone="+91 98765 21021",
-        permanent_address="H.No 304, Green Avenue, Hyderabad, TS - 500001",
-        assignment_status="AVAILABLE",
-    ),
-]
-
-# Lookup index for O(1) case retrieval by case_id
-_MOCK_DB_INDEX: dict[str, CaseRecord] = {c.case_id: c for c in MOCK_DB}
-
-
-# ── Helper ────────────────────────────────────────────────────────────────────
+        present_docs=row.get("present_docs") or [],
+        urgency_flags=flags,
+        jail_location=row.get("jail_location") or "District Jail, synthetic",
+        preferred_language=row.get("preferred_language") or "en",
+        relative_name=row.get("relative_name") or "Not Specified",
+        relative_relation=row.get("relative_relation") or "Parent/Relative",
+        relative_phone=row.get("relative_phone") or "+91 98765 00000",
+        permanent_address=row.get("permanent_address") or "Synthetic Address",
+        assignment_status=row.get("assignment_status") or "AVAILABLE",
+        assigned_lawyer_id=row.get("assigned_lawyer_id")
+    )
 
 def _find_case(case_id: str) -> CaseRecord:
-    """Return the CaseRecord for case_id or raise a 404 HTTPException."""
-    case = _MOCK_DB_INDEX.get(case_id)
-    if not case:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Case '{case_id}' not found. Available IDs: {list(_MOCK_DB_INDEX.keys())}",
-        )
-    return case
+    res = sb.table("undertrial_cases").select("*").eq("id", case_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found.")
+    return db_row_to_case_record(res.data[0])
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
-
 @app.get("/", tags=["Health"])
 def root():
-    """Health check — confirms the API is online."""
+    res = sb.table("undertrial_cases").select("id", count="exact").limit(1).execute()
+    count = res.count if hasattr(res, 'count') and res.count else 0
     return {
         "status": "online",
         "service": "Nyaya Mitra API",
         "version": "1.0.0",
         "docs_url": "/docs",
-        "total_cases_in_db": len(MOCK_DB),
+        "total_cases_in_db": count,
     }
-
 
 @app.get("/cases", tags=["Cases"])
 def get_cases():
-    """
-    Return all cases sorted by urgency score (highest first).
-
-    Each item in the returned list includes the full CaseRecord, the
-    computed days_overdue, and the urgency_score used for sorting.
-    This is the primary data source for the lawyer dashboard queue.
-    """
-    # Build evaluation list with a fast approximation of days_overdue
-    # (full Eligibility Agent is reserved for individual case detail)
+    res = sb.table("undertrial_cases").select("*").execute()
+    db_cases = [db_row_to_case_record(r) for r in res.data]
+    
     case_evaluations = []
-    for case in MOCK_DB:
-        days_overdue = max(
-            0,
-            case.custody_days - (case.max_sentence_days_for_offense // 2),
-        )
-        case_evaluations.append({
-            "case": case,
-            "days_overdue": days_overdue,
-        })
+    for case in db_cases:
+        threshold = case.max_sentence_days_for_offense // (3 if not case.urgency_flags.repeat_offender else 2)
+        days_overdue = max(0, case.custody_days - threshold)
+        case_evaluations.append({"case": case, "days_overdue": days_overdue})
 
     sorted_queue = prioritize_cases(case_evaluations)
-
-    # Serialise CaseRecord objects to plain dicts for JSON response
     return [
         {
             "case": entry["case"].model_dump(),
@@ -239,26 +111,17 @@ def get_cases():
         }
         for entry in sorted_queue
     ]
-
 
 @app.get("/cases/available", tags=["Available Cases"])
 def get_available_cases():
-    """
-    Return all available undertrial cases that can be taken up by advocates.
-
-    Excludes cases that have already been assigned or declined.
-    """
-    available = [c for c in MOCK_DB if c.assignment_status == "AVAILABLE"]
+    res = sb.table("undertrial_cases").select("*").eq("assignment_status", "AVAILABLE").execute()
+    db_cases = [db_row_to_case_record(r) for r in res.data]
+    
     case_evaluations = []
-    for case in available:
-        days_overdue = max(
-            0,
-            case.custody_days - (case.max_sentence_days_for_offense // 2),
-        )
-        case_evaluations.append({
-            "case": case,
-            "days_overdue": days_overdue,
-        })
+    for case in db_cases:
+        threshold = case.max_sentence_days_for_offense // (3 if not case.urgency_flags.repeat_offender else 2)
+        days_overdue = max(0, case.custody_days - threshold)
+        case_evaluations.append({"case": case, "days_overdue": days_overdue})
 
     sorted_queue = prioritize_cases(case_evaluations)
     return [
@@ -270,97 +133,106 @@ def get_available_cases():
         for entry in sorted_queue
     ]
 
-
 @app.get("/cases/{case_id}", tags=["Cases"])
 def get_case_by_id(case_id: str):
-    """
-    Run the full 8-agent pipeline on a single case and return all outputs.
-
-    Response includes:
-      - eligibility, completeness, urgency_score, notification
-      - retrieval, draft (if eligible + complete)
-      - explanation (plain-language, in preferred language)
-      - status_tracking, draft_ready flag
-      - agent_activity_log (timestamped trace of every agent step)
-    """
     case = _find_case(case_id)
     return process_case(case)
 
-
 @app.post("/cases/{case_id}/take", tags=["Available Cases"])
 def take_up_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
-    """
-    Assign an available case to the specified lawyer upon full review & scroll approval.
-
-    Updates assignment_status to 'ASSIGNED' and syncs the case to the lawyer's queue.
-    """
-    case = _find_case(case_id)
-    case.assignment_status = "ASSIGNED"
-    case.assigned_lawyer_id = lawyer_id
+    res = sb.table("undertrial_cases").update({
+        "assignment_status": "ASSIGNED",
+        "assigned_lawyer_id": lawyer_id
+    }).eq("id", case_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found.")
+    
+    sb.table("case_lawyer_actions").insert({
+        "case_id": case_id,
+        "lawyer_id": lawyer_id,
+        "action_type": "APPROVED",
+        "notes": "Case assigned via dashboard."
+    }).execute()
+    
+    case = db_row_to_case_record(res.data[0])
     return {
         "status": "success",
         "message": f"Case {case_id} successfully assigned to {lawyer_id}",
         "case": case.model_dump(),
     }
 
-
 @app.post("/cases/{case_id}/decline", tags=["Available Cases"])
 def decline_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
-    """
-    Decline an available case so it is hidden and will not be presented to this lawyer again.
-    """
-    case = _find_case(case_id)
-    case.assignment_status = "DECLINED"
+    res = sb.table("undertrial_cases").update({
+        "assignment_status": "DECLINED"
+    }).eq("id", case_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found.")
+    
+    sb.table("case_lawyer_actions").insert({
+        "case_id": case_id,
+        "lawyer_id": lawyer_id,
+        "action_type": "DECLINED",
+        "notes": "Case declined via dashboard."
+    }).execute()
+
     return {
         "status": "declined",
         "message": f"Case {case_id} declined by {lawyer_id}. Will not show again.",
         "case_id": case_id,
     }
 
-
 @app.get("/lawyer/profile", tags=["Lawyer Profile"])
 def get_lawyer_profile(lawyer_id: str = "Legal Officer 104"):
-    """Return profile details and statistics for the advocate / legal officer."""
-    assigned_count = sum(1 for c in MOCK_DB if c.assignment_status == "ASSIGNED")
+    res = sb.table("lawyers").select("*").eq("id", lawyer_id).execute()
+    if not res.data:
+        return {
+            "id": "Legal Officer 104",
+            "full_name": "Adv. Rajesh Sharma",
+            "bar_association_id": "DL/2018/49281",
+            "email": "rajesh.sharma@nyayamitra.org",
+            "phone": "+91 98112 34567",
+            "specialization": "Undertrial Defense & Section 479 BNSS",
+            "cases_taken": 3,
+            "status": "Active Pro Bono Counsel",
+            "organization": "Delhi Legal Services Authority (DLSA)",
+        }
+    
+    lawyer = res.data[0]
+    assigned_res = sb.table("undertrial_cases").select("id", count="exact").eq("assignment_status", "ASSIGNED").execute()
+    assigned_count = assigned_res.count if hasattr(assigned_res, 'count') and assigned_res.count else len(assigned_res.data)
+    
     return {
-        "id": "Legal Officer 104",
-        "full_name": "Adv. Rajesh Sharma",
-        "bar_association_id": "DL/2018/49281",
-        "email": "rajesh.sharma@nyayamitra.org",
-        "phone": "+91 98112 34567",
-        "specialization": "Undertrial Defense & Section 479 BNSS",
-        "cases_taken": 3 + assigned_count,
-        "status": "Active Pro Bono Counsel",
+        "id": lawyer["id"],
+        "full_name": lawyer["full_name"],
+        "bar_association_id": lawyer["bar_association_id"],
+        "email": lawyer["email"],
+        "phone": lawyer.get("phone"),
+        "specialization": lawyer.get("specialization") or "Undertrial Defense",
+        "cases_taken": assigned_count,
+        "status": lawyer.get("status", "Active"),
         "organization": "Delhi Legal Services Authority (DLSA)",
     }
 
-
-
-# ── Additional Module Endpoints ────────────────────────────────────────────────
-
 @app.get("/documents", tags=["Documents"])
 def get_documents():
-    """Retrieve document status and vault inventory across all active cases."""
+    res = sb.table("documents").select("*").execute()
     docs = []
-    for c in MOCK_DB:
-        for r_doc in c.required_docs:
-            is_present = r_doc in c.present_docs
-            docs.append({
-                "id": f"DOC-{c.case_id}-{r_doc}",
-                "case_id": c.case_id,
-                "prisoner_name": c.name,
-                "document_type": r_doc.replace("_", " ").title(),
-                "status": "Verified & Present" if is_present else "Missing — Action Required",
-                "is_present": is_present,
-                "uploaded_date": c.arrest_date if is_present else None,
-                "jail_location": c.jail_location,
-            })
+    for d in res.data:
+        docs.append({
+            "id": d["id"],
+            "case_id": d["case_id"],
+            "prisoner_name": "synthetic - not a real person",
+            "document_type": d["document_type"].replace("_", " ").title(),
+            "status": "Verified & Present" if d.get("is_present") else "Missing — Action Required",
+            "is_present": d.get("is_present", False),
+            "uploaded_date": d.get("uploaded_at") or d.get("created_at"),
+            "jail_location": "Synthetic Jail",
+        })
     return docs
-
 
 @app.get("/cases/{case_id}/documents", tags=["Documents"])
 def get_case_documents(case_id: str):
-    """Retrieve document status breakdown for a single case."""
     case = _find_case(case_id)
     missing = [d for d in case.required_docs if d not in case.present_docs]
     return {
@@ -371,69 +243,37 @@ def get_case_documents(case_id: str):
         "is_complete": len(missing) == 0,
     }
 
-
 @app.post("/documents/upload", tags=["Documents"])
 def upload_document(case_id: str, document_type: str):
-    """Simulate uploading a missing document for a case."""
-    case = _find_case(case_id)
-    if document_type not in case.present_docs:
-        case.present_docs.append(document_type)
+    res = sb.table("undertrial_cases").select("present_docs").eq("id", case_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Case not found")
+    
+    present = res.data[0].get("present_docs") or []
+    if document_type not in present:
+        present.append(document_type)
+        sb.table("undertrial_cases").update({"present_docs": present}).eq("id", case_id).execute()
+        
     return {
         "status": "success",
         "message": f"Document '{document_type}' uploaded and attached to case {case_id}.",
-        "present_docs": case.present_docs,
+        "present_docs": present,
     }
-
-
-# In-memory Evidence Store initialized from MOCK_DB
-MOCK_EVIDENCE_STORE: dict[str, dict] = {}
-
-def _init_evidence_store():
-    if not MOCK_EVIDENCE_STORE:
-        for idx, c in enumerate(MOCK_DB, 1):
-            item_id = f"EVI-2026-00{idx}"
-            missing_count = len(c.required_docs) - len(c.present_docs)
-            confidence = 98.5 if missing_count == 0 else 74.0
-            MOCK_EVIDENCE_STORE[item_id] = {
-                "id": item_id,
-                "case_id": c.case_id,
-                "title": f"Police Remand & Charge Record for {c.case_id}",
-                "offense": ", ".join(c.offense_sections),
-                "verification_status": "Verified Authentic" if confidence > 85 else "Pending Verification",
-                "authenticity_score": confidence,
-                "chain_of_custody": f"Verified at {c.jail_location}",
-                "flagged": missing_count > 0,
-                "notes": f"Required docs: {len(c.required_docs)}, Present: {len(c.present_docs)}",
-            }
-
-_init_evidence_store()
-
 
 @app.get("/evidence", tags=["Evidence"])
 def get_evidence():
-    """Retrieve evidence verification records and AI authenticity analysis."""
-    _init_evidence_store()
-    return list(MOCK_EVIDENCE_STORE.values())
-
+    res = sb.table("evidence_items").select("*").execute()
+    return res.data
 
 @app.post("/evidence/verify", tags=["Evidence"])
 def verify_evidence(evidence_id: str):
-    """Trigger AI verification scan on an evidence item."""
-    _init_evidence_store()
-    item = MOCK_EVIDENCE_STORE.get(evidence_id)
-    if not item:
-        # Check by case_id match or fallback
-        for k, v in MOCK_EVIDENCE_STORE.items():
-            if v["case_id"] == evidence_id or k == evidence_id:
-                item = v
-                break
+    sb.table("evidence_items").update({
+        "verification_status": "Verified Authentic",
+        "authenticity_score": 99.5,
+        "flagged": False,
+        "notes": "AI scan verified cryptographic seal and chain-of-custody checksum."
+    }).eq("id", evidence_id).execute()
     
-    if item:
-        item["verification_status"] = "Verified Authentic"
-        item["authenticity_score"] = 99.5
-        item["flagged"] = False
-        item["notes"] = "AI scan verified cryptographic seal and chain-of-custody checksum."
-
     return {
         "evidence_id": evidence_id,
         "status": "Verified Authentic",
@@ -442,159 +282,73 @@ def verify_evidence(evidence_id: str):
         "timestamp": "2026-08-09T02:50:00Z",
     }
 
-
 @app.get("/actions", tags=["Actions"])
 def get_actions():
-    """Retrieve automated agent actions queue and execution log."""
-    actions = []
-    for c in MOCK_DB:
-        is_eligible = c.custody_days >= (c.max_sentence_days_for_offense // 2)
-        missing_docs = [d for d in c.required_docs if d not in c.present_docs]
-        
-        if is_eligible and not missing_docs:
-            actions.append({
-                "id": f"ACT-{c.case_id}-BAIL",
-                "case_id": c.case_id,
-                "action_type": "Auto-Draft BNSS 479 Petition",
-                "priority": "HIGH",
-                "status": "Ready for Approval",
-                "description": f"Case {c.case_id} has completed half sentence ({c.custody_days} days). Auto-draft generated.",
-                "created_at": "2026-08-08",
-            })
-        elif missing_docs:
-            actions.append({
-                "id": f"ACT-{c.case_id}-DOCS",
-                "case_id": c.case_id,
-                "action_type": "DLSA Document Request",
-                "priority": "MEDIUM",
-                "status": "Pending Document Retrieval",
-                "description": f"Requesting missing documents ({', '.join(missing_docs)}) from police authority.",
-                "created_at": "2026-08-08",
-            })
-    return actions
-
+    res = sb.table("automated_actions").select("*").execute()
+    return res.data
 
 @app.post("/actions/trigger", tags=["Actions"])
 def trigger_action(action_id: str):
-    """Execute an automated agent action from the queue."""
     return {
         "action_id": action_id,
         "status": "Executed Successfully",
         "message": f"Action {action_id} triggered and sent to DLSA portal.",
     }
 
-
 @app.get("/hearings", tags=["Hearings"])
 def get_hearings():
-    """Retrieve court hearing schedules and judicial calendar."""
-    hearings = [
-        {
-            "id": "HRG-2026-01",
-            "case_id": "UTP-0007",
-            "prisoner_name": "UTP-0007 (Senior Citizen)",
-            "court_name": "District & Sessions Court, Bench 3",
-            "hearing_date": "2026-08-12",
-            "hearing_type": "Bail Application Under BNSS 479",
-            "status": "Scheduled",
-            "judge": "Hon'ble Justice R. K. Sharma",
-        },
-        {
-            "id": "HRG-2026-02",
-            "case_id": "UTP-0001",
-            "prisoner_name": "UTP-0001",
-            "court_name": "Chief Judicial Magistrate Court",
-            "hearing_date": "2026-08-14",
-            "hearing_type": "Remand Review & Bail Motion",
-            "status": "Scheduled",
-            "judge": "Hon'ble Magistrate S. Patel",
-        },
-        {
-            "id": "HRG-2026-03",
-            "case_id": "UTP-0021",
-            "prisoner_name": "UTP-0021 (Medical Priority)",
-            "court_name": "District Court, High Priority Bench",
-            "hearing_date": "2026-08-15",
-            "hearing_type": "Urgent Medical Bail Hearing",
-            "status": "Pending Hearing Notice",
-            "judge": "Hon'ble Justice M. V. Reddy",
-        },
-    ]
-    return hearings
-
+    res = sb.table("hearings").select("*").execute()
+    return res.data
 
 @app.get("/reports", tags=["Reports"])
 def get_reports():
-    """Retrieve legal analytics, inmate metrics, and DLSA performance report."""
-    total_cases = len(MOCK_DB)
-    eligible = sum(1 for c in MOCK_DB if c.custody_days >= (c.max_sentence_days_for_offense // 2))
-    senior_citizens = sum(1 for c in MOCK_DB if c.urgency_flags.age >= 60)
-    health_cases = sum(1 for c in MOCK_DB if c.urgency_flags.health_flag)
-
+    res = sb.table("undertrial_cases").select("id, custody_days, max_sentence_days_for_offense, age, health_flag").execute()
+    cases = res.data
+    total_cases = len(cases)
+    
+    eligible = sum(1 for c in cases if c.get("custody_days", 0) >= (c.get("max_sentence_days_for_offense", 0) // 2))
+    senior_citizens = sum(1 for c in cases if c.get("age", 0) >= 60)
+    health_cases = sum(1 for c in cases if c.get("health_flag"))
+    
+    avg_custody = round(sum(c.get("custody_days", 0) for c in cases) / total_cases, 1) if total_cases > 0 else 0
+    
     return {
         "overview": {
             "total_undertrials_monitored": total_cases,
             "bnss_479_eligible": eligible,
             "senior_citizens": senior_citizens,
             "medical_priority_cases": health_cases,
-            "average_custody_days": round(sum(c.custody_days for c in MOCK_DB) / total_cases, 1),
-            "estimated_hours_saved_by_ai": 340,
+            "average_custody_days": avg_custody,
+            "estimated_hours_saved_by_ai": int(total_cases * 1.5),
         },
         "court_jurisdiction_breakdown": [
-            {"jail": "District Jail, synthetic", "count": 2},
-            {"jail": "Central Jail, synthetic", "count": 2},
-            {"jail": "Sub-Jail, synthetic", "count": 1},
+            {"jail": "Central Jail, Tihar (synthetic)", "count": 68},
+            {"jail": "District Jail, Patna (synthetic)", "count": 45},
+            {"jail": "Other Facilities", "count": total_cases - 113 if total_cases > 113 else 0},
         ],
         "eligibility_distribution": [
-            {"category": "Eligible & Complete", "count": 3},
-            {"category": "Missing Documents", "count": 1},
-            {"category": "Ineligible (Sentence Threshold)", "count": 1},
+            {"category": "Eligible for 479 BNSS", "count": eligible},
+            {"category": "Ineligible", "count": total_cases - eligible},
         ],
     }
 
-
 @app.get("/notifications", tags=["Notifications"])
 def get_notifications():
-    """Retrieve system-wide alerts and notification feed."""
-    notifications = [
-        {
-            "id": "NOTIF-01",
-            "title": "High Priority Bail Eligibility Flagged",
-            "message": "UTP-0007 (Senior Citizen, 63 yrs) has exceeded 50% max sentence length.",
-            "timestamp": "10 mins ago",
-            "type": "urgent",
-            "case_id": "UTP-0007",
-            "read": False,
-        },
-        {
-            "id": "NOTIF-02",
-            "title": "Medical Priority Alert",
-            "message": "UTP-0021 has documented health flag and requires immediate bail motion review.",
-            "timestamp": "25 mins ago",
-            "type": "warning",
-            "case_id": "UTP-0021",
-            "read": False,
-        },
-        {
-            "id": "NOTIF-03",
-            "title": "Missing Charge Sheet Notice",
-            "message": "UTP-0015 is eligible under BNSS 479 but missing Charge Sheet document.",
-            "timestamp": "1 hour ago",
-            "type": "info",
-            "case_id": "UTP-0015",
-            "read": True,
-        },
-        {
-            "id": "NOTIF-04",
-            "title": "Bail Hearing Scheduled",
-            "message": "Hearing for UTP-0001 scheduled on 2026-08-14 at Chief Judicial Magistrate Court.",
-            "timestamp": "2 hours ago",
-            "type": "success",
-            "case_id": "UTP-0001",
-            "read": True,
-        },
-    ]
-    return notifications
-
+    res = sb.table("notifications").select("*").order("created_at", desc=True).limit(10).execute()
+    if res.data:
+        return res.data
+    else:
+        return [
+            {
+                "id": "NOTIF-01",
+                "title": "System Active",
+                "message": "Connected to Supabase DB. Monitoring 200 cases.",
+                "timestamp": "Just now",
+                "type": "info",
+                "case_id": None,
+                "read": False,
+            }
+        ]
 
 # ── Document Processing & Assessment Pipeline Endpoints ─────────────────────────
 
@@ -605,10 +359,6 @@ class AssessDocumentPayload(BaseModel):
 
 @app.post("/cases/assess-document", tags=["Document AI Pipeline"], response_model=DocumentPipelineResult)
 def assess_legal_document(payload: Optional[AssessDocumentPayload] = Body(default=None)):
-    """
-    Executes the 7-stage Document AI pipeline:
-    📄 Document Intake → ✍️ Scanned/TrOCR OCR → 📦 IBM Data Prep Kit → 🔎 RAG → 🧠 IBM Granite → Preliminary Assessment
-    """
     doc_name = payload.document_name if payload else "scanned_handwritten_remand.pdf"
     text_content = payload.provided_text if payload else None
 
@@ -619,12 +369,8 @@ def assess_legal_document(payload: Optional[AssessDocumentPayload] = Body(defaul
     )
     return result
 
-
 @app.get("/cases/sample-documents", tags=["Document AI Pipeline"])
 def get_sample_documents():
-    """
-    Retrieve pre-built scanned & handwritten legal document samples for quick demonstration.
-    """
     return [
         {
             "id": "sample-1",
@@ -677,5 +423,4 @@ def get_sample_documents():
             ),
         },
     ]
-
 

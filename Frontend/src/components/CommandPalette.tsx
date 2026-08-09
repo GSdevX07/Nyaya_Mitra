@@ -1,8 +1,6 @@
 import { useState, useEffect } from "react";
 import { Search, FileText, Activity } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { MOCK_CASES } from "@/data/mock";
-
 interface CommandPaletteProps {
   isOpen?: boolean;
   onClose?: () => void;
@@ -45,7 +43,7 @@ export function CommandPalette({ isOpen: externalIsOpen, onClose }: CommandPalet
   };
 
   const results = query
-    ? MOCK_CASES.filter(
+    ? [].filter(
         (c) =>
           c.id.toLowerCase().includes(query.toLowerCase()) ||
           c.prisonerName.toLowerCase().includes(query.toLowerCase()) ||

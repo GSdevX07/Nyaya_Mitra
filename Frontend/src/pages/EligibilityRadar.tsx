@@ -2,8 +2,6 @@ import { useState, useEffect } from "react";
 import { Search, Filter, Clock, ArrowLeft, ArrowUpRight, ShieldAlert, CheckCircle, FileText } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { fetchCases, type BackendCaseSummary } from "@/lib/api";
-import { MOCK_CASES } from "@/data/mock";
-
 type TimeframeWindow = "Today" | "7 days" | "30 days" | "90 days";
 
 export function EligibilityRadar() {
@@ -40,7 +38,7 @@ export function EligibilityRadar() {
         age: c.case.urgency_flags.age,
         court: c.case.jail_location,
       }))
-    : MOCK_CASES.map((c) => ({
+    : [].map((c) => ({
         id: c.id,
         prisonerName: c.prisonerName,
         offence: c.offence,

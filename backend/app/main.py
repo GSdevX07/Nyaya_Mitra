@@ -445,9 +445,9 @@ def take_up_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
     """
     case = _find_case(case_id)
 
-    # Persist state transitions: APPROVED → then immediately FILED
-    update_case_status(case_id, CaseState.APPROVED)
-    update_case_status(case_id, CaseState.FILED)
+    
+    
+    
 
     # Persist assignment into Supabase so get_available_cases reflects the change
     from app.database import supabase

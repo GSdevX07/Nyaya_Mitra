@@ -89,9 +89,8 @@ export function CasesPage() {
           item.case.assignment_status === "AVAILABLE" || !item.case.assignment_status
         );
         
-        // Force UI to show 2 assigned cases and 198 available cases
-        assignedList = rawAssigned.slice(0, 2);
-        unassignedList = [...rawAssigned.slice(2), ...rawAvailable];
+        assignedList = rawAssigned;
+        unassignedList = rawAvailable;
       } else {
         assignedList = [];
         unassignedList = [];

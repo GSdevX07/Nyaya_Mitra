@@ -38,6 +38,7 @@ export function AvailableCaseModal({
   // Reset scroll lock state when modal opens for a new case
   useEffect(() => {
     if (isOpen) {
+      document.body.style.overflow = "hidden";
       setHasScrolledToBottom(false);
       // Check if content is already short enough to not need scrolling
       setTimeout(() => {
@@ -48,8 +49,13 @@ export function AvailableCaseModal({
           }
         }
       }, 200);
+    } else {
+      document.body.style.overflow = "unset";
     }
-  }, [isOpen, item]);
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [isOpen, item?.case?.case_id]);
 
   const handleScroll = () => {
     if (!scrollRef.current) return;
@@ -76,7 +82,7 @@ export function AvailableCaseModal({
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 15 }}
-          className="relative w-full max-w-3xl bg-[#0F172A] border border-border rounded shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+          className="relative w-full max-w-3xl bg-card border border-border rounded shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         >
           {/* Header */}
           <div className="p-6 border-b border-border bg-card shadow-sm flex items-center justify-between">

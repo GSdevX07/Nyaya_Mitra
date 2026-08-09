@@ -25,6 +25,7 @@ export function CaseIntelligence() {
   const [approving, setApproving] = useState(false);
   const [approvalDone, setApprovalDone] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
+  const [editableDraft, setEditableDraft] = useState<string>("");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [pendingDocType, setPendingDocType] = useState<string | null>(null);
@@ -37,6 +38,9 @@ export function CaseIntelligence() {
       const data = await fetchCaseById(id);
       if (!data) throw new Error("Not found");
       setCaseData(data);
+      if (data.draft_ready && data.draft?.drafted_document) {
+        setEditableDraft((data.draft.drafted_document as string).replaceAll("**", ""));
+      }
     } catch {
       setError(`Could not load case ${id}. Is the backend running at localhost:8000?`);
     } finally {
@@ -136,7 +140,7 @@ export function CaseIntelligence() {
   const eligibility = caseData.eligibility || {};
   const completeness = caseData.completeness || {};
   const retrieval = caseData.retrieval || {};
-  const draft = caseData.draft || {};
+  // const draft = caseData.draft || {};
   const explanation = caseData.explanation || {};
   const statusTracking = caseData.status_tracking || {};
   const agentLog = caseData.agent_activity_log || [];
@@ -335,14 +339,16 @@ export function CaseIntelligence() {
           )}
 
           {/* Draft */}
-          {draftReady && draft.drafted_document && (
+          {draftReady && editableDraft && (
             <section className="space-y-4">
               <h2 className="text-xl font-medium tracking-tight uppercase text-primary flex items-center gap-2">
                 <FileText className="w-5 h-5 text-accent" /> Auto-Generated Bail Application Draft
               </h2>
-              <div className="p-6 rounded border border-accent/20 bg-accent/5 font-serif text-sm text-primary leading-relaxed whitespace-pre-wrap">
-                {(draft.drafted_document as string)?.replaceAll("**", "")}
-              </div>
+              <textarea
+                value={editableDraft}
+                onChange={(e) => setEditableDraft(e.target.value)}
+                className="w-full h-[400px] p-6 rounded border border-accent/20 bg-accent/5 font-serif text-sm text-primary leading-relaxed whitespace-pre-wrap focus:outline-none focus:ring-1 focus:ring-accent resize-y"
+              />
             </section>
           )}
 
@@ -536,11 +542,19 @@ export function CaseIntelligence() {
                   <div className="space-y-2">
                     <button
                       onClick={handleApprove}
-                      disabled={approving || missingDocs.length > 0 || !draftReady}
-                      className="w-full py-3 bg-card text-black font-semibold rounded hover:bg-card transition-colors flex justify-center items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                      disabled={approving || missingDocs.length > 0 || !draftReady || approvalDone || currentStatus === "FILED" || currentStatus === "APPROVED"}
+                      className={`w-full py-3 font-semibold rounded transition-colors flex justify-center items-center gap-2 ${
+                        approvalDone || currentStatus === "FILED" || currentStatus === "APPROVED"
+                          ? "bg-secondary text-primary cursor-not-allowed opacity-80"
+                          : "bg-card text-black hover:bg-card disabled:opacity-40 disabled:cursor-not-allowed"
+                      }`}
                     >
                       {approving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                      {approving ? "Filing…" : "Approve & File"}
+                      {approvalDone || currentStatus === "FILED" || currentStatus === "APPROVED" 
+                        ? "Filed Successfully" 
+                        : approving 
+                        ? "Filing..." 
+                        : "Approve & File"}
                     </button>
                     {missingDocs.length > 0 && (
                       <p className="text-xs text-destructive text-center">Upload all missing documents before approving.</p>

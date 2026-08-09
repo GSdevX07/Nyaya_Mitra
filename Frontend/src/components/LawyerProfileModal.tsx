@@ -63,7 +63,7 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
           <div className="absolute top-0 inset-x-0 h-32 bg-gradient-to-b from-amber-500/10 via-amber-500/5 to-transparent pointer-events-none" />
 
           {/* Modal Header */}
-          <div className="p-6 pb-4 flex items-start justify-between relative z-10 border-b border-white/[0.06]">
+          <div className="p-6 pb-4 flex items-start justify-between relative z-10 border-b border-border">
             <div className="flex items-center gap-4">
               {/* Executive Avatar Pill */}
               <div className="relative">
@@ -108,7 +108,7 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
           {/* Body Content */}
           <div className="p-6 space-y-5 overflow-y-auto custom-scrollbar relative z-10">
             {/* Counsel Status Bar */}
-            <div className="flex items-center justify-between p-3 rounded bg-card shadow-sm border border-white/[0.07]">
+            <div className="flex items-center justify-between p-3 rounded bg-card shadow-sm border border-border">
               <div className="flex items-center gap-2.5">
                 <div className="w-2 h-2 rounded-sm bg-amber-400 animate-pulse" />
                 <span className="text-xs font-semibold text-primary">
@@ -122,7 +122,7 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
 
             {/* Quick Metrics Cards */}
             <div className="grid grid-cols-2 gap-3">
-              <div className="p-4 rounded bg-gradient-to-b from-white/[0.04] to-white/[0.01] border border-white/[0.07] flex flex-col justify-between">
+              <div className="p-4 rounded bg-secondary/50 border border-border flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-muted-foreground font-medium">Cases Assigned</span>
                   <div className="p-1.5 rounded-sm bg-muted text-muted-foreground">
@@ -135,7 +135,7 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
                 </div>
               </div>
 
-              <div className="p-4 rounded bg-gradient-to-b from-white/[0.04] to-white/[0.01] border border-white/[0.07] flex flex-col justify-between">
+              <div className="p-4 rounded bg-secondary/50 border border-border flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-muted-foreground font-medium">Verification Rate</span>
                   <div className="p-1.5 rounded-sm bg-muted text-foreground">
@@ -150,8 +150,8 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
             </div>
 
             {/* Credentials Detail Panel */}
-            <div className="rounded bg-card shadow-sm border border-white/[0.07] overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-white/[0.06] bg-card shadow-sm flex items-center justify-between">
+            <div className="rounded bg-card shadow-sm border border-border overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-border bg-card shadow-sm flex items-center justify-between">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Advocate Credentials &amp; Registry
                 </span>
@@ -164,7 +164,7 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
                 </button>
               </div>
 
-              <div className="divide-y divide-white/[0.04] p-4 text-xs space-y-0">
+              <div className="divide-y divide-border p-4 text-xs space-y-0">
                 <div className="flex items-center justify-between py-2.5">
                   <span className="text-muted-foreground flex items-center gap-2">
                     <Building2 className="w-3.5 h-3.5 text-muted-foreground/80" /> Authority / Org:
@@ -210,13 +210,13 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
           </div>
 
           {/* Footer */}
-          <div className="p-4 border-t border-white/[0.06] bg-card shadow-sm flex items-center justify-between">
+          <div className="p-4 border-t border-border bg-card shadow-sm flex items-center justify-between">
             <span className="text-[11px] text-muted-foreground font-mono">
               System ID: NYAYA-DLSA-2026
             </span>
             <button
               onClick={onClose}
-              className="px-5 py-2 rounded bg-muted-foreground text-black font-semibold text-xs hover:bg-amber-400 transition-all shadow-md shadow-amber-500/10"
+              className="px-5 py-2 rounded bg-primary text-primary-foreground font-semibold text-xs hover:bg-amber-400 transition-all shadow-md shadow-amber-500/10"
             >
               Done
             </button>

@@ -10,7 +10,6 @@ import { fetchNotifications } from "@/lib/api";
 const navItems = [
   { path: "/dashboard", label: "Command Center" },
   { path: "/cases", label: "Cases" },
-  { path: "/assessment", label: "AI Assessment Pipeline" },
   { path: "/radar", label: "Eligibility Radar" },
   { path: "/documents", label: "Documents" },
   { path: "/evidence", label: "Evidence" },

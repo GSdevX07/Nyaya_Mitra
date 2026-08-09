@@ -146,28 +146,28 @@ export function EligibilityRadar() {
 
         {/* Timeline Search & Filter Bar */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-border pb-4">
-          <div className="flex items-center gap-2 text-primary font-medium">
+          <div className="flex items-center gap-2 text-white font-medium">
             <Clock className="w-4 h-4 text-accent" /> Timeline View ({selectedTimeframe})
           </div>
 
           <div className="flex items-center gap-3 w-full sm:w-auto">
             <div className="relative w-full sm:w-64">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
               <input
                 type="text"
                 placeholder="Search cases..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-secondary/50 border border-border rounded pl-9 pr-3 py-1.5 text-sm text-primary focus:outline-none focus:border-accent"
+                className="w-full bg-white/10 border border-white/20 rounded pl-9 pr-3 py-1.5 text-sm text-white placeholder:text-zinc-400 focus:outline-none focus:border-accent"
               />
             </div>
 
             <div className="flex items-center gap-1">
-              <Filter className="w-4 h-4 text-muted-foreground shrink-0" />
+              <Filter className="w-4 h-4 text-zinc-400 shrink-0" />
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as any)}
-                className="bg-secondary/50 border border-border text-primary text-xs rounded px-2.5 py-2 focus:outline-none focus:border-accent"
+                className="bg-white/10 border border-white/20 text-white text-xs rounded px-2.5 py-2 focus:outline-none focus:border-accent"
               >
                 <option value="ALL" className="bg-background">All Statuses</option>
                 <option value="OVERDUE" className="bg-background">Overdue Only</option>
@@ -179,7 +179,7 @@ export function EligibilityRadar() {
         </div>
 
         {loading ? (
-          <div className="p-12 text-center text-muted-foreground animate-pulse">
+          <div className="p-12 text-center text-zinc-400 animate-pulse">
             Loading eligibility radar pipeline...
           </div>
         ) : (
@@ -190,8 +190,8 @@ export function EligibilityRadar() {
               <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-sm bg-accent ring-4 ring-black" />
 
               <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-bold text-primary uppercase tracking-wider flex items-center gap-2">
-                  Active Window <span className="text-xs font-normal text-muted-foreground">({activeWindowCases.length} cases)</span>
+                <h3 className="text-lg font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  Active Window <span className="text-xs font-normal text-zinc-400">({activeWindowCases.length} cases)</span>
                 </h3>
               </div>
 
@@ -203,20 +203,20 @@ export function EligibilityRadar() {
                       c.daysOverdue > 0
                         ? "border-destructive/30 bg-destructive/10 hover:border-destructive/60"
                         : c.missingDocs.length > 0
-                        ? "border-border bg-muted hover:border-amber-500/60"
-                        : "border-border bg-card/70 hover:border-accent/50"
+                        ? "border-white/20 bg-white/10 hover:border-amber-500/60"
+                        : "border-white/10 bg-white/5 hover:border-accent/50"
                     }`}
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-3">
-                        <span className="text-primary font-mono font-bold text-sm">{c.id}</span>
+                        <span className="text-white font-mono font-bold text-sm">{c.id}</span>
                         {c.daysOverdue > 0 && (
                           <span className="px-2 py-0.5 bg-destructive/20 text-destructive text-[10px] font-bold uppercase tracking-wider rounded-md border border-destructive/30 flex items-center gap-1">
                             <ShieldAlert className="w-3 h-3" /> Overdue by {c.daysOverdue} days
                           </span>
                         )}
                         {c.missingDocs.length > 0 && (
-                          <span className="px-2 py-0.5 bg-muted-foreground/20 text-muted-foreground text-[10px] font-bold uppercase tracking-wider rounded-md border border-border flex items-center gap-1">
+                          <span className="px-2 py-0.5 bg-muted-foreground/20 text-zinc-400 text-[10px] font-bold uppercase tracking-wider rounded-md border border-border flex items-center gap-1">
                             <FileText className="w-3 h-3" /> Docs Required ({c.missingDocs.length})
                           </span>
                         )}
@@ -226,10 +226,10 @@ export function EligibilityRadar() {
                           </span>
                         )}
                       </div>
-                      <div className="text-sm text-primary font-medium">
-                        {c.prisonerName} • <span className="text-muted-foreground font-mono">{c.offence}</span>
+                      <div className="text-sm text-white font-medium">
+                        {c.prisonerName} • <span className="text-zinc-400 font-mono">{c.offence}</span>
                       </div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-xs text-zinc-400">
                         Custody: {c.custodyDays} days | Facility: {c.court}
                       </div>
                     </div>
@@ -247,7 +247,7 @@ export function EligibilityRadar() {
                 ))}
 
                 {activeWindowCases.length === 0 && (
-                  <div className="p-6 text-center text-sm text-muted-foreground bg-card shadow-sm rounded border border-border">
+                  <div className="p-6 text-center text-sm text-zinc-400 bg-white/5 shadow-sm rounded border border-white/10 text-zinc-400">
                     No cases matching criteria for this week.
                   </div>
                 )}
@@ -259,28 +259,28 @@ export function EligibilityRadar() {
               <div className="absolute -left-4 top-0 bottom-0 w-px bg-secondary" />
               <div className="absolute -left-[19px] top-1 w-2 h-2 rounded-sm bg-white/30 ring-4 ring-black" />
 
-              <h3 className="text-lg font-bold text-primary mb-6 uppercase tracking-wider flex items-center gap-2">
-                Future / Safe <span className="text-xs font-normal text-muted-foreground">({futureCases.length} cases)</span>
+              <h3 className="text-lg font-bold text-white mb-6 uppercase tracking-wider flex items-center gap-2">
+                Future / Safe <span className="text-xs font-normal text-zinc-400">({futureCases.length} cases)</span>
               </h3>
 
               <div className="space-y-4 pl-4">
                 {futureCases.map((c) => (
                   <div
                     key={c.id}
-                    className="p-5 rounded border border-border bg-card shadow-sm hover:border-border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    className="p-5 rounded border border-white/10 bg-white/5 shadow-sm hover:border-border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                   >
                     <div>
                       <div className="flex items-center gap-3 mb-1">
-                        <span className="text-primary font-mono font-medium text-sm">{c.id}</span>
-                        <span className="text-xs text-muted-foreground font-mono">Custody: {c.custodyDays} days</span>
+                        <span className="text-white font-mono font-medium text-sm">{c.id}</span>
+                        <span className="text-xs text-zinc-400 font-mono">Custody: {c.custodyDays} days</span>
                       </div>
-                      <div className="text-sm text-muted-foreground">
+                      <div className="text-sm text-zinc-400">
                         {c.prisonerName} • Approaching statutory threshold window ({selectedTimeframe})
                       </div>
                     </div>
                     <Link
                       to={`/case/${c.id}`}
-                      className="px-4 py-2 bg-secondary/50 hover:bg-secondary text-primary rounded text-xs font-medium border border-border transition-colors flex items-center gap-1 shrink-0"
+                      className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded text-xs font-medium border border-border transition-colors flex items-center gap-1 shrink-0"
                     >
                       Inspect <ArrowUpRight className="w-3 h-3" />
                     </Link>
@@ -288,7 +288,7 @@ export function EligibilityRadar() {
                 ))}
 
                 {futureCases.length === 0 && (
-                  <div className="p-6 text-center text-sm text-muted-foreground bg-card shadow-sm rounded border border-border">
+                  <div className="p-6 text-center text-sm text-zinc-400 bg-white/5 shadow-sm rounded border border-white/10 text-zinc-400">
                     No future cases scheduled.
                   </div>
                 )}

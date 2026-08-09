@@ -348,7 +348,12 @@ export function CaseIntelligence() {
               <textarea
                 value={editableDraft}
                 onChange={(e) => setEditableDraft(e.target.value)}
-                className="w-full h-[400px] p-6 rounded border border-accent/20 bg-accent/5 font-serif text-sm text-primary leading-relaxed whitespace-pre-wrap focus:outline-none focus:ring-1 focus:ring-accent resize-y"
+                readOnly={approvalDone || currentStatus === "FILED"}
+                className={`w-full h-[400px] p-6 rounded border font-serif text-sm leading-relaxed whitespace-pre-wrap resize-y focus:outline-none ${
+                  approvalDone || currentStatus === "FILED"
+                    ? "bg-muted text-muted-foreground border-border cursor-not-allowed opacity-80"
+                    : "border-accent/20 bg-accent/5 text-primary focus:ring-1 focus:ring-accent"
+                }`}
               />
             </section>
           )}

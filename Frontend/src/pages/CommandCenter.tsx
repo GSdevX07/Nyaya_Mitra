@@ -304,7 +304,10 @@ function DraftTab({ detail, onApprove, approving }: { detail: CaseDetail; onAppr
             <textarea
               value={editableText}
               onChange={(e) => setEditableText(e.target.value)}
-              className="w-full h-[400px] whitespace-pre-wrap text-sm text-muted-foreground font-mono leading-relaxed bg-transparent focus:outline-none focus:ring-1 focus:ring-accent resize-y"
+              readOnly={detail.status_tracking.current_status === "FILED"}
+              className={`w-full h-[400px] whitespace-pre-wrap text-sm text-muted-foreground font-mono leading-relaxed bg-transparent focus:outline-none resize-y ${
+                detail.status_tracking.current_status === "FILED" ? "cursor-not-allowed opacity-80" : "focus:ring-1 focus:ring-accent"
+              }`}
             />
           </div>
           <button

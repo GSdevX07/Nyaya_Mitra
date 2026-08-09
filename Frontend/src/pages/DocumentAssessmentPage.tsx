@@ -453,7 +453,7 @@ export function DocumentAssessmentPage() {
                 <div className="space-y-2 pt-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Full Generated Assessment Draft</h3>
                   <pre className="p-4 rounded-xl bg-black/60 border border-white/10 text-xs font-mono text-slate-300 whitespace-pre-wrap leading-relaxed overflow-x-auto max-h-64">
-                    {result.granite_assessment.ai_generated_report_draft}
+                    {result.granite_assessment.ai_generated_report_draft?.replaceAll("**", "")}
                   </pre>
                 </div>
               </div>

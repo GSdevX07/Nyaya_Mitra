@@ -200,7 +200,8 @@ def run_ibm_granite_assessment(
         "You are IBM Granite Legal Assistant, an AI system specialized in Indian Criminal Jurisprudence "
         "and Undertrial Prisoner Welfare under BNSS (Bharatiya Nagarik Suraksha Sanhita, 2023).\n"
         "Analyze the cleaned document text, extracted prisoner data, and RAG statutory citations.\n"
-        "Generate a structured, professional, high-precision Preliminary Assessment Report for the Legal Aid Defense Counsel (DLSA)."
+        "Generate a structured, professional, high-precision Preliminary Assessment Report for the Legal Aid Defense Counsel (DLSA).\n"
+        "IMPORTANT: Output MUST be PLAIN TEXT ONLY. DO NOT use any markdown formatting, do not use asterisks (**), and do not use bolding. Use standard uppercase letters for section titles."
     )
 
     user_prompt = f"""
@@ -223,7 +224,7 @@ Medical Flag: {structured_meta.get('has_medical_condition')}
 Evaluate eligibility under Section 479 BNSS 2023 and return a complete preliminary legal assessment.
 """
 
-    llm_raw_response = generate(user_prompt, system=system_prompt)
+    llm_raw_response = generate(user_prompt, system=system_prompt).replace("**", "")
 
     # Synthesize structured output for frontend display
     custody_fraction = structured_meta.get("custody_fraction", 0.56)

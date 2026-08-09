@@ -1,11 +1,11 @@
 """
-orchestrator.py — Master pipeline for Nyaya Mitra's agent system.
+orchestrator.py Master pipeline for Nyaya Mitra's agent system.
 
 Design pattern (from Nyaya_Mitra_Master_Roadmap_v2.md §9, Agent 2.9):
   - Sequential pipeline: each agent runs in order, with outputs from earlier
     agents informing later ones (e.g., eligibility result gates RAG/drafting).
   - Human-approval gate: the orchestrator produces a "draft_ready" flag but
-    never auto-advances the status to "Filed" — that requires an explicit
+    never auto-advances the status to "Filed" that requires an explicit
     POST /cases/{id}/approve call from the lawyer dashboard (Phase 3, Step 3.1).
   - Every step is logged to an "agent_activity_log" list so the frontend's
     live Agent Activity Log panel can display a timestamped trace of what ran.
@@ -13,13 +13,13 @@ Design pattern (from Nyaya_Mitra_Master_Roadmap_v2.md §9, Agent 2.9):
     so the frontend can render each section without re-fetching.
 
 Pipeline order:
-  1. Eligibility Agent        (deterministic — gates everything downstream)
+  1. Eligibility Agent        (deterministic gates everything downstream)
   2. Completeness Agent       (deterministic diff + optional LLM phrasing)
   3. Prioritization scoring   (deterministic weighted score)
   4. Notification Agent       (simulated dispatch)
   5. Retrieval Agent (RAG)    (only if eligible + complete)
   6. Drafting Agent           (only if eligible + complete + law retrieved)
-  7. Explainer Agent          (always — explains current status in plain language)
+  7. Explainer Agent          (always explains current status in plain language)
   8. Status Agent             (simulated court tracking)
 """
 
@@ -57,7 +57,7 @@ def process_case(case: CaseRecord) -> dict:
     """
     Run a single CaseRecord through the full Nyaya Mitra agent pipeline.
 
-    The pipeline is sequential — each step gates the next where appropriate.
+    The pipeline is sequential each step gates the next where appropriate.
     The function never raises; unexpected errors in any agent are caught,
     logged to agent_activity_log, and the pipeline continues so the caller
     always receives a complete result dict.
@@ -67,17 +67,17 @@ def process_case(case: CaseRecord) -> dict:
 
     Returns:
         A consolidated dict containing all agent outputs:
-            case_id           — echoed from input
-            eligibility       — full Eligibility Agent result dict
-            completeness      — full Completeness Agent result dict
-            urgency_score     — integer score from Prioritization Agent
-            notification      — full Notification Agent result dict
-            retrieval         — full Retrieval Agent result dict
-            draft             — full Drafting Agent result dict (or skip notice)
-            explanation       — full Explainer Agent result dict
-            status_tracking   — full Status Agent result dict
-            draft_ready       — True only if eligible + complete + draft generated
-            agent_activity_log— list of timestamped step records for the UI panel
+            case_id           echoed from input
+            eligibility       full Eligibility Agent result dict
+            completeness      full Completeness Agent result dict
+            urgency_score     integer score from Prioritization Agent
+            notification      full Notification Agent result dict
+            retrieval         full Retrieval Agent result dict
+            draft             full Drafting Agent result dict (or skip notice)
+            explanation       full Explainer Agent result dict
+            status_tracking   full Status Agent result dict
+            draft_ready       True only if eligible + complete + draft generated
+            agent_activity_loglist of timestamped step records for the UI panel
 
     Example:
         >>> result = process_case(case)
@@ -140,10 +140,10 @@ def process_case(case: CaseRecord) -> dict:
             provider = get_last_provider()
             _log_step(
                 activity_log, "DraftingAgent", "DONE",
-                f"Draft generated via [{provider}] — awaiting human-lawyer approval"
+                f"Draft generated via [{provider}] awaiting human-lawyer approval"
             )
         else:
-            _log_step(activity_log, "DraftingAgent", "SKIPPED", "No statute text retrieved — draft skipped")
+            _log_step(activity_log, "DraftingAgent", "SKIPPED", "No statute text retrieved draft skipped")
     else:
         skip_reason = []
         if not is_eligible:
@@ -198,7 +198,7 @@ if __name__ == "__main__":
     import json
     from app.models.schemas import UrgencyFlags
 
-    # ── "Hero case" — perfect eligible first-time offender ───────────────────
+    # ── "Hero case" perfect eligible first-time offender ───────────────────
     # All docs present, senior citizen, health flag, 167 days overdue
     # Expected: eligible=True, is_complete=True, draft_ready=True
     hero_case = CaseRecord(

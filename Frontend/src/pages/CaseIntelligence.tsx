@@ -119,9 +119,9 @@ export function CaseIntelligence() {
     { id: 3, type: "CALCULATION", title: "Threshold Calculation", description: `ceil(${c.max_sentence_days_for_offense} × ${eligibility.threshold_fraction?.toFixed(4)}) = ${eligibility.required_custody_days} days` },
     {
       id: 4, type: eligibility.eligible ? "AI_INTERPRETATION" : "FACT",
-      title: eligibility.eligible ? "ELIGIBLE — Threshold Exceeded" : "NOT YET ELIGIBLE",
+      title: eligibility.eligible ? "ELIGIBLE Threshold Exceeded" : "NOT YET ELIGIBLE",
       description: eligibility.eligible
-        ? `${eligibility.days_overdue} days overdue — bail application recommended`
+        ? `${eligibility.days_overdue} days overdue bail application recommended`
         : `${eligibility.required_custody_days - (eligibility.custody_days_served ?? 0)} more days needed`
     },
   ];
@@ -271,7 +271,7 @@ export function CaseIntelligence() {
             <section className="space-y-4">
               <h2 className="text-xl font-medium tracking-tight uppercase text-white flex items-center gap-2">
                 <Scale className="w-5 h-5 text-accent" /> Legal Evidence
-                <span className="text-xs font-normal text-muted-foreground ml-2 normal-case">Grounded Legal Retrieval — keyword/indexed</span>
+                <span className="text-xs font-normal text-muted-foreground ml-2 normal-case">Grounded Legal Retrieval keyword/indexed</span>
               </h2>
               {legalSources.map((source: any, idx: number) => (
                 <div key={idx} className="p-6 rounded-xl border border-white/5 bg-white/[0.02] space-y-4">
@@ -331,7 +331,7 @@ export function CaseIntelligence() {
                 <span className="text-xs font-normal text-muted-foreground normal-case ml-2">Logged pipeline execution</span>
               </h2>
 
-              {/* LLM Provider Badge — visible fault tolerance demo */}
+              {/* LLM Provider Badge visible fault tolerance demo */}
               {llmProvider && (
                 <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold ${
                   llmProvider.includes("Groq") ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" :
@@ -465,7 +465,7 @@ export function CaseIntelligence() {
                 </div>
               ) : isManualReview ? (
                 <div className="text-center p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-400 text-sm">
-                  This case requires manual review — automated approval is not permitted.
+                  This case requires manual review automated approval is not permitted.
                 </div>
               ) : (
                 <>

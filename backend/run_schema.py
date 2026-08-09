@@ -35,7 +35,7 @@ if resp.status_code in (200, 201, 204):
     print("✅ Schema applied successfully via RPC!")
 else:
     # Fallback: run statements individually through postgrest
-    print(f"RPC exec_sql not available (status {resp.status_code}) — applying schema statement by statement...")
+    print(f"RPC exec_sql not available (status {resp.status_code}) applying schema statement by statement...")
     
     # Split SQL into individual statements  
     statements = [s.strip() for s in sql.split(";") if s.strip() and not s.strip().startswith("--")]

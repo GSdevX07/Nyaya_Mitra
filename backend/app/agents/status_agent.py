@@ -1,8 +1,8 @@
 """
-status_agent.py — Court status tracking state machine for Nyaya Mitra.
+status_agent.py Court status tracking state machine for Nyaya Mitra.
 
 Design pattern (from Nyaya_Mitra_Master_Roadmap_v2.md §9, Agent 2.8):
-  - EXPLICITLY SIMULATED integration — no public court-record API exists to integrate
+  - EXPLICITLY SIMULATED integration no public court-record API exists to integrate
     against in a short build window. This is a named production integration
     point: in a real deployment, replace get_status() with a call to
     eCourts Services API (ecourts.gov.in) or a DLSA case management system.
@@ -43,9 +43,9 @@ def get_status(case_id: str) -> dict:
 
     Returns:
         A dict containing:
-            case_id        — echoed input
-            current_status — the persisted CaseState string
-            last_updated   — ISO 8601 UTC timestamp of this check
+            case_id        echoed input
+            current_status the persisted CaseState string
+            last_updated   ISO 8601 UTC timestamp of this check
     """
     case = get_case(case_id)
     current_status = case.status.value if case else "UNKNOWN"
@@ -77,10 +77,10 @@ if __name__ == "__main__":
 
     for case_id in test_ids:
         result_1 = get_status(case_id)
-        result_2 = get_status(case_id)   # call twice — must be same
+        result_2 = get_status(case_id)   # call twice must be same
 
         assert result_1["current_status"] == result_2["current_status"], \
-            f"{case_id}: status changed between calls — must be deterministic"
+            f"{case_id}: status changed between calls must be deterministic"
         assert result_1["case_id"] == case_id
 
         print(f"{case_id:<14}{result_1['current_status']:<22}[PASS]")

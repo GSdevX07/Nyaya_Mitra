@@ -1,14 +1,14 @@
 """
-drafting_agent.py — LLM-powered bail application drafter for Nyaya Mitra.
+drafting_agent.py LLM-powered bail application drafter for Nyaya Mitra.
 
 Design pattern (from Nyaya_Mitra_Master_Roadmap_v2.md §9, Agent 2.6):
-  - This is the primary "wow" demo moment — a real generated legal document.
+  - This is the primary "wow" demo moment a real generated legal document.
   - The system prompt explicitly restricts the LLM to ONLY the retrieved
-    statute/precedent text — no hallucinated law is introduced.
+    statute/precedent text no hallucinated law is introduced.
   - This agent should only be called when retrieved_law is non-empty
     (i.e., after the Retrieval Agent confirms eligibility and returns text).
   - The output is always routed through a human-lawyer approval gate before
-    anything is "filed" — the UI enforces this; this agent only produces a draft.
+    anything is "filed" the UI enforces this; this agent only produces a draft.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from app.models.schemas import CaseRecord
 
 DRAFTING_SYSTEM_PROMPT: str = (
     "You are drafting a bail application for a legal-aid lawyer's review. "
-    "Use ONLY the retrieved statute/precedent text provided — do not add legal "
+    "Use ONLY the retrieved statute/precedent text provided do not add legal "
     "claims not present in it. Flag clearly if a required fact is missing "
     "rather than inferring it. "
     "IMPORTANT: Output MUST be PLAIN TEXT ONLY. DO NOT use any markdown formatting, "
@@ -38,7 +38,7 @@ def draft_bail_application(case: CaseRecord, retrieved_law: str) -> dict:
     Generate a formal bail application draft grounded in retrieved statute text.
 
     The LLM is instructed via the system prompt to cite only the provided
-    statute/precedent and to flag gaps rather than infer missing facts —
+    statute/precedent and to flag gaps rather than infer missing facts 
     this is the core hallucination-prevention measure for this agent.
 
     Args:
@@ -49,8 +49,8 @@ def draft_bail_application(case: CaseRecord, retrieved_law: str) -> dict:
 
     Returns:
         A dict containing:
-            case_id          — echoed from the input record
-            drafted_document — LLM-generated bail application text (or the
+            case_id          echoed from the input record
+            drafted_document LLM-generated bail application text (or the
                                dev-mode placeholder if providers are not
                                yet configured)
 

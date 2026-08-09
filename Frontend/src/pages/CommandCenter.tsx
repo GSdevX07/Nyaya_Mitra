@@ -203,7 +203,7 @@ function OverviewTab({ detail }: { detail: CaseDetail }) {
       <Card className="border-white/8 bg-white/[0.02]">
         <CardHeader className="pb-2 pt-4 px-4">
           <CardTitle className="text-sm flex items-center gap-2">
-            <Scale className="w-4 h-4 text-blue-400" /> Eligibility — Section 479 BNSS
+            <Scale className="w-4 h-4 text-blue-400" /> Eligibility Section 479 BNSS
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4 space-y-2">
@@ -449,7 +449,7 @@ export function CommandCenter() {
         <motion.div variants={fadeUp} className="space-y-1">
           <h1 className="text-3xl font-serif font-semibold tracking-tight text-white">Lawyer Command Centre</h1>
           <p className="text-muted-foreground text-sm font-sans">
-            Prioritized undertrial queue — powered by the Nyaya Mitra agent pipeline.
+            Prioritized undertrial queue powered by the Nyaya Mitra agent pipeline.
           </p>
         </motion.div>
 

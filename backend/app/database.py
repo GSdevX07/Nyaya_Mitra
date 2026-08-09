@@ -1,5 +1,5 @@
 """
-database.py — Supabase PostgreSQL persistence for Nyaya Mitra.
+database.py Supabase PostgreSQL persistence for Nyaya Mitra.
 
 This module provides a persistent state machine for the hackathon demo,
 running on Supabase.

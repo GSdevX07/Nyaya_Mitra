@@ -1,8 +1,8 @@
 """
-notification_agent.py — Simulated alert dispatcher for Nyaya Mitra.
+notification_agent.py Simulated alert dispatcher for Nyaya Mitra.
 
 Design pattern (from Nyaya_Mitra_Master_Roadmap_v2.md §9, Agent 2.4):
-  - This agent is EXPLICITLY SIMULATED — no real SMS/email gateway is wired up.
+  - This agent is EXPLICITLY SIMULATED no real SMS/email gateway is wired up.
   - In production this would integrate with an SMS gateway (e.g., Twilio, MSG91)
     or a push-notification service. The architecture supports that drop-in.
   - The console print is intentional: it acts as the visible demo beat for
@@ -43,11 +43,11 @@ def trigger_notification(case: CaseRecord, urgency_score: int) -> dict:
 
     Returns:
         A dict containing:
-            case_id           — echoed from the input record
-            status            — always "Notified" (simulated)
-            alert_level       — "HIGH" or "STANDARD"
-            timestamp         — ISO 8601 UTC timestamp of dispatch
-            dispatched_message— the full alert string sent to the dashboard
+            case_id           echoed from the input record
+            status            always "Notified" (simulated)
+            alert_level       "HIGH" or "STANDARD"
+            timestamp         ISO 8601 UTC timestamp of dispatch
+            dispatched_messagethe full alert string sent to the dashboard
 
     Example:
         >>> result = trigger_notification(case, urgency_score=267)
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     import json
     from app.models.schemas import UrgencyFlags
 
-    # ── Case 1: High urgency — score 267 (above threshold of 100) ───────────
+    # ── Case 1: High urgency score 267 (above threshold of 100) ───────────
     case_high = CaseRecord(
         case_id="UTP-0007",
         name="synthetic - not a real person",
@@ -114,7 +114,7 @@ if __name__ == "__main__":
         preferred_language="hi",
     )
 
-    # ── Case 2: Standard urgency — score 60 (at or below threshold of 100) ──
+    # ── Case 2: Standard urgency score 60 (at or below threshold of 100) ──
     case_standard = CaseRecord(
         case_id="UTP-0001",
         name="synthetic - not a real person",

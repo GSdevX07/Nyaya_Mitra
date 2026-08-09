@@ -110,7 +110,7 @@ export function CommandPalette({ isOpen: externalIsOpen, onClose }: CommandPalet
                 </div>
                 <div>
                   <div className="text-white font-medium text-sm">
-                    {item.case.case_id} — {item.case.name}
+                    {item.case.case_id} {item.case.name}
                   </div>
                   <div className="text-xs text-muted-foreground font-mono">
                     Offense: {item.case.offense_sections.join(", ")} | Days in Custody: {item.case.custody_days}

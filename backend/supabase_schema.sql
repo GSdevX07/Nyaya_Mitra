@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════
--- Nyaya Mitra — Supabase Schema Migration
+-- Nyaya Mitra Supabase Schema Migration
 -- Run this FIRST in Supabase SQL Editor before seeding data
 -- Project: bqvgxarromdjjrzflrwy
 -- ═══════════════════════════════════════════════════════════════════

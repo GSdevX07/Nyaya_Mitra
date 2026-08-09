@@ -63,7 +63,7 @@ class CaseRecord(BaseModel):
     name: str = Field(
         ...,
         description=(
-            "Name of the prisoner — MUST be marked with "
+            "Name of the prisoner MUST be marked with "
             "'(Synthetic)' in all mock data."
         ),
         examples=["Ramesh Kumar (Synthetic)"],

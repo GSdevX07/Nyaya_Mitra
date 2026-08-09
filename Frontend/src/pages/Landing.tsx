@@ -40,7 +40,7 @@ const pipelineSteps = [
 
 const features = [
   { title: "Proactive Case Discovery", desc: "AI continuously monitors custody durations against statutory thresholds, flagging cases before they fall through the cracks.", icon: BrainCircuit },
-  { title: "Evidence-Grounded Analysis", desc: "Every conclusion is traceable to source documents, legal provisions, and extracted data — never a black box.", icon: Shield },
+  { title: "Evidence-Grounded Analysis", desc: "Every conclusion is traceable to source documents, legal provisions, and extracted data never a black box.", icon: Shield },
   { title: "Human-In-The-Loop", desc: "AI prepares, humans decide. No bail application is ever filed without explicit officer review and approval.", icon: Users },
 ];
 
@@ -173,7 +173,7 @@ export function Landing() {
           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="text-center mb-20">
             <div className="text-xs text-accent uppercase tracking-[0.3em] font-semibold mb-4">How it works</div>
             <h2 className="text-4xl md:text-5xl font-bold tracking-tight text-white mb-4">Intelligent Case Pipeline</h2>
-            <p className="text-muted-foreground max-w-xl mx-auto">Every case flows through a structured intelligence pipeline — from raw records to human-reviewed legal action.</p>
+            <p className="text-muted-foreground max-w-xl mx-auto">Every case flows through a structured intelligence pipeline from raw records to human-reviewed legal action.</p>
           </motion.div>
 
           <div className="relative">

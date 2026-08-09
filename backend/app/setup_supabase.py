@@ -1,5 +1,5 @@
 """
-setup_supabase.py — Initialize Supabase PostgreSQL tables and seed data.
+setup_supabase.py Initialize Supabase PostgreSQL tables and seed data.
 """
 
 import os

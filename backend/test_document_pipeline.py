@@ -1,5 +1,5 @@
 """
-test_document_pipeline.py — Verification script for document processing pipeline.
+test_document_pipeline.py Verification script for document processing pipeline.
 """
 
 from app.document_pipeline import execute_full_document_pipeline

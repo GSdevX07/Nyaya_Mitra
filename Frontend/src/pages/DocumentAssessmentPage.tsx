@@ -176,7 +176,7 @@ export function DocumentAssessmentPage() {
           <div className="flex items-center gap-2">
             <Cpu className="w-4 h-4 text-[#B08D57]" />
             <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-white/80">
-              Case-File Transmittal &amp; Routing Slip — Pipeline Operations
+              Case-File Transmittal &amp; Routing Slip Pipeline Operations
             </h2>
           </div>
           {result && (
@@ -426,7 +426,7 @@ export function DocumentAssessmentPage() {
                       {result.granite_assessment.model_name}
                     </span>
                     <h2 className="text-2xl font-bold text-white mt-0.5">
-                      Preliminary Legal Assessment Report — {result.granite_assessment.case_id}
+                      Preliminary Legal Assessment Report {result.granite_assessment.case_id}
                     </h2>
                   </div>
                   <div className="flex items-center gap-3">

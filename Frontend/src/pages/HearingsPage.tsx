@@ -40,7 +40,7 @@ export function HearingsPage() {
             </span>
             <span className="text-xs text-muted-foreground font-mono">Simulated Court Calendar</span>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Court Hearings (Demo Data)</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-white">Court Hearings</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Track upcoming undertrial bail applications and remand reviews across judicial magistrate courts.
           </p>

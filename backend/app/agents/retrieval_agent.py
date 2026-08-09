@@ -1,11 +1,11 @@
 """
-retrieval_agent.py — RAG Retrieval Agent for Nyaya Mitra.
+retrieval_agent.py RAG Retrieval Agent for Nyaya Mitra.
 
 Design pattern (from Nyaya_Mitra_Master_Roadmap_v2.md §9, Agent 2.5):
   - Determines WHICH legal text to retrieve based on case eligibility.
   - The actual retrieval is delegated to the vector_store layer, which is
     swappable between the mock dict and a real ChromaDB index.
-  - If a case is not yet eligible, no statute text is retrieved — this avoids
+  - If a case is not yet eligible, no statute text is retrieved this avoids
     generating a draft bail application for ineligible cases downstream.
 """
 
@@ -23,7 +23,7 @@ def execute_retrieval(case: CaseRecord, is_eligible: bool) -> dict:
     Retrieve relevant statute and precedent text for a case if it is eligible.
 
     For eligible cases, fetches BNSS Section 479 text and the Article 21
-    Supreme Court precedent on prolonged incarceration — the two grounding
+    Supreme Court precedent on prolonged incarceration the two grounding
     chunks the Drafting Agent needs to produce a legally sound bail application.
 
     For ineligible cases, returns an empty string so the orchestrator can
@@ -35,8 +35,8 @@ def execute_retrieval(case: CaseRecord, is_eligible: bool) -> dict:
 
     Returns:
         A dict containing:
-            case_id            — echoed from the input record
-            retrieved_statutes — concatenated statute/precedent text if eligible,
+            case_id            echoed from the input record
+            retrieved_statutes concatenated statute/precedent text if eligible,
                                  empty string if not eligible
 
     Example (eligible):
@@ -90,7 +90,7 @@ if __name__ == "__main__":
     print("RETRIEVAL AGENT -- SMOKE TEST")
     print("=" * 60)
 
-    # ── Test 1: Eligible case — should return statute text ───────────────────
+    # ── Test 1: Eligible case should return statute text ───────────────────
     print("\nTest 1: is_eligible=True")
     print("-" * 40)
     result_eligible = execute_retrieval(mock_case, is_eligible=True)
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     assert result_eligible["retrieved_statutes"] != ""
     print("\n  [PASS] Retrieved text contains Section 479 and Article 21 precedent")
 
-    # ── Test 2: Ineligible case — should return empty string ─────────────────
+    # ── Test 2: Ineligible case should return empty string ─────────────────
     print("\nTest 2: is_eligible=False")
     print("-" * 40)
     result_ineligible = execute_retrieval(mock_case, is_eligible=False)

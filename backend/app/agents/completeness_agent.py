@@ -1,11 +1,11 @@
 """
-completeness_agent.py — Records Completeness Agent for Nyaya Mitra.
+completeness_agent.py Records Completeness Agent for Nyaya Mitra.
 
 Design pattern (from Nyaya_Mitra_Master_Roadmap_v2.md §9, Agent 2.2):
   - Deterministic core: the missing-documents diff is pure set arithmetic.
     No LLM is used to decide whether documents are missing.
   - LLM is used ONLY to phrase the human-readable alert sentence that a
-    records officer will read — a formatting task, not a decision.
+    records officer will read a formatting task, not a decision.
   - If the LLM is unavailable, the agent still returns full structured data;
     only the message string degrades to a plain-text fallback.
 """
@@ -32,10 +32,10 @@ def evaluate_completeness(case: CaseRecord) -> dict:
 
     Returns:
         A dict containing:
-            case_id     — echoed from the input record
-            is_complete — True if no documents are missing
-            missing_docs— list of document names that are absent
-            message     — "All required documents are present." when complete,
+            case_id     echoed from the input record
+            is_complete True if no documents are missing
+            missing_docslist of document names that are absent
+            message     "All required documents are present." when complete,
                           or an LLM-drafted alert sentence when incomplete
 
     Example (complete):
@@ -50,7 +50,7 @@ def evaluate_completeness(case: CaseRecord) -> dict:
         >>> "charge_sheet" in result["missing_docs"]
         True
     """
-    # ── 1. Deterministic diff — no LLM involved ──────────────────────────────
+    # ── 1. Deterministic diff no LLM involved ──────────────────────────────
     required = set(case.required_docs)
     present = set(case.present_docs)
     missing_docs: list[str] = sorted(required - present)   # sorted for stable output
@@ -78,7 +78,7 @@ def evaluate_completeness(case: CaseRecord) -> dict:
     try:
         message = generate(prompt=prompt, system=system)
     except RuntimeError as exc:
-        # All LLM providers failed — degrade gracefully with a plain-text alert
+        # All LLM providers failed degrade gracefully with a plain-text alert
         # so the structured data (missing_docs) is still usable downstream.
         message = (
             f"ALERT: The following documents are missing for case "

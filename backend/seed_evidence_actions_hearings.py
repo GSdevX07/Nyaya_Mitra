@@ -41,7 +41,7 @@ for c in cases:
     evidence_rows.append({
         'id': uid('EV'),
         'case_id': c['id'],
-        'title': f"Remand Order Record — {c['name']}",
+        'title': f"Remand Order Record {c['name']}",
         'offense': offense,
         'verification_status': 'Verified Authentic',
         'authenticity_score': 97.2,
@@ -54,13 +54,13 @@ for c in cases:
     evidence_rows.append({
         'id': uid('EV'),
         'case_id': c['id'],
-        'title': f"FIR & Arrest Log — {c['name']}",
+        'title': f"FIR & Arrest Log {c['name']}",
         'offense': offense,
         'verification_status': 'Pending Review' if is_missing_docs else 'Verified Authentic',
         'authenticity_score': 74.5 if is_missing_docs else 92.1,
         'chain_of_custody': f"Police Station → {c['jail_location']}",
         'flagged': is_missing_docs,
-        'notes': 'Charge sheet missing — manual verification required.' if is_missing_docs else 'All documents present. Chain-of-custody intact.',
+        'notes': 'Charge sheet missing manual verification required.' if is_missing_docs else 'All documents present. Chain-of-custody intact.',
     })
 
 print(f"Inserting {len(evidence_rows)} evidence rows...")

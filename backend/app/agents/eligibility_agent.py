@@ -1,10 +1,10 @@
 """
-eligibility_agent.py — Deterministic Section 479 BNSS eligibility evaluator.
+eligibility_agent.py Deterministic Section 479 BNSS eligibility evaluator.
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  CRITICAL DESIGN RULE (from Nyaya_Mitra_Master_Roadmap_v2.md §2)        ║
 ║  The eligibility decision is NEVER made by an LLM.                      ║
-║  This module is pure deterministic Python arithmetic — no AI calls.     ║
+║  This module is pure deterministic Python arithmetic no AI calls.     ║
 ║  The LLM's role elsewhere is limited to explaining, retrieving,         ║
 ║  and drafting; it never decides custody status.                         ║
 ╚══════════════════════════════════════════════════════════════════════════╝
@@ -23,8 +23,8 @@ from app.models.schemas import CaseRecord
 
 # ── Constants ───────────────────────────────────────────────────────────────
 
-_FIRST_TIME_FRACTION: float = 1 / 3   # Section 479 BNSS — first-time offenders
-_REPEAT_FRACTION: float = 1 / 2       # Section 479 BNSS — repeat offenders
+_FIRST_TIME_FRACTION: float = 1 / 3   # Section 479 BNSS first-time offenders
+_REPEAT_FRACTION: float = 1 / 2       # Section 479 BNSS repeat offenders
 
 _LEGAL_BASIS_FIRST_TIME = (
     "Section 479 BNSS - First-Time Offender (1/3 Max Sentence Served)"
@@ -46,14 +46,14 @@ def evaluate_eligibility(case: CaseRecord) -> dict:
 
     Returns:
         A dict containing:
-            case_id              — echoed from the input record
-            eligible             — True if the prisoner has served the
+            case_id              echoed from the input record
+            eligible             True if the prisoner has served the
                                    required fraction of the max sentence
-            threshold_fraction   — 1/3 for first-time, 1/2 for repeat
-            required_custody_days— minimum days that must be served
-            custody_days_served  — actual days served (from the record)
-            days_overdue         — how many days past threshold (0 if not yet)
-            legal_basis          — human-readable citation string
+            threshold_fraction   1/3 for first-time, 1/2 for repeat
+            required_custody_daysminimum days that must be served
+            custody_days_served  actual days served (from the record)
+            days_overdue         how many days past threshold (0 if not yet)
+            legal_basis          human-readable citation string
 
     Example:
         >>> result = evaluate_eligibility(case)
@@ -178,7 +178,7 @@ if __name__ == "__main__":
     )
 
     print("=" * 60)
-    print("ELIGIBILITY AGENT — SMOKE TEST")
+    print("ELIGIBILITY AGENT SMOKE TEST")
     print("=" * 60)
 
     for label, case in [

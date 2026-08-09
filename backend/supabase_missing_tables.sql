@@ -1,4 +1,4 @@
--- Nyaya Mitra — Supabase MISSING Tables Only
+-- Nyaya Mitra Supabase MISSING Tables Only
 -- Run this in: https://supabase.com/dashboard/project/bqvgxarromdjjrzflrwy/sql/new
 
 -- ── 1. Offenses Lookup ──────────────────────────────────────────────

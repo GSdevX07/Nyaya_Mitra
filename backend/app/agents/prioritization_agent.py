@@ -1,8 +1,8 @@
 """
-prioritization_agent.py — Urgency scoring and case queue sorter for Nyaya Mitra.
+prioritization_agent.py Urgency scoring and case queue sorter for Nyaya Mitra.
 
 Design pattern (from Nyaya_Mitra_Master_Roadmap_v2.md §9, Agent 2.3):
-  - Fully deterministic weighted scoring — no LLM involved.
+  - Fully deterministic weighted scoring no LLM involved.
   - Score formula: days_overdue + health_flag(50) + age>60(30) + first_time(20)
   - Completely explainable to a judge: every point awarded has a named reason.
   - The output sorted queue feeds directly into the lawyer dashboard.
@@ -16,7 +16,7 @@ from app.models.schemas import CaseRecord
 # ── Scoring weights (named constants for explainability) ─────────────────────
 
 WEIGHT_HEALTH_FLAG: int = 50       # Documented serious health condition
-WEIGHT_ELDERLY: int = 30           # Age above 60 — elevated vulnerability
+WEIGHT_ELDERLY: int = 30           # Age above 60 elevated vulnerability
 WEIGHT_FIRST_TIME_OFFENDER: int = 20  # First-time offenders get statutory preference
 AGE_ELDERLY_THRESHOLD: int = 60
 
@@ -39,7 +39,7 @@ def calculate_urgency_score(case: CaseRecord, days_overdue: int) -> int:
     Args:
         case:        A validated CaseRecord instance.
         days_overdue: Days the prisoner has been held past the eligibility
-                      threshold (0 if not yet eligible — never negative).
+                      threshold (0 if not yet eligible never negative).
 
     Returns:
         Integer urgency score (higher = needs attention sooner).
@@ -106,7 +106,7 @@ def prioritize_cases(case_evaluations: list[dict]) -> list[dict]:
 if __name__ == "__main__":
     from app.models.schemas import UrgencyFlags
 
-    # ── Case 1: Standard case — moderate overdue, no special flags ───────────
+    # ── Case 1: Standard case moderate overdue, no special flags ───────────
     # Expected score: 40 overdue + 20 first-time = 60
     case_standard = CaseRecord(
         case_id="UTP-0001",
@@ -123,7 +123,7 @@ if __name__ == "__main__":
         preferred_language="en",
     )
 
-    # ── Case 2: Senior citizen with health issues — low overdue, high flags ──
+    # ── Case 2: Senior citizen with health issues low overdue, high flags ──
     # Expected score: 10 overdue + 50 health + 30 elderly + 20 first-time = 110
     case_senior_health = CaseRecord(
         case_id="UTP-0007",

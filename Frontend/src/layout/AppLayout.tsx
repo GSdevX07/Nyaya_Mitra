@@ -229,7 +229,7 @@ export function AppLayout() {
               <button
                 onClick={() => scrollNav("right")}
                 className="absolute right-0 z-20 p-1.5 rounded-full bg-background/95 border border-white/20 text-accent hover:bg-white/10 shadow-lg backdrop-blur-md transition-all animate-pulse"
-                title="More tabs available — Click to scroll right"
+                title="More tabs available Click to scroll right"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>

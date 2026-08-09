@@ -1,5 +1,5 @@
 """
-main.py — FastAPI application entry point for Nyaya Mitra.
+main.py FastAPI application entry point for Nyaya Mitra.
 
 Run locally:
     uvicorn app.main:app --reload --port 8000
@@ -14,10 +14,10 @@ Design notes:
         UTP-0001  eligible first-time offender, all docs present   (HIGH priority)
         UTP-0007  eligible first-time, senior + health flag        (HIGHEST priority)
         UTP-0012  not yet eligible repeat offender                 (STANDARD)
-        UTP-0015  eligible but missing a document                  (HIGH — docs gap)
+        UTP-0015  eligible but missing a document                  (HIGH docs gap)
         UTP-0021  eligible first-time, young + healthy             (STANDARD)
   - The human-approval gate (POST /cases/{id}/approve) is a real UI button,
-    not a slide claim — matching the project ground rule from the roadmap.
+    not a slide claim matching the project ground rule from the roadmap.
   - process_case() is intentionally called only on individual case detail
     (GET /cases/{id}) so the queue endpoint remains fast even with many cases.
 """
@@ -59,7 +59,7 @@ app = FastAPI(
     title="Nyaya Mitra Backend API",
     description=(
         "Agentic AI Legal Operations API for Undertrial Prisoners. "
-        "Built with synthetic data only — no real prisoner records are used."
+        "Built with synthetic data only no real prisoner records are used."
     ),
     version="1.1.0",
     lifespan=lifespan,
@@ -78,11 +78,11 @@ app.add_middleware(
 
 # ── Mock database ─────────────────────────────────────────────────────────────
 # 5 hero cases engineered to hit distinct agent decision branches.
-# All data is synthetic — see Nyaya_Mitra_Master_Roadmap_v2.md §8, Step 1.1.
+# All data is synthetic see Nyaya_Mitra_Master_Roadmap_v2.md §8, Step 1.1.
 
 MOCK_DB: list[CaseRecord] = [
 
-    # UTP-0001 — Eligible first-time offender, all docs present, young + healthy
+    # UTP-0001 Eligible first-time offender, all docs present, young + healthy
     # Expected: eligible, complete, urgency=STANDARD
     CaseRecord(
         case_id="UTP-0001",
@@ -104,7 +104,7 @@ MOCK_DB: list[CaseRecord] = [
         assignment_status="AVAILABLE",
     ),
 
-    # UTP-0007 — Eligible first-time offender, senior citizen + health flag, all docs
+    # UTP-0007 Eligible first-time offender, senior citizen + health flag, all docs
     # Expected: eligible, complete, urgency=HIGH (score ~267)
     CaseRecord(
         case_id="UTP-0007",
@@ -126,7 +126,7 @@ MOCK_DB: list[CaseRecord] = [
         assignment_status="AVAILABLE",
     ),
 
-    # UTP-0012 — Not yet eligible repeat offender, missing docs
+    # UTP-0012 Not yet eligible repeat offender, missing docs
     # Expected: NOT eligible, NOT complete, draft skipped
     CaseRecord(
         case_id="UTP-0012",
@@ -148,7 +148,7 @@ MOCK_DB: list[CaseRecord] = [
         assignment_status="AVAILABLE",
     ),
 
-    # UTP-0015 — Eligible but missing a key document (tests Completeness Agent)
+    # UTP-0015 Eligible but missing a key document (tests Completeness Agent)
     # Expected: eligible, NOT complete (missing charge_sheet), draft skipped
     CaseRecord(
         case_id="UTP-0015",
@@ -170,7 +170,7 @@ MOCK_DB: list[CaseRecord] = [
         assignment_status="AVAILABLE",
     ),
 
-    # UTP-0021 — Eligible first-time offender, elderly + health flag, all docs
+    # UTP-0021 Eligible first-time offender, elderly + health flag, all docs
     # Expected: eligible, complete, urgency=HIGH
     CaseRecord(
         case_id="UTP-0021",
@@ -210,7 +210,7 @@ def _find_case(case_id: str) -> CaseRecord:
 
 @app.get("/", tags=["Health"])
 def root():
-    """Health check — confirms the API is online."""
+    """Health check confirms the API is online."""
     return {
         "status": "online",
         "service": "Nyaya Mitra API",
@@ -284,7 +284,7 @@ def get_available_cases():
     ]
 
 
-# ── Document AI Pipeline endpoints — MUST be before /cases/{case_id} ──────────
+# ── Document AI Pipeline endpoints MUST be before /cases/{case_id} ──────────
 # FastAPI resolves GET routes in registration order; if these appear after the
 # parameterised route, "sample-documents" gets matched as case_id.
 
@@ -431,7 +431,7 @@ def take_up_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
 
     This endpoint represents the mandatory sign-off that must happen before
     a bail application draft is considered 'filed'. It is a real UI button
-    in the lawyer dashboard — not a slide claim.
+    in the lawyer dashboard not a slide claim.
     """
     case = _find_case(case_id)
 
@@ -449,7 +449,7 @@ def take_up_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
     return {
         "status": "success",
         "case_id": case_id,
-        "message": f"Approved by Human Lawyer — bail application submitted to court. Assigned to {lawyer_id}",
+        "message": f"Approved by Human Lawyer bail application submitted to court. Assigned to {lawyer_id}",
         "next_step": "Status Tracking Agent will monitor hearing schedule.",
         "offense_sections": case.offense_sections,
         "jail_location": case.jail_location,
@@ -480,7 +480,7 @@ def decline_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
 @app.post("/cases/{case_id}/approve", tags=["Cases"])
 def approve_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
     """
-    Human-in-the-loop approval gate — called from the Case Intelligence page.
+    Human-in-the-loop approval gate called from the Case Intelligence page.
 
     The lawyer reviews the full orchestrator output and clicks 'Approve & File'.
     This persists the FILED status and ASSIGNED assignment into SQLite.
@@ -506,7 +506,7 @@ def approve_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
 @app.get("/lawyer/profile", tags=["Lawyer Profile"])
 def get_lawyer_profile(lawyer_id: str = "Legal Officer 104"):
     """Return profile details and statistics for the advocate / legal officer."""
-    # Count from SQLite — reflects actual persisted assignment state
+    # Count from SQLite reflects actual persisted assignment state
     assigned_count = sum(1 for c in get_all_cases() if c.assignment_status == "ASSIGNED")
     return {
         "id": "Legal Officer 104",
@@ -528,10 +528,11 @@ def get_lawyer_profile(lawyer_id: str = "Legal Officer 104"):
 def get_documents():
     """
     Retrieve document status and vault inventory across all active cases.
-    Reads from SQLite — reflects any uploads that have been persisted.
+    Reads from SQLite reflects any uploads that have been persisted.
     """
     docs = []
-    for c in get_all_cases():  # ← SQLite, not MOCK_DB
+    cases = [c for c in get_all_cases() if c.assignment_status == "ASSIGNED"]
+    for c in cases:  # ← SQLite, not MOCK_DB
         for r_doc in c.required_docs:
             is_present = r_doc in c.present_docs
             docs.append({
@@ -539,7 +540,7 @@ def get_documents():
                 "case_id": c.case_id,
                 "prisoner_name": c.name,
                 "document_type": r_doc.replace("_", " ").title(),
-                "status": "Verified & Present" if is_present else "Missing — Action Required",
+                "status": "Verified & Present" if is_present else "Missing Action Required",
                 "is_present": is_present,
                 "uploaded_date": c.arrest_date if is_present else None,
                 "jail_location": c.jail_location,
@@ -572,7 +573,7 @@ def upload_document(case_id: str, document_type: str):
     on the next call to GET /cases/{case_id}.
     """
     case = _find_case(case_id)
-    updated_docs = list(case.present_docs)  # copy — do not mutate in-memory object
+    updated_docs = list(case.present_docs)  # copy do not mutate in-memory object
     if document_type not in updated_docs:
         updated_docs.append(document_type)
     # Persist to SQLite so change survives page reload
@@ -597,7 +598,7 @@ def upload_document(case_id: str, document_type: str):
     }
 
 
-# ── Evidence subsystem — SHA-256 integrity verification ──────────────────────
+# ── Evidence subsystem SHA-256 integrity verification ──────────────────────
 
 @app.get("/evidence", tags=["Evidence"])
 def get_evidence():
@@ -606,7 +607,7 @@ def get_evidence():
     Reads directly from the dedicated 'evidence' SQLite table.
     """
     evidence_records = get_all_evidence()
-    cases = {c.case_id: c for c in get_all_cases()}
+    cases = {c.case_id: c for c in get_all_cases() if c.assignment_status == "ASSIGNED"}
     
     results = []
     for record in evidence_records:
@@ -675,10 +676,11 @@ def verify_evidence(evidence_id: str):
 def get_actions():
     """
     Retrieve automated agent actions queue derived from the canonical EligibilityAgent.
-    No duplicate threshold logic — everything flows through evaluate_eligibility().
+    No duplicate threshold logic everything flows through evaluate_eligibility().
     """
     actions = []
-    for c in get_all_cases():
+    cases = [c for c in get_all_cases() if c.assignment_status == "ASSIGNED"]
+    for c in cases:
         eligibility = evaluate_eligibility(c)
         is_eligible = eligibility["eligible"]
         is_manual_review = "MANUAL_REVIEW" in eligibility["legal_basis"]
@@ -702,7 +704,7 @@ def get_actions():
                 "priority": "HIGH",
                 "status": "Ready for Approval",
                 "description": (
-                    f"Case {c.case_id} — {eligibility['custody_days_served']} days served, "
+                    f"Case {c.case_id} {eligibility['custody_days_served']} days served, "
                     f"{eligibility['required_custody_days']} required. "
                     f"Overdue by {eligibility['days_overdue']} days. Auto-draft generated."
                 ),
@@ -733,39 +735,34 @@ def trigger_action(action_id: str):
 
 @app.get("/hearings", tags=["Hearings"])
 def get_hearings():
-    """Retrieve court hearing schedules and judicial calendar."""
-    hearings = [
-        {
-            "id": "HRG-2026-01",
-            "case_id": "UTP-0007",
-            "prisoner_name": "UTP-0007 (Senior Citizen)",
-            "court_name": "District & Sessions Court, Bench 3",
-            "hearing_date": "2026-08-12",
-            "hearing_type": "Bail Application Under BNSS 479",
+    hearings = []
+    cases = [c for c in get_all_cases() if c.assignment_status == "ASSIGNED"]
+    
+    # Generate a dynamic hearing for each assigned case
+    for i, c in enumerate(cases):
+        # Determine hearing date (fake date e.g. 7 days from now)
+        target_date = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7 + i)
+        
+        # Simple heuristic for hearing type based on eligibility
+        eligibility = evaluate_eligibility(c)
+        if eligibility["eligible"]:
+            hearing_type = "Bail Application Under BNSS 479"
+            judge = "Hon'ble Justice R. K. Sharma"
+        else:
+            hearing_type = "Remand Review & Bail Motion"
+            judge = "Hon'ble Magistrate S. Patel"
+            
+        hearings.append({
+            "id": f"HRG-2026-{str(i+1).zfill(2)}",
+            "case_id": c.case_id,
+            "prisoner_name": c.name,
+            "court_name": "District & Sessions Court" if eligibility["eligible"] else "Chief Judicial Magistrate Court",
+            "hearing_date": target_date.strftime("%Y-%m-%d"),
+            "hearing_type": hearing_type,
             "status": "Scheduled",
-            "judge": "Hon'ble Justice R. K. Sharma",
-        },
-        {
-            "id": "HRG-2026-02",
-            "case_id": "UTP-0001",
-            "prisoner_name": "UTP-0001",
-            "court_name": "Chief Judicial Magistrate Court",
-            "hearing_date": "2026-08-14",
-            "hearing_type": "Remand Review & Bail Motion",
-            "status": "Scheduled",
-            "judge": "Hon'ble Magistrate S. Patel",
-        },
-        {
-            "id": "HRG-2026-03",
-            "case_id": "UTP-0021",
-            "prisoner_name": "UTP-0021 (Medical Priority)",
-            "court_name": "District Court, High Priority Bench",
-            "hearing_date": "2026-08-15",
-            "hearing_type": "Urgent Medical Bail Hearing",
-            "status": "Pending Hearing Notice",
-            "judge": "Hon'ble Justice M. V. Reddy",
-        },
-    ]
+            "judge": judge,
+        })
+
     return hearings
 
 
@@ -773,9 +770,9 @@ def get_hearings():
 def get_reports():
     """
     Retrieve legal analytics, inmate metrics, and DLSA performance report.
-    ALL metrics are derived from the canonical EligibilityAgent — no duplicate logic.
+    ALL metrics are derived from the canonical EligibilityAgent no duplicate logic.
     """
-    cases = get_all_cases()
+    cases = [c for c in get_all_cases() if c.assignment_status == "ASSIGNED"]
     total_cases = len(cases)
 
     eligibility_results = [evaluate_eligibility(c) for c in cases]

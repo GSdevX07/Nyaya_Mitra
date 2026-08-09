@@ -80,7 +80,7 @@ print("[OK] Excel loaded successfully")
 # ═══════════════════════════════════════════════════════════════════════════════
 print("\n[1/7] Seeding offenses …")
 if not table_exists("offenses"):
-    print("  ⚠ 'offenses' table not found — please apply supabase_schema.sql first")
+    print("  ⚠ 'offenses' table not found please apply supabase_schema.sql first")
 else:
     offense_rows = read_sheet(wb, "Offenses (lookup)")
     offenses = [{
@@ -96,7 +96,7 @@ else:
 # ═══════════════════════════════════════════════════════════════════════════════
 print("\n[2/7] Seeding jails …")
 if not table_exists("jails"):
-    print("  ⚠ 'jails' table not found — please apply supabase_schema.sql first")
+    print("  ⚠ 'jails' table not found please apply supabase_schema.sql first")
 else:
     jail_rows = read_sheet(wb, "Jails (lookup)")
     jails = [{
@@ -112,7 +112,7 @@ else:
 # ═══════════════════════════════════════════════════════════════════════════════
 print("\n[3/7] Seeding lawyers_lookup …")
 if not table_exists("lawyers_lookup"):
-    print("  ⚠ 'lawyers_lookup' table not found — please apply supabase_schema.sql first")
+    print("  ⚠ 'lawyers_lookup' table not found please apply supabase_schema.sql first")
 else:
     lawyer_rows = read_sheet(wb, "Lawyers (lookup)")
     lawyers_lookup = [{
@@ -188,7 +188,7 @@ upsert_batch("documents", documents, "id")
 # ═══════════════════════════════════════════════════════════════════════════════
 print("\n[6/7] Seeding bail_applications (63 rows) …")
 if not table_exists("bail_applications"):
-    print("  ⚠ 'bail_applications' table not found — please apply supabase_schema.sql first")
+    print("  ⚠ 'bail_applications' table not found please apply supabase_schema.sql first")
 else:
     bail_rows = read_sheet(wb, "Bail_Applications")
     bail_apps = [{
@@ -205,7 +205,7 @@ else:
 # ═══════════════════════════════════════════════════════════════════════════════
 print("\n[7/7] Seeding status_tracking (154 rows) …")
 if not table_exists("status_tracking"):
-    print("  ⚠ 'status_tracking' table not found — please apply supabase_schema.sql first")
+    print("  ⚠ 'status_tracking' table not found please apply supabase_schema.sql first")
 else:
     tracking_rows = read_sheet(wb, "Status_Tracking")
     tracking = [{

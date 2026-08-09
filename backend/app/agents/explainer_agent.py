@@ -1,5 +1,5 @@
 """
-explainer_agent.py — Multilingual Explainer Agent for Nyaya Mitra.
+explainer_agent.py Multilingual Explainer Agent for Nyaya Mitra.
 
 Design pattern (from Nyaya_Mitra_Master_Roadmap_v2.md §9, Agent 2.7):
   - Humanizes the pitch: this is the family-facing side of the system.
@@ -7,7 +7,7 @@ Design pattern (from Nyaya_Mitra_Master_Roadmap_v2.md §9, Agent 2.7):
     making legal status accessible to families with no legal background.
   - The system prompt explicitly bans jargon and limits output to 150 words,
     making it suitable for reading aloud over a phone call.
-  - This agent is always safe to call regardless of eligibility status —
+  - This agent is always safe to call regardless of eligibility status 
     it explains the current situation honestly, whether eligible or not.
 """
 
@@ -36,7 +36,7 @@ def generate_explanation(case: CaseRecord, eligibility_details: dict) -> dict:
     Generate a plain-language explanation of a prisoner's bail eligibility
     status in their preferred language.
 
-    The LLM is instructed to avoid legal jargon and stay under 150 words —
+    The LLM is instructed to avoid legal jargon and stay under 150 words 
     the output is meant to be read aloud to a family member by a legal-aid
     volunteer, not submitted as a formal document.
 
@@ -49,10 +49,10 @@ def generate_explanation(case: CaseRecord, eligibility_details: dict) -> dict:
 
     Returns:
         A dict containing:
-            case_id    — echoed from the input record
-            explanation— LLM-generated plain-language explanation string
-            english_translation — the original English version
-            language   — value of case.preferred_language (for the UI to label
+            case_id    echoed from the input record
+            explanationLLM-generated plain-language explanation string
+            english_translation the original English version
+            language   value of case.preferred_language (for the UI to label
                          which language the explanation was generated in)
 
     Example:
@@ -99,7 +99,7 @@ def generate_explanation(case: CaseRecord, eligibility_details: dict) -> dict:
 if __name__ == "__main__":
     from app.models.schemas import UrgencyFlags
 
-    # ── Test Case A: Eligible prisoner — Hindi explanation ───────────────────
+    # ── Test Case A: Eligible prisoner Hindi explanation ───────────────────
     case_hindi = CaseRecord(
         case_id="UTP-0007",
         name="synthetic - not a real person",
@@ -120,7 +120,7 @@ if __name__ == "__main__":
         "days_overdue": 167,
     }
 
-    # ── Test Case B: Ineligible prisoner — Tamil explanation ─────────────────
+    # ── Test Case B: Ineligible prisoner Tamil explanation ─────────────────
     case_tamil = CaseRecord(
         case_id="UTP-0012",
         name="synthetic - not a real person",

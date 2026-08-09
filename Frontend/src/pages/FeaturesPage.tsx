@@ -12,7 +12,7 @@ const featuresList = [
   {
     icon: Shield,
     title: "Evidence-Grounded Analysis (RAG)",
-    desc: "Every conclusion is traceable to exact source documents, Indian legal sections (e.g. BNSS 479), and precedent summaries — never hallucinated.",
+    desc: "Every conclusion is traceable to exact source documents, Indian legal sections (e.g. BNSS 479), and precedent summaries never hallucinated.",
     highlight: "Strict Citation Grounding"
   },
   {

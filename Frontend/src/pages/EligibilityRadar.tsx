@@ -29,14 +29,16 @@ export function EligibilityRadar() {
     load();
   }, []);
 
-  // Map backend cases — compute exact BNSS §479 threshold and days overdue
+  // Map backend cases — compute exact BNSS §479 threshold, days overdue, and days until threshold
   const caseList = cases.map((c) => {
     const isRepeat = c.case.urgency_flags?.repeat_offender;
     const requiredDays = isRepeat
       ? Math.ceil(c.case.max_sentence_days_for_offense / 2)
       : Math.ceil(c.case.max_sentence_days_for_offense / 3);
+
     const calculatedOverdue = c.case.custody_days - requiredDays;
-    const daysOverdue = c.days_overdue > 0 ? c.days_overdue : calculatedOverdue;
+    const daysOverdue = c.days_overdue > 0 ? c.days_overdue : Math.max(0, calculatedOverdue);
+    const daysUntilThreshold = Math.max(0, requiredDays - c.case.custody_days);
     const isEligible = c.days_overdue > 0 || c.case.custody_days >= requiredDays;
 
     return {
@@ -47,7 +49,9 @@ export function EligibilityRadar() {
       maxSentenceDays: c.case.max_sentence_days_for_offense,
       requiredDays,
       daysOverdue,
+      daysUntilThreshold,
       isEligible,
+      urgencyScore: c.urgency_score,
       urgency: c.urgency_score > 200 ? "URGENT" : "MEDIUM",
       missingDocs: c.case.required_docs.filter((d) => !c.case.present_docs.includes(d)),
       healthFlag: c.case.urgency_flags?.health_flag,
@@ -55,6 +59,15 @@ export function EligibilityRadar() {
       court: c.case.jail_location,
     };
   });
+
+  const windowDays =
+    selectedTimeframe === "Today"
+      ? 1
+      : selectedTimeframe === "7 days"
+      ? 7
+      : selectedTimeframe === "30 days"
+      ? 30
+      : 90;
 
   // Filter based on search and status filter
   const filteredCases = caseList.filter((item) => {
@@ -65,17 +78,9 @@ export function EligibilityRadar() {
 
     if (!matchesSearch) return false;
 
-    if (statusFilter === "OVERDUE") return item.daysOverdue > 0;
-    
-    const APPROACHING_WINDOW_DAYS = selectedTimeframe === "Today" ? 1 : selectedTimeframe === "7 days" ? 7 : selectedTimeframe === "30 days" ? 30 : 90;
-    
+    if (statusFilter === "OVERDUE") return item.isEligible;
     if (statusFilter === "APPROACHING") {
-      const daysUntilThreshold = -item.daysOverdue;
-      return (
-        !item.isEligible &&
-        daysUntilThreshold >= 0 && 
-        daysUntilThreshold <= APPROACHING_WINDOW_DAYS
-      );
+      return !item.isEligible && item.daysUntilThreshold <= windowDays;
     }
     if (statusFilter === "DOCS_REQUIRED") return item.missingDocs.length > 0;
 
@@ -83,20 +88,31 @@ export function EligibilityRadar() {
   });
 
   // Compute real summary stats from actual case data
-  const countOverdue = caseList.filter((c) => c.daysOverdue > 0).length;
+  const countOverdue = caseList.filter((c) => c.isEligible).length;
   const countDocsRequired = caseList.filter((c) => c.missingDocs.length > 0).length;
-  // "Approaching" = threshold NOT yet crossed but within timeframe window of crossing
-  const APPROACHING_WINDOW_DAYS = selectedTimeframe === "Today" ? 1 : selectedTimeframe === "7 days" ? 7 : selectedTimeframe === "30 days" ? 30 : 90;
-  const countApproaching = caseList.filter((c) => {
-    if (c.daysOverdue > 0) return false; // already overdue, not approaching
-    const daysUntilThreshold = -c.daysOverdue;
-    return daysUntilThreshold >= 0 && daysUntilThreshold <= APPROACHING_WINDOW_DAYS;
-  }).length;
+  const countApproaching = caseList.filter(
+    (c) => !c.isEligible && c.daysUntilThreshold > 0 && c.daysUntilThreshold <= windowDays
+  ).length;
 
-  // Group cases for timeline: active window vs. future/safe
-  const activeWindowCases = filteredCases.filter(
-    (c) => c.daysOverdue > 0 || c.missingDocs.length > 0 || (-c.daysOverdue >= 0 && -c.daysOverdue <= 90)
-  );
+  // Group cases for timeline: active window (matching selected timeframe) vs. future/safe
+  const activeWindowCases = filteredCases.filter((c) => {
+    if (statusFilter === "APPROACHING") {
+      return c.daysUntilThreshold <= windowDays;
+    }
+    if (statusFilter === "OVERDUE") {
+      return c.isEligible;
+    }
+    if (statusFilter === "DOCS_REQUIRED") {
+      return c.missingDocs.length > 0;
+    }
+    // "ALL": show cases active within selected windowDays or high priority
+    return (
+      (!c.isEligible && c.daysUntilThreshold <= windowDays) ||
+      (c.isEligible && c.daysOverdue <= windowDays * 3) ||
+      c.missingDocs.length > 0
+    );
+  });
+
   const futureCases = filteredCases.filter(
     (c) => !activeWindowCases.includes(c)
   );

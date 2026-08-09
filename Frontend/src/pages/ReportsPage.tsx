@@ -37,9 +37,9 @@ export function ReportsPage() {
             estimated_hours_saved_by_ai: 340,
           },
           court_jurisdiction_breakdown: [
-            { jail: "District Jail, synthetic", count: 2 },
-            { jail: "Central Jail, synthetic", count: 2 },
-            { jail: "Sub-Jail, synthetic", count: 1 },
+            { jail: "District Jail, ", count: 2 },
+            { jail: "Central Jail, ", count: 2 },
+            { jail: "Sub-Jail, ", count: 1 },
           ],
           eligibility_distribution: [
             { category: "Eligible & Complete", count: 3 },
@@ -90,7 +90,7 @@ export function ReportsPage() {
           </div>
           <div className="text-3xl font-bold text-primary">{overview.total_undertrials_monitored}</div>
           <div className="text-xs text-foreground font-medium flex items-center gap-1">
-            <TrendingUp className="w-3 h-3" /> 100% Synthetic Monitored
+            <TrendingUp className="w-3 h-3" /> 100%  Monitored
           </div>
         </div>
 

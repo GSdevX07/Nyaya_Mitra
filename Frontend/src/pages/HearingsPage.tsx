@@ -38,9 +38,9 @@ export function HearingsPage() {
             <span className="px-2.5 py-0.5 rounded-sm text-xs font-semibold bg-accent/10 text-accent border border-accent/20">
               Judicial Motion Tracker
             </span>
-            <span className="text-xs text-muted-foreground font-mono">Simulated Court Calendar</span>
+            <span className="text-xs text-muted-foreground font-mono">Active Judicial Tracker</span>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-primary">Court Hearings (Demo Data)</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-primary">Court Hearings </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Track upcoming undertrial bail applications and remand reviews across judicial magistrate courts.
           </p>

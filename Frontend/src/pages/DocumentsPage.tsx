@@ -72,8 +72,8 @@ export function DocumentsPage() {
   const [docs, setDocs] = useState<DocItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [uploadCaseId, setUploadCaseId] = useState("UTP-0015");
-  const [uploadDocType, setUploadDocType] = useState("charge_sheet");
+  const [uploadCaseId, setUploadCaseId] = useState("");
+  const [uploadDocType, setUploadDocType] = useState("");
   const [uploading, setUploading] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
 
@@ -343,13 +343,17 @@ export function DocumentsPage() {
                   <label className="text-xs text-muted-foreground block mb-1.5 font-medium">
                     Target Case ID
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={uploadCaseId}
                     onChange={(e) => setUploadCaseId(e.target.value)}
                     className="w-full px-3 py-2.5 bg-secondary/50 border border-border rounded-xl text-primary text-sm focus:outline-none focus:border-accent/60 transition-colors"
                     required
-                  />
+                  >
+                    <option value="" disabled className="bg-card">Select a Case</option>
+                    {Array.from(new Set(docs.map(d => d.case_id))).map(caseId => (
+                      <option key={caseId} value={caseId} className="bg-card">{caseId}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1.5 font-medium">
@@ -360,6 +364,7 @@ export function DocumentsPage() {
                     onChange={(e) => setUploadDocType(e.target.value)}
                     className="w-full px-3 py-2.5 bg-secondary/50 border border-border rounded-xl text-primary text-sm focus:outline-none focus:border-accent/60 transition-colors"
                   >
+                    <option value="" disabled className="bg-card">Select a Document Type</option>
                     <option value="charge_sheet" className="bg-card">Charge Sheet</option>
                     <option value="remand_order" className="bg-card">Remand Order</option>
                     <option value="prior_bail_order_if_any" className="bg-card">Prior Bail Order</option>

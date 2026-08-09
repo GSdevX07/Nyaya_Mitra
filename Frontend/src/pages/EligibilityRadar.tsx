@@ -236,12 +236,12 @@ export function EligibilityRadar() {
 
                     <div className="flex items-center gap-3">
                       {/* Interactive Review Button - Navigates directly to Case Dossier */}
-                      <button
-                        onClick={() => navigate(`/case/${c.id}`)}
+                      <Link
+                        to={`/case/${c.id}`}
                         className="px-4 py-2 bg-accent text-accent-foreground font-semibold rounded-xl text-xs hover:opacity-90 transition-opacity flex items-center gap-1.5 shadow-md shadow-accent/20 shrink-0"
                       >
                         Review Case <ArrowUpRight className="w-3.5 h-3.5" />
-                      </button>
+                      </Link>
                     </div>
                   </div>
                 ))}
@@ -278,12 +278,12 @@ export function EligibilityRadar() {
                         {c.prisonerName} • Approaching statutory threshold window ({selectedTimeframe})
                       </div>
                     </div>
-                    <button
-                      onClick={() => navigate(`/case/${c.id}`)}
+                    <Link
+                      to={`/case/${c.id}`}
                       className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl text-xs font-medium border border-white/10 transition-colors flex items-center gap-1 shrink-0"
                     >
                       Inspect <ArrowUpRight className="w-3 h-3" />
-                    </button>
+                    </Link>
                   </div>
                 ))}
 

@@ -321,7 +321,7 @@ def get_hearings():
 
 @app.get("/reports", tags=["Reports"])
 def get_reports():
-    res = sb.table("undertrial_cases").select("id, custody_days, max_sentence_days_for_offense, age, health_flag").execute()
+    res = sb.table("undertrial_cases").select("id, custody_days, max_sentence_days_for_offense, age, health_flag, jail_location, first_time_offender").execute()
     cases = res.data
     total_cases = len(cases)
     
@@ -330,6 +330,20 @@ def get_reports():
     health_cases = sum(1 for c in cases if c.get("health_flag"))
     
     avg_custody = round(sum(c.get("custody_days", 0) for c in cases) / total_cases, 1) if total_cases > 0 else 0
+
+    # Compute jail breakdown dynamically from real data
+    jail_counts: dict = {}
+    for c in cases:
+        jail = c.get("jail_location") or "Unknown Facility"
+        jail_counts[jail] = jail_counts.get(jail, 0) + 1
+    
+    sorted_jails = sorted(jail_counts.items(), key=lambda x: x[1], reverse=True)
+    # Return top 4 + "Others" bucket
+    top_jails = sorted_jails[:4]
+    others = sum(count for _, count in sorted_jails[4:])
+    jail_breakdown = [{"jail": jail, "count": count} for jail, count in top_jails]
+    if others > 0:
+        jail_breakdown.append({"jail": "Other Facilities", "count": others})
     
     return {
         "overview": {
@@ -340,16 +354,13 @@ def get_reports():
             "average_custody_days": avg_custody,
             "estimated_hours_saved_by_ai": int(total_cases * 1.5),
         },
-        "court_jurisdiction_breakdown": [
-            {"jail": "Central Jail, Tihar (synthetic)", "count": 68},
-            {"jail": "District Jail, Patna (synthetic)", "count": 45},
-            {"jail": "Other Facilities", "count": total_cases - 113 if total_cases > 113 else 0},
-        ],
+        "court_jurisdiction_breakdown": jail_breakdown,
         "eligibility_distribution": [
             {"category": "Eligible for 479 BNSS", "count": eligible},
-            {"category": "Ineligible", "count": total_cases - eligible},
+            {"category": "Ineligible (Below Threshold)", "count": total_cases - eligible},
         ],
     }
+
 
 @app.get("/notifications", tags=["Notifications"])
 def get_notifications():

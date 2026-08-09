@@ -312,7 +312,7 @@ export function DocumentsPage() {
       {showUploadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
           <div
-            className="w-full max-w-2xl bg-[#0f1117] border border-border rounded-3xl shadow-2xl overflow-hidden"
+            className="w-full max-w-2xl bg-card border border-border rounded-3xl shadow-2xl overflow-hidden"
             style={{ boxShadow: "0 0 60px rgba(99,102,241,0.15)" }}
           >
             {/* Modal Header */}
@@ -330,7 +330,7 @@ export function DocumentsPage() {
               </div>
               <button
                 onClick={closeModal}
-                className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-muted-foreground hover:text-primary transition-colors"
+                className="w-8 h-8 rounded-lg hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-primary transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -360,12 +360,12 @@ export function DocumentsPage() {
                     onChange={(e) => setUploadDocType(e.target.value)}
                     className="w-full px-3 py-2.5 bg-secondary/50 border border-border rounded-xl text-primary text-sm focus:outline-none focus:border-accent/60 transition-colors"
                   >
-                    <option value="charge_sheet" className="bg-[#0f1117]">Charge Sheet</option>
-                    <option value="remand_order" className="bg-[#0f1117]">Remand Order</option>
-                    <option value="prior_bail_order_if_any" className="bg-[#0f1117]">Prior Bail Order</option>
-                    <option value="medical_certificate" className="bg-[#0f1117]">Medical Certificate</option>
-                    <option value="identity_proof" className="bg-[#0f1117]">Identity Proof</option>
-                    <option value="other" className="bg-[#0f1117]">Other Document</option>
+                    <option value="charge_sheet" className="bg-card">Charge Sheet</option>
+                    <option value="remand_order" className="bg-card">Remand Order</option>
+                    <option value="prior_bail_order_if_any" className="bg-card">Prior Bail Order</option>
+                    <option value="medical_certificate" className="bg-card">Medical Certificate</option>
+                    <option value="identity_proof" className="bg-card">Identity Proof</option>
+                    <option value="other" className="bg-card">Other Document</option>
                   </select>
                 </div>
               </div>
@@ -421,7 +421,7 @@ export function DocumentsPage() {
                             setStep("idle");
                             if (fileInputRef.current) fileInputRef.current.value = "";
                           }}
-                          className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                          className="absolute top-2 right-2 w-6 h-6 rounded-full bg-secondary hover:bg-secondary/80 flex items-center justify-center transition-colors"
                         >
                           <X className="w-3 h-3 text-primary" />
                         </button>
@@ -550,7 +550,7 @@ export function DocumentsPage() {
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="px-4 py-2.5 bg-secondary/50 text-primary rounded-xl text-sm font-medium hover:bg-white/10 transition-colors"
+                  className="px-4 py-2.5 bg-secondary/50 text-primary rounded-xl text-sm font-medium hover:bg-secondary transition-colors"
                 >
                   {step === "done" ? "Close" : "Cancel"}
                 </button>

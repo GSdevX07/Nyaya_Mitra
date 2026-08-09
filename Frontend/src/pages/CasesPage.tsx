@@ -12,10 +12,9 @@ import {
   UserCheck, 
   Sparkles, 
   Phone, 
-  MapPin, 
   Eye, 
-  Check, 
-  Briefcase 
+  Briefcase,
+  WifiOff
 } from "lucide-react";
 import { 
   fetchCases, 
@@ -79,63 +78,69 @@ export function CasesPage() {
     const declinedIds = getDeclinedFromStorage();
 
     // Fetch all cases & available cases from backend
-    const [allData, availData] = await Promise.all([fetchCases(), fetchAvailableCases()]);
+    try {
+      const [allData] = await Promise.all([fetchCases(), fetchAvailableCases()]);
+      setBackendError(false);
 
-    let assignedList: BackendCaseSummary[] = [];
-    let unassignedList: BackendCaseSummary[] = [];
+      let assignedList: BackendCaseSummary[] = [];
+      let unassignedList: BackendCaseSummary[] = [];
 
-    if (allData.length > 0) {
-      // Backend returned data
-      assignedList = allData.filter(item => item.case.assignment_status === "ASSIGNED" || approvedIds.includes(item.case.case_id));
-      unassignedList = allData.filter(item => 
-        (item.case.assignment_status === "AVAILABLE" || !item.case.assignment_status) &&
-        !approvedIds.includes(item.case.case_id) &&
-        !declinedIds.includes(item.case.case_id)
-      );
-    } else {
-      // Fallback to MOCK_CASES
-      const formattedMock = MOCK_CASES.map(c => {
-        const missingDocsCount = c.documents.filter(d => d.status === "missing").length;
-        return {
-          case: {
-            case_id: c.id,
-            name: c.prisonerName,
-            offense_sections: [c.offence],
-            arrest_date: "2024-01-10",
-            custody_days: c.custodyDurationDays,
-            max_sentence_days_for_offense: 1095,
-            prior_bail_orders: [],
-            required_docs: ["remand_order", "charge_sheet"],
-            present_docs: missingDocsCount === 0 ? ["remand_order", "charge_sheet"] : ["remand_order"],
-            urgency_flags: {
-              age: c.age,
-              health_flag: c.age >= 60,
-              repeat_offender: false,
+      if (allData.length > 0) {
+        // Backend returned data
+        assignedList = allData.filter(item => item.case.assignment_status === "ASSIGNED" || approvedIds.includes(item.case.case_id));
+        unassignedList = allData.filter(item => 
+          (item.case.assignment_status === "AVAILABLE" || !item.case.assignment_status) &&
+          !approvedIds.includes(item.case.case_id) &&
+          !declinedIds.includes(item.case.case_id)
+        );
+      } else {
+        // Fallback to MOCK_CASES
+        const formattedMock = MOCK_CASES.map(c => {
+          const missingDocsCount = c.documents.filter(d => d.status === "missing").length;
+          return {
+            case: {
+              case_id: c.id,
+              name: c.prisonerName,
+              offense_sections: [c.offence],
+              arrest_date: "2024-01-10",
+              custody_days: c.custodyDurationDays,
+              max_sentence_days_for_offense: 1095,
+              prior_bail_orders: [],
+              required_docs: ["remand_order", "charge_sheet"],
+              present_docs: missingDocsCount === 0 ? ["remand_order", "charge_sheet"] : ["remand_order"],
+              urgency_flags: {
+                age: c.age,
+                health_flag: c.age >= 60,
+                repeat_offender: false,
+              },
+              jail_location: c.court,
+              preferred_language: "en",
+              relative_name: c.relativeName || "Ramesh Kumar",
+              relative_relation: c.relativeRelation || "Father",
+              relative_phone: c.relativePhone || "+91 98765 11001",
+              permanent_address: c.permanentAddress || "Plot 42, Gandhi Nagar, Sector 4, Chennai, TN - 600001",
+              assignment_status: c.assignmentStatus || "AVAILABLE",
             },
-            jail_location: c.court,
-            preferred_language: "en",
-            relative_name: c.relativeName || "Ramesh Kumar",
-            relative_relation: c.relativeRelation || "Father",
-            relative_phone: c.relativePhone || "+91 98765 11001",
-            permanent_address: c.permanentAddress || "Plot 42, Gandhi Nagar, Sector 4, Chennai, TN - 600001",
-            assignment_status: c.assignmentStatus || "AVAILABLE",
-          },
-          days_overdue: Math.max(0, c.custodyDurationDays - 547),
-          urgency_score: c.urgency === "URGENT" ? 250 : 120,
-        };
-      });
+            days_overdue: Math.max(0, c.custodyDurationDays - 547),
+            urgency_score: c.urgency === "URGENT" ? 250 : 120,
+          };
+        });
 
-      assignedList = formattedMock.filter(item => item.case.assignment_status === "ASSIGNED" || approvedIds.includes(item.case.case_id));
-      unassignedList = formattedMock.filter(item => 
-        (item.case.assignment_status === "AVAILABLE" || !item.case.assignment_status) &&
-        !approvedIds.includes(item.case.case_id) &&
-        !declinedIds.includes(item.case.case_id)
-      );
+        assignedList = formattedMock.filter(item => item.case.assignment_status === "ASSIGNED" || approvedIds.includes(item.case.case_id));
+        unassignedList = formattedMock.filter(item => 
+          (item.case.assignment_status === "AVAILABLE" || !item.case.assignment_status) &&
+          !approvedIds.includes(item.case.case_id) &&
+          !declinedIds.includes(item.case.case_id)
+        );
+      }
+
+      setMyCases(assignedList);
+      setAvailableCases(unassignedList);
+    } catch {
+      setBackendError(true);
+    } finally {
+      setLoading(false);
     }
-
-    setMyCases(assignedList);
-    setAvailableCases(unassignedList);
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -386,7 +391,6 @@ export function CasesPage() {
                     <div className="flex justify-between text-xs text-muted-foreground font-mono">
                       <span>Custody: {c.custody_days}d</span>
                       <span>{thresholdLabel}: {thresholdDays}d</span>
-                    </div>
                     </div>
                     <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
                       <div

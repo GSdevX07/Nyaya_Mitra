@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { Search, Bell, User, Activity } from "lucide-react";
+import { Search, Bell, Activity } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CommandPalette } from "@/components/CommandPalette";
 import { NotificationsModal } from "@/components/NotificationsModal";

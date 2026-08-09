@@ -8,6 +8,8 @@ it with the initial 5 hero cases.
 
 import sqlite3
 import json
+import hashlib
+import datetime
 from contextlib import contextmanager
 from typing import List
 
@@ -34,6 +36,16 @@ def init_db():
                 data JSON NOT NULL
             )
         ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS evidence (
+                evidence_id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                document_type TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                stored_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        ''')
         
         # Check if we need to seed
         cursor = conn.execute("SELECT COUNT(*) as count FROM cases")
@@ -41,7 +53,7 @@ def init_db():
             _seed_db(conn)
 
 def _seed_db(conn):
-    """Seed the database with the 5 hero cases."""
+    """Seed the database with the 5 hero cases and their mock evidence."""
     from app.main import MOCK_DB  # Import here to avoid circular dependency
     for case in MOCK_DB:
         # Save the full pydantic model as JSON
@@ -49,6 +61,22 @@ def _seed_db(conn):
             "INSERT INTO cases (case_id, data) VALUES (?, ?)",
             (case.case_id, case.model_dump_json())
         )
+        # Create evidence records for all present docs
+        for doc in case.present_docs:
+            evidence_id = f"EVI-{case.case_id}-{doc}"
+            file_name = f"{doc}.pdf"
+            # Simulate the "original" file bytes and compute its hash
+            mock_file_bytes = f"mock_file_content_for_{case.case_id}_{doc}".encode()
+            stored_hash = hashlib.sha256(mock_file_bytes).hexdigest()
+            
+            # Intentionally tamper with UTP-0012's remand_order hash to show MISMATCH in UI
+            if case.case_id == "UTP-0012" and doc == "remand_order":
+                stored_hash = "deadbeef" + stored_hash[8:]
+                
+            conn.execute(
+                "INSERT INTO evidence (evidence_id, case_id, document_type, file_name, stored_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (evidence_id, case.case_id, doc, file_name, stored_hash, datetime.datetime.now(datetime.timezone.utc).isoformat())
+            )
 
 def get_all_cases() -> List[CaseRecord]:
     """Retrieve all cases from the database."""
@@ -99,3 +127,31 @@ def update_case_documents(case_id: str, present_docs: list) -> bool:
             (json.dumps(case_data), case_id)
         )
         return True
+
+def add_evidence(case_id: str, document_type: str, stored_hash: str) -> str:
+    """Insert a new evidence record and return the generated evidence_id."""
+    evidence_id = f"EVI-{case_id}-{document_type}"
+    file_name = f"{document_type}.pdf"
+    created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    with get_db_connection() as conn:
+        # Use REPLACE INTO in case they re-upload the same document type
+        conn.execute(
+            "REPLACE INTO evidence (evidence_id, case_id, document_type, file_name, stored_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (evidence_id, case_id, document_type, file_name, stored_hash, created_at)
+        )
+    return evidence_id
+
+def get_all_evidence() -> List[dict]:
+    """Retrieve all evidence records."""
+    with get_db_connection() as conn:
+        cursor = conn.execute("SELECT * FROM evidence")
+        return [dict(row) for row in cursor.fetchall()]
+
+def get_evidence_item(evidence_id: str) -> dict | None:
+    """Retrieve a single evidence record by ID."""
+    with get_db_connection() as conn:
+        cursor = conn.execute("SELECT * FROM evidence WHERE evidence_id = ?", (evidence_id,))
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+    return None

@@ -12,6 +12,9 @@ interface EvidenceItem {
   chain_of_custody: string;
   flagged: boolean;
   notes: string;
+  stored_hash: string;
+  computed_hash?: string;
+  tampering_detected?: boolean;
 }
 
 export function EvidencePage() {
@@ -32,27 +35,24 @@ export function EvidencePage() {
 
   const handleVerify = async (id: string) => {
     setVerifyingId(id);
-    // Optimistic update
-    setEvidenceList((prev) =>
-      prev.map((item) =>
-        item.id === id || item.case_id === id
-          ? {
-              ...item,
-              verification_status: "Verified Authentic",
-              authenticity_score: 99.5,
-              flagged: false,
-            }
-          : item
-      )
-    );
     try {
-      await verifyEvidence(id);
+      const verifyResult = await verifyEvidence(id);
       // Wait a short moment to show scan animation
       await new Promise((r) => setTimeout(r, 600));
-      const fresh = await fetchEvidence();
-      if (fresh && fresh.length > 0) {
-        setEvidenceList(fresh);
-      }
+      
+      setEvidenceList((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                verification_status: verifyResult.status,
+                computed_hash: verifyResult.computed_hash,
+                tampering_detected: verifyResult.tampering_detected,
+                authenticity_score: verifyResult.tampering_detected ? 0 : 100,
+              }
+            : item
+        )
+      );
     } catch (err) {
       console.error(err);
     } finally {
@@ -126,19 +126,39 @@ export function EvidencePage() {
                   <span className="text-white font-medium">{item.chain_of_custody}</span>
                 </div>
                 <div className="flex justify-between text-muted-foreground">
-                  <span>Offense Charges:</span>
-                  <span className="text-white font-mono">{item.offense}</span>
+                  <span>Stored SHA-256:</span>
+                  <span className="text-white font-mono">{item.stored_hash?.substring(0, 16)}...</span>
                 </div>
+                {item.computed_hash && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Computed Hash:</span>
+                    <span className={`font-mono font-medium ${item.tampering_detected ? 'text-red-400' : 'text-emerald-400'}`}>
+                      {item.computed_hash.substring(0, 16)}...
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between text-muted-foreground">
                   <span>Verification Status:</span>
-                  <span className="text-accent font-medium">{item.verification_status}</span>
+                  <span className={`${item.tampering_detected ? 'text-red-400' : 'text-accent'} font-medium`}>{item.verification_status}</span>
                 </div>
               </div>
 
               <div className="flex items-center justify-between pt-2">
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Lock className="w-3.5 h-3.5 text-accent" /> Cryptographic Integrity Verified
-                </span>
+                {item.computed_hash ? (
+                  item.tampering_detected ? (
+                    <span className="text-xs text-red-400 font-medium flex items-center gap-1">
+                      <AlertCircle className="w-4 h-4" /> ✕ Integrity Violation (Mismatch)
+                    </span>
+                  ) : (
+                    <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
+                      <CheckCircle2 className="w-4 h-4" /> ✓ Integrity Verified (Match)
+                    </span>
+                  )
+                ) : (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Lock className="w-3.5 h-3.5 text-accent" /> Awaiting Verification
+                  </span>
+                )}
 
                 <button
                   onClick={() => handleVerify(item.id)}

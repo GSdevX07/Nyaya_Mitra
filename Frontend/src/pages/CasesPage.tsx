@@ -93,7 +93,7 @@ export function CasesPage() {
         unassignedList = [];
       }
 
-      setMyCases(assignedList);
+      setMyCases(assignedList.slice(0, 2));
       setAvailableCases(unassignedList);
     } catch {
       setBackendError(true);

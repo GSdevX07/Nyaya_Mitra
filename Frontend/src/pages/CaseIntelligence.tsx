@@ -353,8 +353,21 @@ export function CaseIntelligence() {
                 <Activity className="w-5 h-5 text-accent" /> Family Explanation
                 <span className="text-xs font-normal text-muted-foreground normal-case ml-2">Language: {c.preferred_language}</span>
               </h2>
-              <div className="p-6 rounded-xl border border-white/5 bg-white/[0.02] text-white/90 leading-relaxed">
-                {explanation.explanation as string}
+              <div className="space-y-4">
+                <div className="p-6 rounded-xl border border-white/5 bg-white/[0.02] text-white/90 leading-relaxed">
+                  {explanation.explanation as string}
+                </div>
+                
+                {explanation.english_translation && explanation.english_translation !== explanation.explanation && (
+                  <div className="p-5 rounded-xl border border-white/5 bg-black/40 text-muted-foreground leading-relaxed relative">
+                    <div className="absolute -top-2.5 left-4 px-2 py-0.5 bg-[#0a0a0a] border border-white/10 rounded text-[10px] uppercase tracking-widest text-accent font-medium">
+                      English Translation
+                    </div>
+                    <div className="pt-2 text-sm">
+                      {explanation.english_translation as string}
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
           )}

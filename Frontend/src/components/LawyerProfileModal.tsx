@@ -51,13 +51,13 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-primary backdrop-blur-xl animate-in fade-in duration-200">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
         <motion.div
           initial={{ opacity: 0, scale: 0.96, y: 12 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 12 }}
           transition={{ type: "spring", stiffness: 380, damping: 28 }}
-          className="relative w-full max-w-xl bg-[#0D121B] border border-border rounded shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col max-h-[90vh]"
+          className="relative w-full max-w-xl bg-card border border-border rounded shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         >
           {/* Subtle Ambient Top Accent Glow */}
           <div className="absolute top-0 inset-x-0 h-32 bg-gradient-to-b from-amber-500/10 via-amber-500/5 to-transparent pointer-events-none" />
@@ -70,7 +70,7 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
                 <div className="w-16 h-16 rounded bg-gradient-to-br from-amber-500/20 via-yellow-500/10 to-amber-950/40 border border-border flex items-center justify-center font-bold text-muted-foreground text-xl tracking-wider font-mono shadow-lg shadow-amber-500/5">
                   RS
                 </div>
-                <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-sm bg-[#0D121B] flex items-center justify-center p-0.5">
+                <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-sm bg-card flex items-center justify-center p-0.5">
                   <span className="w-3.5 h-3.5 rounded-sm bg-accent flex items-center justify-center text-[8px] text-black font-bold">
                     ✓
                   </span>

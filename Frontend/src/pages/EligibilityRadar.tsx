@@ -59,7 +59,17 @@ export function EligibilityRadar() {
     if (!matchesSearch) return false;
 
     if (statusFilter === "OVERDUE") return item.daysOverdue > 0;
-    if (statusFilter === "APPROACHING") return item.daysOverdue === 0 && item.isEligible;
+    
+    const APPROACHING_WINDOW_DAYS = selectedTimeframe === "Today" ? 1 : selectedTimeframe === "7 days" ? 7 : selectedTimeframe === "30 days" ? 30 : 90;
+    
+    if (statusFilter === "APPROACHING") {
+      const daysUntilThreshold = -item.daysOverdue;
+      return (
+        item.daysOverdue <= 0 &&
+        daysUntilThreshold >= 0 && 
+        daysUntilThreshold <= APPROACHING_WINDOW_DAYS
+      );
+    }
     if (statusFilter === "DOCS_REQUIRED") return item.missingDocs.length > 0;
 
     return true;

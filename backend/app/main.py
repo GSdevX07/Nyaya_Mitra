@@ -216,20 +216,39 @@ def get_lawyer_profile(lawyer_id: str = "Legal Officer 104"):
 
 @app.get("/documents", tags=["Documents"])
 def get_documents():
-    res = sb.table("documents").select("*").execute()
+    """
+    Returns a per-document row for every ASSIGNED case.
+    Each required doc type (remand_order, charge_sheet, prior_bail_order_if_any)
+    is emitted as a separate row with is_present derived from present_docs.
+    """
+    required_doc_types = ["remand_order", "charge_sheet", "prior_bail_order_if_any"]
+    doc_type_labels = {
+        "remand_order": "Remand Order",
+        "charge_sheet": "Charge Sheet",
+        "prior_bail_order_if_any": "Prior Bail Order",
+    }
+
+    res = sb.table("undertrial_cases").select(
+        "id, name, present_docs, jail_location, assignment_status"
+    ).eq("assignment_status", "ASSIGNED").execute()
+
     docs = []
-    for d in res.data:
-        docs.append({
-            "id": d["id"],
-            "case_id": d["case_id"],
-            "prisoner_name": "Unknown (Synthetic)",
-            "document_type": d["document_type"].replace("_", " ").title(),
-            "status": "Verified & Present" if d.get("is_present") else "Missing — Action Required",
-            "is_present": d.get("is_present", False),
-            "uploaded_date": d.get("uploaded_at") or d.get("created_at"),
-            "jail_location": "Synthetic Jail",
-        })
+    for row in res.data:
+        present = row.get("present_docs") or []
+        for doc_type in required_doc_types:
+            is_present = doc_type in present
+            docs.append({
+                "id": f"{row['id']}__{doc_type}",
+                "case_id": row["id"],
+                "prisoner_name": row.get("name") or "Unknown (Synthetic)",
+                "document_type": doc_type_labels[doc_type],
+                "status": "Verified & Present" if is_present else "Missing — Action Required",
+                "is_present": is_present,
+                "uploaded_date": None,
+                "jail_location": row.get("jail_location") or "Unknown Facility",
+            })
     return docs
+
 
 @app.get("/cases/{case_id}/documents", tags=["Documents"])
 def get_case_documents(case_id: str):

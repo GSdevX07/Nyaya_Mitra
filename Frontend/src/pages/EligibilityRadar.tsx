@@ -96,7 +96,7 @@ export function EligibilityRadar() {
   );
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-10 animate-in fade-in duration-300">
+    <div className="p-4 md:p-8 w-full space-y-10 animate-in fade-in duration-300">
       {/* Header */}
       <div className="space-y-6">
         <Link

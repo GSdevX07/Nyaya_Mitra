@@ -23,7 +23,24 @@
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 43 96% 56%;
-    --radius: 0.5rem;
+    --radius: 0.25rem;
+
+    /* The Case File Tokens */
+    --paper: #F1EFE6;
+    --paper-dim: #E8E4D6;
+    --rule: #D9D4C2;
+    --ink: #26283B;
+    --ink-muted: #5B5D72;
+    --navy: #1F2A44;
+    --brass: #B08D57;
+
+    --sage: #8CA189;
+    --sage-bg: #E4E9DF;
+    --stamp-red: #A85043;
+    --stamp-red-bg: #EFDFDA;
+    --ochre: #BB8A34;
+    --ochre-bg: #EFE3C6;
+    --thread-red: #B4453A;
   }
 }
 
@@ -33,11 +50,42 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: 'Public Sans', system-ui, -apple-system, sans-serif;
   }
   html {
     scroll-behavior: smooth;
   }
+  h1, h2, h3, .font-display {
+    font-family: 'Fraunces', serif;
+  }
+}
+
+/* Ink Stamp Base Styling */
+.ink-stamp {
+  font-family: 'IBM Plex Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-width: 1.5px;
+  border-style: solid;
+  transition: transform 60ms ease-out;
+}
+.ink-stamp:active {
+  transform: scale(0.95);
+}
+
+/* Dog-ear corner fold */
+.dog-ear-fold {
+  position: relative;
+}
+.dog-ear-fold::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  background: linear-gradient(225deg, transparent 50%, rgba(255, 255, 255, 0.08) 50%);
+  pointer-events: none;
 }
 
 /* Film grain */

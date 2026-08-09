@@ -151,7 +151,7 @@ export function Landing() {
 
       {/* Stats */}
       <section className="relative z-20 border-y border-white/5 bg-white/[0.01] backdrop-blur-sm">
-        <div className="max-w-6xl mx-auto grid grid-cols-3 divide-x divide-white/5">
+        <div className="w-full grid grid-cols-3 divide-x divide-white/5">
           <div className="p-8 md:p-12 text-center">
             <div className="text-4xl md:text-5xl font-light text-white tracking-tight">{casesMonitored.toLocaleString()}</div>
             <div className="text-xs text-muted-foreground uppercase tracking-widest mt-2">Cases Monitored</div>
@@ -169,7 +169,7 @@ export function Landing() {
 
       {/* Pipeline */}
       <section id="pipeline" className="relative z-20 py-32 px-6">
-        <div className="max-w-6xl mx-auto">
+        <div className="w-full">
           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="text-center mb-20">
             <div className="text-xs text-accent uppercase tracking-[0.3em] font-semibold mb-4">How it works</div>
             <h2 className="text-4xl md:text-5xl font-bold tracking-tight text-white mb-4">Intelligent Case Pipeline</h2>
@@ -206,7 +206,7 @@ export function Landing() {
 
       {/* Features */}
       <section id="features" className="relative z-20 py-32 px-6 border-t border-white/5">
-        <div className="max-w-6xl mx-auto">
+        <div className="w-full">
           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="text-center mb-20">
             <div className="text-xs text-accent uppercase tracking-[0.3em] font-semibold mb-4">Core Principles</div>
             <h2 className="text-4xl md:text-5xl font-bold tracking-tight text-white">Built for trust and transparency</h2>
@@ -240,7 +240,7 @@ export function Landing() {
 
       {/* Footer */}
       <footer className="relative z-20 border-t border-white/5 px-8 py-10 bg-black/40">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 text-xs text-muted-foreground">
+        <div className="w-full flex flex-col md:flex-row items-center justify-between gap-6 text-xs text-muted-foreground">
           <Link to="/" onClick={scrollToTop} className="flex items-center gap-2 text-white hover:text-accent transition-colors">
             <Activity className="w-4 h-4 text-accent" />
             <span className="uppercase tracking-wider font-bold text-sm">Nyaya Mitra</span>

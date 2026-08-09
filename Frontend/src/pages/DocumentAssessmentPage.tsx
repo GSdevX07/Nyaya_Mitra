@@ -124,80 +124,171 @@ export function DocumentAssessmentPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+import { InkStamp } from "@/components/ui/InkStamp";
+
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in duration-300">
+    <div className="p-4 md:p-8 w-full space-y-8 animate-in fade-in duration-300">
       {/* Top Banner Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-6">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-accent/20 text-accent border border-accent/30 flex items-center gap-1.5 shadow-sm">
-              <Sparkles className="w-3.5 h-3.5 text-accent animate-pulse" /> TrOCR + IBM Data Prep Kit + RAG + IBM Granite
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="px-3 py-1 rounded-md text-xs font-mono font-semibold bg-[#1F2A44] text-[#B08D57] border border-[#B08D57]/30 shadow-sm uppercase tracking-wider">
+              TrOCR + IBM Data Prep Kit + RAG + IBM Granite
             </span>
-            <span className="text-xs text-muted-foreground font-mono">End-to-End AI Legal Operations</span>
+            <span className="text-xs text-muted-foreground font-mono">End-to-End Legal Operations</span>
           </div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
-            Legal Document AI & Preliminary Assessment Pipeline
+          <h1 className="text-3xl font-serif font-bold tracking-tight text-white flex items-center gap-3">
+            Legal Document AI &amp; Preliminary Assessment Pipeline
           </h1>
-          <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
-            Automated intake for scanned & handwritten undertrial legal records. Extract text using HuggingFace TrOCR, clean structure via IBM Data Prep Kit, retrieve BNSS §479 statutes via RAG, and generate preliminary legal assessments with IBM Granite.
+          <p className="text-sm text-muted-foreground font-sans mt-1 max-w-3xl leading-relaxed">
+            Automated intake for scanned &amp; handwritten undertrial legal records. Extract text using HuggingFace TrOCR, clean structure via IBM Data Prep Kit, retrieve BNSS §479 statutes via RAG, and generate preliminary legal assessments with IBM Granite.
           </p>
         </div>
 
         <button
           onClick={() => handleRunAssessment()}
           disabled={loading}
-          className="px-5 py-2.5 bg-accent text-accent-foreground font-semibold rounded-xl text-sm hover:opacity-90 transition-all flex items-center gap-2 shadow-lg shadow-accent/25 disabled:opacity-50"
+          className="px-5 py-2.5 bg-[#1F2A44] text-white font-semibold rounded-lg text-sm border-b-2 border-[#B08D57] hover:bg-[#253454] transition-all flex items-center gap-2 shadow-md disabled:opacity-50"
         >
           {loading ? (
             <>
-              <RefreshCw className="w-4 h-4 animate-spin text-accent-foreground" />
+              <RefreshCw className="w-4 h-4 animate-spin text-[#B08D57]" />
               Processing Stage {activeStep}/6...
             </>
           ) : (
             <>
-              <Zap className="w-4 h-4 text-accent-foreground" />
+              <FileText className="w-4 h-4 text-[#B08D57]" />
               Execute Pipeline Assessment
             </>
           )}
         </button>
       </div>
 
-      {/* Interactive Workflow Diagram (Exact Flowchart from User Prompt) */}
-      <div className="p-6 rounded-2xl bg-slate-900/60 border border-white/10 backdrop-blur-md space-y-4 shadow-xl">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-            <Cpu className="w-4 h-4 text-accent" /> Active Document Processing Architecture
-          </h2>
+      {/* Case-File Transmittal & Routing Slip */}
+      <div className="p-5 rounded-xl bg-[#0F141C] border border-white/10 shadow-xl space-y-4">
+        <div className="flex items-center justify-between border-b border-white/5 pb-3">
+          <div className="flex items-center gap-2">
+            <Cpu className="w-4 h-4 text-[#B08D57]" />
+            <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-white/80">
+              Case-File Transmittal &amp; Routing Slip — Pipeline Operations
+            </h2>
+          </div>
           {result && (
-            <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
-              ⚡ Executed in {result.processing_time_ms}ms
-            </span>
+            <InkStamp
+              text={`EXECUTED IN ${result.processing_time_ms}MS`}
+              variant="sage"
+            />
           )}
         </div>
 
-        {/* 7-Step Interactive Flow Nodes */}
+        {/* 7-Step Routing Slip Nodes */}
         <div className="grid grid-cols-1 md:grid-cols-7 gap-2 relative">
           {/* Node 1: Legal Document */}
           <div
-            className={`p-3 rounded-xl border text-center transition-all ${
+            className={`p-3 rounded-lg border text-center transition-all relative ${
               activeStep >= 1
-                ? "bg-accent/10 border-accent/40 text-white shadow-md shadow-accent/10"
+                ? "bg-[#162030] border-[#B08D57]/50 text-white shadow-md"
                 : "bg-white/[0.02] border-white/10 text-muted-foreground"
             }`}
           >
-            <div className="flex justify-center mb-1.5 text-accent">
-              <FileText className="w-5 h-5" />
-            </div>
-            <div className="text-xs font-bold">1. Legal Doc</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5 truncate">
+            <div className="text-[10px] font-mono font-bold text-[#B08D57] mb-1">01 / INTAKE</div>
+            <div className="text-xs font-semibold font-serif">1. Legal Doc</div>
+            <div className="text-[10px] font-mono text-muted-foreground mt-1 truncate">
               {result ? result.document_name : "Upload / Presets"}
             </div>
           </div>
 
           {/* Node 2: Scanned Check */}
           <div
-            className={`p-3 rounded-xl border text-center transition-all ${
+            className={`p-3 rounded-lg border text-center transition-all relative ${
               activeStep >= 2
+                ? "bg-[#162030] border-[#B08D57]/50 text-white shadow-md"
+                : "bg-white/[0.02] border-white/10 text-muted-foreground"
+            }`}
+          >
+            <div className="text-[10px] font-mono font-bold text-[#B08D57] mb-1">02 / OCR</div>
+            <div className="text-xs font-semibold font-serif">2. Scanned Check</div>
+            <div className="text-[10px] font-mono text-muted-foreground mt-1 truncate">
+              {result ? (result.is_scanned_handwritten ? "TrOCR Vision" : "PyPDF Native") : "Format Detect"}
+            </div>
+          </div>
+
+          {/* Node 3: Text Extract */}
+          <div
+            className={`p-3 rounded-lg border text-center transition-all relative ${
+              activeStep >= 3
+                ? "bg-[#162030] border-[#B08D57]/50 text-white shadow-md"
+                : "bg-white/[0.02] border-white/10 text-muted-foreground"
+            }`}
+          >
+            <div className="text-[10px] font-mono font-bold text-[#B08D57] mb-1">03 / EXTRACT</div>
+            <div className="text-xs font-semibold font-serif">3. Text Extract</div>
+            <div className="text-[10px] font-mono text-muted-foreground mt-1 truncate">
+              {result ? `${result.extracted_text?.length ?? 0} chars` : "Text Buffer"}
+            </div>
+          </div>
+
+          {/* Node 4: IBM Data Prep */}
+          <div
+            className={`p-3 rounded-lg border text-center transition-all relative ${
+              activeStep >= 4
+                ? "bg-[#162030] border-[#B08D57]/50 text-white shadow-md"
+                : "bg-white/[0.02] border-white/10 text-muted-foreground"
+            }`}
+          >
+            <div className="text-[10px] font-mono font-bold text-[#B08D57] mb-1">04 / CLEAN</div>
+            <div className="text-xs font-semibold font-serif">4. Data Prep Kit</div>
+            <div className="text-[10px] font-mono text-muted-foreground mt-1 truncate">
+              {result ? "Cleaned JSON" : "IBM Sanitizer"}
+            </div>
+          </div>
+
+          {/* Node 5: RAG Grounding */}
+          <div
+            className={`p-3 rounded-lg border text-center transition-all relative ${
+              activeStep >= 5
+                ? "bg-[#162030] border-[#B08D57]/50 text-white shadow-md"
+                : "bg-white/[0.02] border-white/10 text-muted-foreground"
+            }`}
+          >
+            <div className="text-[10px] font-mono font-bold text-[#B08D57] mb-1">05 / RAG</div>
+            <div className="text-xs font-semibold font-serif">5. Statute Vector</div>
+            <div className="text-[10px] font-mono text-muted-foreground mt-1 truncate">
+              {result ? "ChromaDB Match" : "BNSS §479 Embed"}
+            </div>
+          </div>
+
+          {/* Node 6: Granite LLM */}
+          <div
+            className={`p-3 rounded-lg border text-center transition-all relative ${
+              activeStep >= 6
+                ? "bg-[#162030] border-[#B08D57]/50 text-white shadow-md"
+                : "bg-white/[0.02] border-white/10 text-muted-foreground"
+            }`}
+          >
+            <div className="text-[10px] font-mono font-bold text-[#B08D57] mb-1">06 / REASON</div>
+            <div className="text-xs font-semibold font-serif">6. Granite Engine</div>
+            <div className="text-[10px] font-mono text-muted-foreground mt-1 truncate">
+              {result ? (result.llm_used ?? "IBM Granite 3.1") : "Bail Assessment"}
+            </div>
+          </div>
+
+          {/* Node 7: Legal Officer Review */}
+          <div
+            className={`p-3 rounded-lg border text-center transition-all relative ${
+              activeStep >= 6
+                ? "bg-[#162030] border-emerald-500/50 text-white shadow-md"
+                : "bg-white/[0.02] border-white/10 text-muted-foreground"
+            }`}
+          >
+            <div className="text-[10px] font-mono font-bold text-emerald-400 mb-1">07 / APPROVE</div>
+            <div className="text-xs font-semibold font-serif">7. Officer Review</div>
+            <div className="text-[10px] font-mono text-muted-foreground mt-1 truncate">
+              Human-in-the-Loop
+            </div>
+          </div>
+        </div>
+      </div>
                 ? "bg-amber-500/10 border-amber-500/40 text-amber-300 shadow-md shadow-amber-500/10"
                 : "bg-white/[0.02] border-white/10 text-muted-foreground"
             }`}

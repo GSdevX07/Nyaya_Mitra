@@ -305,7 +305,7 @@ export function CaseIntelligence() {
                 <FileText className="w-5 h-5 text-accent" /> Auto-Generated Bail Application Draft
               </h2>
               <div className="p-6 rounded-xl border border-accent/20 bg-accent/5 font-serif text-sm text-white/90 leading-relaxed whitespace-pre-wrap">
-                {(draft.drafted_document as string).replaceAll("**", "")}
+                {(draft.drafted_document as string)?.replaceAll("**", "")}
               </div>
             </section>
           )}

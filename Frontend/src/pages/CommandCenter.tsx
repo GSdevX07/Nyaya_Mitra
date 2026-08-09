@@ -296,7 +296,7 @@ function DraftTab({ detail, onApprove, approving }: { detail: CaseDetail; onAppr
         <>
           <div className="p-4 rounded-xl bg-white/[0.02] border border-white/8">
             <pre className="whitespace-pre-wrap text-sm text-white/80 font-mono leading-relaxed">
-              {detail.draft.drafted_document}
+              {detail.draft?.drafted_document?.replaceAll("**", "")}
             </pre>
           </div>
           <button

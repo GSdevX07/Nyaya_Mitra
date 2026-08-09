@@ -1,131 +1,105 @@
 """
-database.py — Lightweight SQLite persistence for Nyaya Mitra.
+database.py — Supabase PostgreSQL persistence for Nyaya Mitra.
 
-This module provides a persistent state machine for the hackathon demo.
-It initializes a SQLite database, creates the necessary schema, and seeds
-it with the initial 5 hero cases.
+This module provides a persistent state machine for the hackathon demo,
+running on Supabase.
 """
 
-import sqlite3
-import json
-import hashlib
+import os
 import datetime
-from contextlib import contextmanager
 from typing import List
 
-from app.models.schemas import CaseRecord, CaseState
+from dotenv import load_dotenv
+from supabase import create_client, Client
+from pydantic import ValidationError
 
-DB_PATH = "nyaya_mitra.db"
+from app.models.schemas import CaseRecord, CaseState, UrgencyFlags
 
-@contextmanager
-def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-    finally:
-        conn.commit()
-        conn.close()
+# Load environment variables
+load_dotenv()
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
+
+# Initialize Supabase Client
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 
 def init_db():
-    """Create tables and seed initial mock data if empty."""
-    with get_db_connection() as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS cases (
-                case_id TEXT PRIMARY KEY,
-                data JSON NOT NULL
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS evidence (
-                evidence_id TEXT PRIMARY KEY,
-                case_id TEXT NOT NULL,
-                document_type TEXT NOT NULL,
-                file_name TEXT NOT NULL,
-                stored_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS notifications (
-                id TEXT PRIMARY KEY,
-                case_id TEXT NOT NULL,
-                title TEXT NOT NULL,
-                message TEXT NOT NULL,
-                type TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                is_read INTEGER DEFAULT 0
-            )
-        ''')
-        
-        # Check if we need to seed
-        cursor = conn.execute("SELECT COUNT(*) as count FROM cases")
-        if cursor.fetchone()["count"] == 0:
-            _seed_db(conn)
+    """Create tables and seed initial mock data if empty.
+    Handled externally via Supabase SQL editor or scripts now.
+    """
+    pass
 
-def _seed_db(conn):
-    """Seed the database with the 5 hero cases and their mock evidence."""
-    from app.main import MOCK_DB  # Import here to avoid circular dependency
-    for case in MOCK_DB:
-        # Save the full pydantic model as JSON
-        conn.execute(
-            "INSERT INTO cases (case_id, data) VALUES (?, ?)",
-            (case.case_id, case.model_dump_json())
+def _map_row_to_case_record(row: dict) -> CaseRecord:
+    try:
+        flags = UrgencyFlags(
+            age=row.get("age", 30),
+            health_flag=row.get("health_flag", False),
+            repeat_offender=not row.get("first_time_offender", True)
         )
-        # Create evidence records for all present docs
-        for doc in case.present_docs:
-            evidence_id = f"EVI-{case.case_id}-{doc}"
-            file_name = f"{doc}.pdf"
-            # Simulate the "original" file bytes and compute its hash
-            mock_file_bytes = f"mock_file_content_for_{case.case_id}_{doc}".encode()
-            stored_hash = hashlib.sha256(mock_file_bytes).hexdigest()
+        # Some rows might have "id" as the primary key from undertrial_cases
+        case_id = row.get("id") or row.get("case_id")
+        
+        status_val = row.get("status", CaseState.DETECTED.value)
+        # Ensure status is valid
+        if status_val not in [s.value for s in CaseState]:
+            status_val = CaseState.DETECTED.value
             
-            # Intentionally tamper with UTP-0012's remand_order hash to show MISMATCH in UI
-            if case.case_id == "UTP-0012" and doc == "remand_order":
-                stored_hash = "deadbeef" + stored_hash[8:]
-                
-            conn.execute(
-                "INSERT INTO evidence (evidence_id, case_id, document_type, file_name, stored_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (evidence_id, case.case_id, doc, file_name, stored_hash, datetime.datetime.now(datetime.timezone.utc).isoformat())
-            )
-            
-        # Add a mock notification for UTP-0007 if present
-        if case.case_id == "UTP-0007":
-            conn.execute(
-                "INSERT INTO notifications (id, case_id, title, message, type, timestamp, is_read) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (f"NOTIF-{case.case_id}-mock", case.case_id, "High Priority Bail Eligibility Flagged", f"{case.case_id} has exceeded the sentence threshold.", "urgent", datetime.datetime.now(datetime.timezone.utc).isoformat(), 0)
-            )
+        case = CaseRecord(
+            case_id=case_id,
+            name=row.get("name", "Unknown"),
+            offense_sections=row.get("offense_sections", []),
+            arrest_date=row.get("arrest_date", "2023-01-01"),
+            custody_days=row.get("custody_days", 0),
+            max_sentence_days_for_offense=row.get("max_sentence_days_for_offense", 0),
+            prior_bail_orders=row.get("prior_bail_orders", []),
+            required_docs=row.get("required_docs", ["remand_order", "charge_sheet", "prior_bail_order_if_any"]),
+            present_docs=row.get("present_docs", []),
+            urgency_flags=flags,
+            jail_location=row.get("jail_location", "Unknown"),
+            preferred_language=row.get("preferred_language", "en"),
+            relative_name=row.get("relative_name"),
+            relative_relation=row.get("relative_relation"),
+            relative_phone=row.get("relative_phone"),
+            permanent_address=row.get("permanent_address"),
+            assignment_status=row.get("assignment_status", "AVAILABLE"),
+            assigned_lawyer_id=row.get("assigned_lawyer_id"),
+            status=CaseState(status_val)
+        )
+        return case
+    except Exception as e:
+        print(f"Error mapping row to case record: {e} | Row: {row}")
+        raise
 
 def get_all_cases() -> List[CaseRecord]:
     """Retrieve all cases from the database."""
-    with get_db_connection() as conn:
-        cursor = conn.execute("SELECT data FROM cases")
-        rows = cursor.fetchall()
-        return [CaseRecord.model_validate_json(row["data"]) for row in rows]
+    # We fetch from 'undertrial_cases' instead of the deprecated 'cases' table.
+    response = supabase.table("undertrial_cases").select("*").execute()
+    cases = []
+    for row in response.data:
+        try:
+            cases.append(_map_row_to_case_record(row))
+        except Exception:
+            pass
+    return cases
 
 def get_case(case_id: str) -> CaseRecord | None:
     """Retrieve a single case by ID."""
-    with get_db_connection() as conn:
-        cursor = conn.execute("SELECT data FROM cases WHERE case_id = ?", (case_id,))
-        row = cursor.fetchone()
-        if row:
-            return CaseRecord.model_validate_json(row["data"])
+    response = supabase.table("undertrial_cases").select("*").eq("id", case_id).execute()
+    if response.data:
+        try:
+            return _map_row_to_case_record(response.data[0])
+        except Exception:
+            pass
     return None
+
 
 def update_case_status(case_id: str, new_status: CaseState) -> bool:
     """Update the status of a case. Returns True if successful."""
-    with get_db_connection() as conn:
-        cursor = conn.execute("SELECT data FROM cases WHERE case_id = ?", (case_id,))
-        row = cursor.fetchone()
-        if not row:
-            return False
-        case_data = json.loads(row["data"])
-        case_data["status"] = new_status.value
-        conn.execute(
-            "UPDATE cases SET data = ? WHERE case_id = ?",
-            (json.dumps(case_data), case_id)
-        )
-        return True
+    # Update the row in undertrial_cases directly
+    response = supabase.table("undertrial_cases").update({"status": new_status.value}).eq("id", case_id).execute()
+    return len(response.data) > 0
+
 
 def update_case_documents(case_id: str, present_docs: list) -> bool:
     """
@@ -133,66 +107,71 @@ def update_case_documents(case_id: str, present_docs: list) -> bool:
     This is required after document upload so the change survives a page reload.
     Returns True if successful.
     """
-    with get_db_connection() as conn:
-        cursor = conn.execute("SELECT data FROM cases WHERE case_id = ?", (case_id,))
-        row = cursor.fetchone()
-        if not row:
-            return False
-        case_data = json.loads(row["data"])
-        case_data["present_docs"] = present_docs
-        conn.execute(
-            "UPDATE cases SET data = ? WHERE case_id = ?",
-            (json.dumps(case_data), case_id)
-        )
-        return True
+    response = supabase.table("undertrial_cases").update({"present_docs": present_docs}).eq("id", case_id).execute()
+    return len(response.data) > 0
+
 
 def add_evidence(case_id: str, document_type: str, stored_hash: str) -> str:
     """Insert a new evidence record and return the generated evidence_id."""
     evidence_id = f"EVI-{case_id}-{document_type}"
     file_name = f"{document_type}.pdf"
     created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    with get_db_connection() as conn:
-        # Use REPLACE INTO in case they re-upload the same document type
-        conn.execute(
-            "REPLACE INTO evidence (evidence_id, case_id, document_type, file_name, stored_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (evidence_id, case_id, document_type, file_name, stored_hash, created_at)
-        )
+    
+    # Upsert (equivalent to REPLACE INTO)
+    supabase.table("evidence").upsert({
+        "evidence_id": evidence_id,
+        "case_id": case_id,
+        "document_type": document_type,
+        "file_name": file_name,
+        "stored_hash": stored_hash,
+        "created_at": created_at
+    }).execute()
+    
     return evidence_id
+
 
 def get_all_evidence() -> List[dict]:
     """Retrieve all evidence records."""
-    with get_db_connection() as conn:
-        cursor = conn.execute("SELECT * FROM evidence")
-        return [dict(row) for row in cursor.fetchall()]
+    response = supabase.table("evidence").select("*").execute()
+    return response.data
+
 
 def get_evidence_item(evidence_id: str) -> dict | None:
     """Retrieve a single evidence record by ID."""
-    with get_db_connection() as conn:
-        cursor = conn.execute("SELECT * FROM evidence WHERE evidence_id = ?", (evidence_id,))
-        row = cursor.fetchone()
-        if row:
-            return dict(row)
+    response = supabase.table("evidence").select("*").eq("evidence_id", evidence_id).execute()
+    if response.data:
+        return response.data[0]
     return None
 
-def add_notification(case_id: str, title: str, message: str, type: str) -> str:
+
+def add_notification(case_id: str, title: str, message: str, notif_type: str) -> str:
     """Insert a new notification only if an identical one doesn't already exist.
     
     Uses a stable ID based on case_id + type to prevent duplicate notifications
     from being created every time a case detail page is loaded.
     """
-    # Stable ID: one notification per case_id per type per UTC-day
     today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
-    notif_id = f"NOTIF-{case_id}-{type}-{today}"
+    notif_id = f"NOTIF-{case_id}-{notif_type}-{today}"
     timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    with get_db_connection() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO notifications (id, case_id, title, message, type, timestamp, is_read) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (notif_id, case_id, title, message, type, timestamp, 0)
-        )
+    
+    try:
+        # Ignore conflicts via 'on_conflict' on the primary key 'id'
+        supabase.table("notifications").upsert({
+            "id": notif_id,
+            "case_id": case_id,
+            "title": title,
+            "message": message,
+            "type": notif_type,
+            "timestamp": timestamp,
+            "is_read": 0
+        }, on_conflict="id", ignore_duplicates=True).execute()
+    except Exception as e:
+        print(f"Error adding notification: {e}")
+        
     return notif_id
+
 
 def get_all_notifications() -> List[dict]:
     """Retrieve all notifications sorted by newest first."""
-    with get_db_connection() as conn:
-        cursor = conn.execute("SELECT * FROM notifications ORDER BY timestamp DESC")
-        return [dict(row) for row in cursor.fetchall()]
+    response = supabase.table("notifications").select("*").order("timestamp", desc=True).execute()
+    return response.data

@@ -129,8 +129,8 @@ function QueueCard({
         onClick={onClick}
         className={`cursor-pointer transition-all duration-200 border relative overflow-hidden dog-ear-fold
           ${isSelected
-            ? "border-amber-500/50 bg-[#141B26] shadow-lg shadow-primary/5"
-            : "border-border bg-[#0F141C]/80 hover:border-border hover:bg-[#141A24]"
+            ? "border-accent/50 bg-card shadow-md"
+            : "border-border bg-card/60 hover:border-border hover:bg-card"
           }`}
       >
         {/* Red urgency thread on left edge */}

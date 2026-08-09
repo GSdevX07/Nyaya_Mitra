@@ -52,7 +52,7 @@ def db_row_to_case_record(row: dict) -> CaseRecord:
     
     return CaseRecord(
         case_id=row["id"],
-        name=row.get("name") or "synthetic - not a real person",
+        name=row.get("name") or "Unknown (Synthetic)",
         offense_sections=row.get("offense_sections") or ["IPC 379"],
         arrest_date=row.get("arrest_date") or "2024-01-01",
         custody_days=row.get("custody_days") or 0,
@@ -222,7 +222,7 @@ def get_documents():
         docs.append({
             "id": d["id"],
             "case_id": d["case_id"],
-            "prisoner_name": "synthetic - not a real person",
+            "prisoner_name": "Unknown (Synthetic)",
             "document_type": d["document_type"].replace("_", " ").title(),
             "status": "Verified & Present" if d.get("is_present") else "Missing — Action Required",
             "is_present": d.get("is_present", False),

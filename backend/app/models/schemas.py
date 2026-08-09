@@ -45,10 +45,10 @@ class CaseRecord(BaseModel):
     name: str = Field(
         ...,
         description=(
-            "Name of the prisoner — MUST be marked as "
-            "'synthetic - not a real person' in all mock data."
+            "Name of the prisoner — MUST be marked with "
+            "'(Synthetic)' in all mock data."
         ),
-        examples=["synthetic - not a real person"],
+        examples=["Ramesh Kumar (Synthetic)"],
     )
     offense_sections: List[str] = Field(
         ...,

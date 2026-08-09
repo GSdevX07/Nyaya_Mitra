@@ -16,42 +16,28 @@ export function EligibilityRadar() {
     async function load() {
       setLoading(true);
       const data = await fetchCases();
-      setCases(data);
+      // Only show cases assigned to this lawyer
+      setCases(data.filter((c: any) => c.case.assignment_status === "ASSIGNED"));
       setLoading(false);
     }
     load();
   }, []);
 
-  // Map backend cases or fallback to mock cases
-  const caseList = cases.length > 0
-    ? cases.map((c) => ({
-        id: c.case.case_id,
-        prisonerName: c.case.name,
-        offence: c.case.offense_sections.join(", "),
-        custodyDays: c.case.custody_days,
-        maxSentenceDays: c.case.max_sentence_days_for_offense,
-        daysOverdue: c.days_overdue,
-        isEligible: c.case.custody_days >= Math.floor(c.case.max_sentence_days_for_offense / 2),
-        urgency: c.urgency_score > 200 ? "URGENT" : "MEDIUM",
-        missingDocs: c.case.required_docs.filter((d) => !c.case.present_docs.includes(d)),
-        healthFlag: c.case.urgency_flags.health_flag,
-        age: c.case.urgency_flags.age,
-        court: c.case.jail_location,
-      }))
-    : [].map((c) => ({
-        id: c.id,
-        prisonerName: c.prisonerName,
-        offence: c.offence,
-        custodyDays: c.custodyDurationDays,
-        maxSentenceDays: 1095,
-        daysOverdue: Math.max(0, c.custodyDurationDays - 547),
-        isEligible: c.custodyDurationDays >= 547,
-        urgency: c.urgency,
-        missingDocs: c.documents.filter((d) => d.status === "missing").map((d) => d.name),
-        healthFlag: c.age >= 60,
-        age: c.age,
-        court: c.court,
-      }));
+  // Map backend cases
+  const caseList = cases.map((c) => ({
+    id: c.case.case_id,
+    prisonerName: c.case.name,
+    offence: c.case.offense_sections.join(", "),
+    custodyDays: c.case.custody_days,
+    maxSentenceDays: c.case.max_sentence_days_for_offense,
+    daysOverdue: c.days_overdue,
+    isEligible: c.case.custody_days >= Math.floor(c.case.max_sentence_days_for_offense / 2),
+    urgency: c.urgency_score > 200 ? "URGENT" : "MEDIUM",
+    missingDocs: c.case.required_docs.filter((d) => !c.case.present_docs.includes(d)),
+    healthFlag: c.case.urgency_flags.health_flag,
+    age: c.case.urgency_flags.age,
+    court: c.case.jail_location,
+  }));
 
   // Filter based on search and status filter
   const filteredCases = caseList.filter((item) => {
@@ -69,27 +55,27 @@ export function EligibilityRadar() {
     return true;
   });
 
-  // Calculate dynamic summary stats based on selected timeframe
-  const multiplier =
-    selectedTimeframe === "Today"
-      ? 0.2
-      : selectedTimeframe === "7 days"
-      ? 0.5
-      : selectedTimeframe === "30 days"
-      ? 1.0
-      : 2.2;
+  const thresholdWindow = 
+    selectedTimeframe === "Today" ? 1
+    : selectedTimeframe === "7 days" ? 7
+    : selectedTimeframe === "30 days" ? 30
+    : 90;
 
-  const countApproaching = Math.round(12 * multiplier);
-  const countDocsRequired = Math.round(34 * multiplier);
-  const countOverdue = caseList.filter((c) => c.daysOverdue > 0).length || Math.round(7 * multiplier);
+  // Calculate REAL stats
+  const countApproaching = filteredCases.filter(c => {
+    const daysUntil = (c.maxSentenceDays / 2) - c.custodyDays;
+    return daysUntil > 0 && daysUntil <= thresholdWindow;
+  }).length;
+  const countDocsRequired = filteredCases.filter(c => c.missingDocs.length > 0).length;
+  const countOverdue = filteredCases.filter(c => c.daysOverdue > 0).length;
 
-  // Group cases for timeline: This Week vs Next Week vs Later
-  const thisWeekCases = filteredCases.filter(
-    (c) => c.urgency === "URGENT" || c.daysOverdue > 0 || c.missingDocs.length > 0
-  );
-  const nextWeekCases = filteredCases.filter(
-    (c) => !thisWeekCases.includes(c)
-  );
+  // Group cases for timeline
+  const activeWindowCases = filteredCases.filter(c => {
+    const daysUntil = (c.maxSentenceDays / 2) - c.custodyDays;
+    return c.daysOverdue > 0 || c.missingDocs.length > 0 || (daysUntil > 0 && daysUntil <= thresholdWindow);
+  });
+  
+  const futureCases = filteredCases.filter(c => !activeWindowCases.includes(c));
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-10 animate-in fade-in duration-300">
@@ -205,12 +191,12 @@ export function EligibilityRadar() {
 
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                  This Week <span className="text-xs font-normal text-muted-foreground">({thisWeekCases.length} cases)</span>
+                  Active Window <span className="text-xs font-normal text-muted-foreground">({activeWindowCases.length} cases)</span>
                 </h3>
               </div>
 
               <div className="space-y-4 pl-4">
-                {thisWeekCases.map((c) => (
+                {activeWindowCases.map((c) => (
                   <div
                     key={c.id}
                     className={`p-5 rounded-2xl border transition-all duration-300 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
@@ -260,7 +246,7 @@ export function EligibilityRadar() {
                   </div>
                 ))}
 
-                {thisWeekCases.length === 0 && (
+                {activeWindowCases.length === 0 && (
                   <div className="p-6 text-center text-sm text-muted-foreground bg-white/[0.01] rounded-xl border border-white/5">
                     No cases matching criteria for this week.
                   </div>
@@ -274,11 +260,11 @@ export function EligibilityRadar() {
               <div className="absolute -left-[19px] top-1 w-2 h-2 rounded-full bg-white/30 ring-4 ring-black" />
 
               <h3 className="text-lg font-bold text-white mb-6 uppercase tracking-wider flex items-center gap-2">
-                Next Week <span className="text-xs font-normal text-muted-foreground">({nextWeekCases.length} cases)</span>
+                Future / Safe <span className="text-xs font-normal text-muted-foreground">({futureCases.length} cases)</span>
               </h3>
 
               <div className="space-y-4 pl-4">
-                {nextWeekCases.map((c) => (
+                {futureCases.map((c) => (
                   <div
                     key={c.id}
                     className="p-5 rounded-2xl border border-white/5 bg-white/[0.02] hover:border-white/20 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
@@ -301,9 +287,9 @@ export function EligibilityRadar() {
                   </div>
                 ))}
 
-                {nextWeekCases.length === 0 && (
+                {futureCases.length === 0 && (
                   <div className="p-6 text-center text-sm text-muted-foreground bg-white/[0.01] rounded-xl border border-white/5">
-                    No cases scheduled for next week.
+                    No future cases scheduled.
                   </div>
                 )}
               </div>

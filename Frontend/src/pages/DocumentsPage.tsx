@@ -312,11 +312,11 @@ export function DocumentsPage() {
       {showUploadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
           <div
-            className="w-full max-w-2xl bg-card border border-border rounded-3xl shadow-2xl overflow-hidden"
+            className="w-full max-w-2xl bg-card border border-border rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
             style={{ boxShadow: "0 0 60px rgba(99,102,241,0.15)" }}
           >
             {/* Modal Header */}
-            <div className="px-7 py-5 border-b border-border flex items-center justify-between">
+            <div className="px-7 py-5 border-b border-border flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-accent/15 border border-accent/30 flex items-center justify-center">
                   <FileScan className="w-5 h-5 text-accent" />
@@ -336,7 +336,7 @@ export function DocumentsPage() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="px-7 py-6 space-y-6">
+            <form onSubmit={handleSubmit} className="px-7 py-6 space-y-6 overflow-y-auto">
               {/* Case ID & Doc Type row */}
               <div className="grid grid-cols-2 gap-4">
                 <div>

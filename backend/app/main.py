@@ -474,7 +474,7 @@ def trigger_action(action_id: str):
     return {
         "action_id": action_id,
         "status": "Executed Successfully",
-        "message": f"Action {action_id} triggered and sent to DLSA portal.",
+        "message": f"Action {action_id} triggered (DLSA submission simulated)."
     }
 
 

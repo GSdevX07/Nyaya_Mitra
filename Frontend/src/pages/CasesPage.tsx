@@ -161,12 +161,17 @@ export function CasesPage() {
 
     if (!matchesSearch) return false;
 
+    const isRepeat = c.urgency_flags?.repeat_offender;
+    const thresholdDays = isRepeat
+      ? Math.ceil(c.max_sentence_days_for_offense / 2)
+      : Math.ceil(c.max_sentence_days_for_offense / 3);
+    const isEligible = item.days_overdue > 0 || c.custody_days >= thresholdDays;
+
     if (filterType === "ELIGIBLE") {
-      // Use backend days_overdue as the canonical eligibility signal
-      return item.days_overdue > 0 || (item.urgency_score > 0 && item.days_overdue >= 0);
+      return isEligible;
     }
     if (filterType === "INELIGIBLE") {
-      return c.custody_days < Math.floor(c.max_sentence_days_for_offense / 2);
+      return !isEligible;
     }
     if (filterType === "MEDICAL") {
       return c.urgency_flags.health_flag || c.urgency_flags.age >= 60;
@@ -301,13 +306,12 @@ export function CasesPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filtered.map(item => {
             const c = item.case;
-            // Use backend days_overdue as canonical eligibility signal (comes from EligibilityAgent)
-            const isEligible = item.days_overdue > 0;
-            const isRepeat = c.urgency_flags.repeat_offender;
+            const isRepeat = c.urgency_flags?.repeat_offender;
             const thresholdLabel = isRepeat ? "1/2 Threshold" : "1/3 Threshold";
             const thresholdDays = isRepeat
               ? Math.ceil(c.max_sentence_days_for_offense / 2)
               : Math.ceil(c.max_sentence_days_for_offense / 3);
+            const isEligible = item.days_overdue > 0 || c.custody_days >= thresholdDays;
             const missingDocs = c.required_docs.filter(d => !c.present_docs.includes(d));
             const isAvailableTab = activeMainTab === "AVAILABLE_CASES";
 

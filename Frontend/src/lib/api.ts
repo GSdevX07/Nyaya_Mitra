@@ -138,18 +138,70 @@ export async function fetchDocuments() {
   }
 }
 
+/**
+ * Upload a real file (PDF / image) and / or custom text for a case document.
+ * Sends multipart/form-data to POST /documents/upload.
+ */
+export async function uploadDocumentFile(
+  caseId: string,
+  documentType: string,
+  file?: File,
+  customText?: string
+): Promise<{
+  status: string;
+  message: string;
+  present_docs: string[];
+  is_complete: boolean;
+  is_handwritten: boolean;
+  ocr_engine: string;
+  extracted_text: string;
+  file_name: string;
+  file_size_bytes: number;
+  file_hash: string;
+}> {
+  const formData = new FormData();
+  if (file) formData.append("file", file);
+  if (customText) formData.append("custom_text", customText);
+
+  const res = await fetch(
+    `${API_BASE_URL}/documents/upload?case_id=${encodeURIComponent(caseId)}&document_type=${encodeURIComponent(documentType)}`,
+    { method: "POST", body: formData }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.detail || `Upload failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/** Backward-compat alias — no file, no text. */
 export async function uploadDocument(caseId: string, documentType: string) {
+  return uploadDocumentFile(caseId, documentType, undefined, undefined);
+}
+
+/** Fetch per-case upload history from Supabase. */
+export async function getUploadedDocuments(caseId: string): Promise<
+  Array<{
+    id: string;
+    case_id: string;
+    document_type: string;
+    file_name: string;
+    extracted_text: string;
+    custom_text: string;
+    is_handwritten: boolean;
+    ocr_engine: string;
+    file_hash: string;
+    file_size_bytes: number;
+    mime_type: string;
+    uploaded_at: string;
+  }>
+> {
   try {
-    const res = await fetch(
-      `${API_BASE_URL}/documents/upload?case_id=${encodeURIComponent(
-        caseId
-      )}&document_type=${encodeURIComponent(documentType)}`,
-      { method: "POST" }
-    );
-    return await res.json();
-  } catch (err) {
-    console.error("Document upload error:", err);
-    throw err;
+    const res = await fetch(`${API_BASE_URL}/documents/uploaded/${encodeURIComponent(caseId)}`);
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
   }
 }
 
@@ -276,4 +328,3 @@ export async function assessUploadedDocument(file: File) {
   }
   return res.json();
 }
-

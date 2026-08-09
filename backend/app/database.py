@@ -175,3 +175,56 @@ def get_all_notifications() -> List[dict]:
     """Retrieve all notifications sorted by newest first."""
     response = supabase.table("notifications").select("*").order("timestamp", desc=True).execute()
     return response.data
+
+
+def store_uploaded_document(
+    case_id: str,
+    document_type: str,
+    file_name: str,
+    extracted_text: str,
+    custom_text: str,
+    is_handwritten: bool,
+    ocr_engine: str,
+    file_hash: str,
+    file_size_bytes: int,
+    mime_type: str,
+) -> str:
+    """Upsert an uploaded document record into Supabase and return the document UUID.
+
+    Uses an upsert keyed on (case_id, document_type) so re-uploading the same
+    document type for the same case just refreshes the record rather than
+    creating duplicates.
+    """
+    created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    # Build stable ID so we can upsert without a real duplicate
+    import hashlib as _hashlib
+    stable_id = _hashlib.md5(f"{case_id}-{document_type}".encode()).hexdigest()
+    payload = {
+        "id": stable_id,
+        "case_id": case_id,
+        "document_type": document_type,
+        "file_name": file_name,
+        "extracted_text": extracted_text,
+        "custom_text": custom_text,
+        "is_handwritten": is_handwritten,
+        "ocr_engine": ocr_engine,
+        "file_hash": file_hash,
+        "file_size_bytes": file_size_bytes,
+        "mime_type": mime_type,
+        "uploaded_at": created_at,
+    }
+    supabase.table("uploaded_documents").upsert(payload, on_conflict="id").execute()
+    return stable_id
+
+
+def get_case_uploaded_documents(case_id: str) -> List[dict]:
+    """Retrieve all uploaded document records for a given case."""
+    response = (
+        supabase.table("uploaded_documents")
+        .select("*")
+        .eq("case_id", case_id)
+        .order("uploaded_at", desc=True)
+        .execute()
+    )
+    return response.data
+

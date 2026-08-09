@@ -24,6 +24,15 @@ Design notes:
 
 from __future__ import annotations
 
+import os
+import warnings
+
+# Suppress verbose oneDNN and TensorFlow informational messages
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+warnings.filterwarnings("ignore")
+
 import hashlib
 import json
 import datetime
@@ -39,9 +48,10 @@ from app.agents.eligibility_agent import evaluate_eligibility
 from app.models.schemas import CaseRecord, UrgencyFlags, CaseState
 from app.database import (
     init_db, get_all_cases, get_case, update_case_status, update_case_documents,
-    add_evidence, get_all_evidence, get_evidence_item, get_all_notifications
+    add_evidence, get_all_evidence, get_evidence_item, get_all_notifications,
+    store_uploaded_document, get_case_uploaded_documents,
 )
-from app.document_pipeline import DocumentPipelineError, DocumentPipelineResult, execute_full_document_pipeline
+from app.document_pipeline import DocumentPipelineError, DocumentPipelineResult, execute_full_document_pipeline, extract_document_text
 from app.rag.legal_ingestion import LegalIngestionError, ingest_legal_pdf
 from app.rag.vector_store import VectorStoreUnavailable, corpus_status
 
@@ -563,42 +573,163 @@ def get_case_documents(case_id: str):
 
 
 @app.post("/documents/upload", tags=["Documents"])
-def upload_document(case_id: str, document_type: str):
+async def upload_document(
+    case_id: str,
+    document_type: str,
+    file: Optional[UploadFile] = File(None),
+    custom_text: Optional[str] = Form(None),
+):
     """
-    Attach a document to a case and persist the change to SQLite.
+    Upload a real document file (PDF or image) and/or paste custom text for a case.
 
-    The document type string must match one of the required_docs values
-    (e.g. 'charge_sheet', 'remand_order', 'prior_bail_order_if_any').
-    After a successful upload the CompletenessAgent outcome will change
-    on the next call to GET /cases/{case_id}.
+    - Accepts PDF files → extracts text via pypdf.
+    - Accepts images (JPG, PNG, WEBP, BMP, TIFF, GIF, HEIC) → runs OCR (Tesseract
+      or HANDWRITING_OCR_COMMAND) to recognise handwriting.
+    - custom_text may be supplied instead of or alongside a file.
+    - Extracted text + SHA-256 file hash are persisted to the `uploaded_documents`
+      Supabase table.
+    - present_docs on the case is updated so the document flips to 'Present'.
     """
+    # ── 1. Read file bytes if a file was provided ─────────────────────────────
+    file_bytes: Optional[bytes] = None
+    file_name: str = "manual_entry.txt"
+    mime_type: str = "text/plain"
+
+    if file and file.filename:
+        file_bytes = await file.read()
+        file_name = file.filename
+        mime_type = file.content_type or "application/octet-stream"
+
+    # ── 2. Extract text from file (OCR / pypdf) ───────────────────────────────
+    extracted_text = ""
+    is_handwritten = False
+    ocr_engine = "none"
+
+    if file_bytes:
+        try:
+            is_handwritten, _conf, ocr_engine, extracted_text = extract_document_text(
+                file_bytes, file_name, None
+            )
+        except DocumentPipelineError as exc:
+            # Surface actionable OCR errors to the client
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    # Use custom_text as fallback / supplement
+    final_text = extracted_text or (custom_text or "")
+
+    if not final_text.strip() and not file_bytes:
+        raise HTTPException(
+            status_code=422,
+            detail="Please upload a file or paste text before submitting.",
+        )
+
+    # ── 3. Compute SHA-256 hash for tamper-evident storage ────────────────────
+    file_hash = ""
+    file_size = 0
+    if file_bytes:
+        file_hash = hashlib.sha256(file_bytes).hexdigest()
+        file_size = len(file_bytes)
+
+    # ── 4. Persist to Supabase uploaded_documents table ──────────────────────
+    try:
+        store_uploaded_document(
+            case_id=case_id,
+            document_type=document_type,
+            file_name=file_name,
+            extracted_text=extracted_text,
+            custom_text=custom_text or "",
+            is_handwritten=bool(is_handwritten),
+            ocr_engine=ocr_engine,
+            file_hash=file_hash,
+            file_size_bytes=file_size,
+            mime_type=mime_type,
+        )
+    except Exception as exc:
+        # Non-fatal: log but don't block the upload workflow
+        print(f"[WARN] store_uploaded_document failed: {exc}")
+
+    # ── 5. Update present_docs on the case ───────────────────────────────────
     case = _find_case(case_id)
-    updated_docs = list(case.present_docs)  # copy do not mutate in-memory object
+    updated_docs = list(case.present_docs)
     if document_type not in updated_docs:
         updated_docs.append(document_type)
-    # Persist to SQLite so change survives page reload
     update_case_documents(case_id, updated_docs)
-    # Advance workflow state if now complete
+
     all_required = set(case.required_docs)
     if all_required.issubset(set(updated_docs)):
         update_case_status(case_id, CaseState.DOCUMENTS_COMPLETE)
     else:
         update_case_status(case_id, CaseState.DOCUMENTS_MISSING)
-        
-    # Simulate the uploaded file bytes to create cryptographic evidence
-    mock_file_bytes = f"mock_file_content_for_{case_id}_{document_type}".encode()
-    stored_hash = hashlib.sha256(mock_file_bytes).hexdigest()
-    add_evidence(case_id, document_type, stored_hash)
-    
+
+    # ── 6. Add SHA-256 evidence record ───────────────────────────────────────
+    evidence_hash = file_hash or hashlib.sha256(final_text.encode()).hexdigest()
+    add_evidence(case_id, document_type, evidence_hash)
+
     return {
         "status": "success",
         "message": f"Document '{document_type}' uploaded and persisted for case {case_id}.",
         "present_docs": updated_docs,
         "is_complete": all_required.issubset(set(updated_docs)),
+        "is_handwritten": bool(is_handwritten),
+        "ocr_engine": ocr_engine,
+        "extracted_text": final_text[:2000],  # preview, not full blob
+        "file_name": file_name,
+        "file_size_bytes": file_size,
+        "file_hash": file_hash,
     }
 
 
+@app.post("/documents/assess", tags=["Documents"])
+async def assess_document_file(
+    file: Optional[UploadFile] = File(None),
+    case_id: Optional[str] = Form(None),
+    document_name: Optional[str] = Form(None),
+    provided_text: Optional[str] = Form(None),
+):
+    """
+    Run the full document assessment pipeline on an uploaded file or pasted text.
+
+    - PDF → pypdf text extraction → RAG → LLM assessment
+    - Image → OCR (Tesseract / HANDWRITING_OCR_COMMAND) → RAG → LLM assessment
+    - Returns structured assessment including eligibility status, legal citations,
+      and extracted metadata.
+    """
+    file_bytes: Optional[bytes] = None
+    name = document_name or "uploaded_document"
+
+    if file and file.filename:
+        file_bytes = await file.read()
+        name = document_name or file.filename
+
+    try:
+        result = execute_full_document_pipeline(
+            file_bytes=file_bytes,
+            document_name=name,
+            provided_text=provided_text,
+        )
+    except DocumentPipelineError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    return result.model_dump()
+
+
+@app.get("/documents/uploaded/{case_id}", tags=["Documents"])
+def get_uploaded_documents(case_id: str):
+    """
+    Retrieve all previously uploaded document records for a case from Supabase.
+
+    Returns file metadata, extracted text, OCR engine used, SHA-256 hash,
+    and upload timestamp for every document uploaded against this case.
+    """
+    try:
+        records = get_case_uploaded_documents(case_id)
+        return records
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not fetch uploaded documents: {exc}")
+
+
 # ── Evidence subsystem SHA-256 integrity verification ──────────────────────
+
 
 @app.get("/evidence", tags=["Evidence"])
 def get_evidence():

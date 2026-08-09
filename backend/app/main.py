@@ -439,20 +439,12 @@ def take_up_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
     update_case_status(case_id, CaseState.APPROVED)
     update_case_status(case_id, CaseState.FILED)
 
-    # Persist assignment into SQLite so get_available_cases reflects the change
-    import json
-    from app.database import get_db_connection
-    with get_db_connection() as conn:
-        cursor = conn.execute("SELECT data FROM cases WHERE case_id = ?", (case_id,))
-        row = cursor.fetchone()
-        if row:
-            case_data = json.loads(row["data"])
-            case_data["assignment_status"] = "ASSIGNED"
-            case_data["assigned_lawyer_id"] = lawyer_id
-            conn.execute(
-                "UPDATE cases SET data = ? WHERE case_id = ?",
-                (json.dumps(case_data), case_id)
-            )
+    # Persist assignment into Supabase so get_available_cases reflects the change
+    from app.database import supabase
+    supabase.table("undertrial_cases").update({
+        "assignment_status": "ASSIGNED",
+        "assigned_lawyer_id": lawyer_id
+    }).eq("id", case_id).execute()
 
     return {
         "status": "success",
@@ -472,19 +464,11 @@ def decline_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
     """
     case = _find_case(case_id)
 
-    # Persist DECLINED into SQLite
-    import json
-    from app.database import get_db_connection
-    with get_db_connection() as conn:
-        cursor = conn.execute("SELECT data FROM cases WHERE case_id = ?", (case_id,))
-        row = cursor.fetchone()
-        if row:
-            case_data = json.loads(row["data"])
-            case_data["assignment_status"] = "DECLINED"
-            conn.execute(
-                "UPDATE cases SET data = ? WHERE case_id = ?",
-                (json.dumps(case_data), case_id)
-            )
+    # Persist DECLINED into Supabase
+    from app.database import supabase
+    supabase.table("undertrial_cases").update({
+        "assignment_status": "DECLINED"
+    }).eq("id", case_id).execute()
 
     return {
         "status": "declined",
@@ -506,19 +490,11 @@ def approve_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
     update_case_status(case_id, CaseState.APPROVED)
     update_case_status(case_id, CaseState.FILED)
 
-    import json
-    from app.database import get_db_connection
-    with get_db_connection() as conn:
-        cursor = conn.execute("SELECT data FROM cases WHERE case_id = ?", (case_id,))
-        row = cursor.fetchone()
-        if row:
-            case_data = json.loads(row["data"])
-            case_data["assignment_status"] = "ASSIGNED"
-            case_data["assigned_lawyer_id"] = lawyer_id
-            conn.execute(
-                "UPDATE cases SET data = ? WHERE case_id = ?",
-                (json.dumps(case_data), case_id)
-            )
+    from app.database import supabase
+    supabase.table("undertrial_cases").update({
+        "assignment_status": "ASSIGNED",
+        "assigned_lawyer_id": lawyer_id
+    }).eq("id", case_id).execute()
 
     return {
         "status": "FILED",
@@ -804,22 +780,26 @@ def get_reports():
 
     eligibility_results = [evaluate_eligibility(c) for c in cases]
 
-    eligible_count = sum(1 for r in eligibility_results if r["eligible"])
-    manual_review_count = sum(1 for r in eligibility_results if "MANUAL_REVIEW" in r["legal_basis"])
+    eligible_complete = 0
+    eligible_missing_docs = 0
+    manual_review_count = 0
+    ineligible_count = 0
+
+    for c, r in zip(cases, eligibility_results):
+        if "MANUAL_REVIEW" in r["legal_basis"]:
+            manual_review_count += 1
+        elif r["eligible"]:
+            if set(c.required_docs).issubset(set(c.present_docs)):
+                eligible_complete += 1
+            else:
+                eligible_missing_docs += 1
+        else:
+            ineligible_count += 1
+
+    eligible_count = eligible_complete + eligible_missing_docs
     senior_citizens = sum(1 for c in cases if c.urgency_flags.age >= 60)
     health_cases = sum(1 for c in cases if c.urgency_flags.health_flag)
     avg_custody = round(sum(c.custody_days for c in cases) / total_cases, 1) if total_cases else 0
-
-    # Document completeness derived from actual case data
-    eligible_complete = sum(
-        1 for c, r in zip(cases, eligibility_results)
-        if r["eligible"] and set(c.required_docs).issubset(set(c.present_docs))
-    )
-    missing_docs_count = sum(
-        1 for c in cases
-        if not set(c.required_docs).issubset(set(c.present_docs))
-    )
-    ineligible_count = total_cases - eligible_count - manual_review_count
 
     # Estimate hours saved: each eligible+complete case avoids ~12hrs manual review
     estimated_hours_saved = eligible_complete * 12
@@ -827,8 +807,12 @@ def get_reports():
     # Build jail breakdown dynamically
     jail_counts: dict[str, int] = {}
     for c in cases:
-        jail_counts[c.jail_location] = jail_counts.get(c.jail_location, 0) + 1
-    jail_breakdown = [{"jail": jail, "count": count} for jail, count in jail_counts.items()]
+        jail_name = c.jail_location.replace(" (Synthetic)", "").replace(", synthetic", "")
+        jail_counts[jail_name] = jail_counts.get(jail_name, 0) + 1
+    
+    # Sort jail counts by highest first
+    sorted_jails = sorted(jail_counts.items(), key=lambda x: x[1], reverse=True)
+    jail_breakdown = [{"jail": jail, "count": count} for jail, count in sorted_jails]
 
     return {
         "overview": {
@@ -844,7 +828,7 @@ def get_reports():
         "court_jurisdiction_breakdown": jail_breakdown,
         "eligibility_distribution": [
             {"category": "Eligible & Complete", "count": eligible_complete},
-            {"category": "Missing Documents", "count": missing_docs_count},
+            {"category": "Eligible (Missing Docs)", "count": eligible_missing_docs},
             {"category": "Ineligible (Sentence Threshold)", "count": ineligible_count},
             {"category": "Manual Review Required", "count": manual_review_count},
         ],

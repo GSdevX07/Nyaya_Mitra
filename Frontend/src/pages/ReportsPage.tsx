@@ -10,6 +10,7 @@ interface ReportsData {
     medical_priority_cases: number;
     average_custody_days: number;
     estimated_hours_saved_by_ai: number;
+    estimated_hours_saved_note?: string;
   };
   court_jurisdiction_breakdown: { jail: string; count: number }[];
   eligibility_distribution: { category: string; count: number }[];
@@ -90,7 +91,7 @@ export function ReportsPage() {
           </div>
           <div className="text-3xl font-bold text-white">{overview.total_undertrials_monitored}</div>
           <div className="text-xs text-emerald-400 font-medium flex items-center gap-1">
-            <TrendingUp className="w-3 h-3" /> 100% Synthetic Monitored
+            <TrendingUp className="w-3 h-3" /> 100% Live Cases Monitored
           </div>
         </div>
 
@@ -101,7 +102,7 @@ export function ReportsPage() {
           </div>
           <div className="text-3xl font-bold text-white">{overview.bnss_479_eligible}</div>
           <div className="text-xs text-muted-foreground">
-            {Math.round((overview.bnss_479_eligible / overview.total_undertrials_monitored) * 100)}% ready for bail motion
+            {overview.total_undertrials_monitored > 0 ? Math.round((overview.bnss_479_eligible / overview.total_undertrials_monitored) * 100) : 0}% ready for bail motion
           </div>
         </div>
 
@@ -120,7 +121,7 @@ export function ReportsPage() {
             <Award className="w-4 h-4 text-accent" />
           </div>
           <div className="text-3xl font-bold text-white">{overview.estimated_hours_saved_by_ai} <span className="text-sm font-normal text-muted-foreground">hrs</span></div>
-          <div className="text-xs text-accent font-medium">Automated petition drafting</div>
+          <div className="text-[11px] text-accent font-medium leading-tight">{overview.estimated_hours_saved_note}</div>
         </div>
       </div>
 

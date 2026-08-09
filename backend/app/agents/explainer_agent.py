@@ -17,6 +17,8 @@ from app.llm_client import generate
 from app.models.schemas import CaseRecord
 
 
+
+
 # ── System prompt ────────────────────────────────────────────────────────────
 # Kept as a named constant for easy tuning without touching agent logic.
 
@@ -49,6 +51,7 @@ def generate_explanation(case: CaseRecord, eligibility_details: dict) -> dict:
         A dict containing:
             case_id    — echoed from the input record
             explanation— LLM-generated plain-language explanation string
+            english_translation — the original English version
             language   — value of case.preferred_language (for the UI to label
                          which language the explanation was generated in)
 
@@ -59,9 +62,9 @@ def generate_explanation(case: CaseRecord, eligibility_details: dict) -> dict:
         >>> isinstance(result["explanation"], str)
         True
     """
-    # ── Construct user prompt (template from Roadmap §14) ────────────────────
+    # ── Construct base user prompt ────────────────────
     user_prompt = (
-        f"Target Language: {case.preferred_language}\n\n"
+        f"Target Language: English\n\n"
         f"Facts: "
         f"Eligibility Result: {eligibility_details['eligible']}, "
         f"Days Overdue: {eligibility_details['days_overdue']}, "
@@ -69,12 +72,24 @@ def generate_explanation(case: CaseRecord, eligibility_details: dict) -> dict:
         f"Task: Generate the explanation."
     )
 
-    # ── Call LLM via the single choke-point ─────────────────────────────────
-    explanation = generate(prompt=user_prompt, system=EXPLAINER_SYSTEM_PROMPT)
+    # ── Call LLM via the single choke-point for English base ─────────────────────────────────
+    english_explanation = generate(prompt=user_prompt, system=EXPLAINER_SYSTEM_PROMPT)
+    
+    # ── Translate to preferred language if necessary ─────────────────────────────────
+    if case.preferred_language.lower() in ["en", "english"]:
+        native_explanation = english_explanation
+    else:
+        translate_prompt = (
+            f"Translate the following English explanation into {case.preferred_language} (ISO 639-1 code if provided). "
+            f"Provide ONLY the translated text, with no additional commentary:\n\n"
+            f"{english_explanation}"
+        )
+        native_explanation = generate(prompt=translate_prompt, system="You are an expert legal translator.")
 
     return {
         "case_id": case.case_id,
-        "explanation": explanation,
+        "explanation": native_explanation,
+        "english_translation": english_explanation,
         "language": case.preferred_language,
     }
 
@@ -143,13 +158,15 @@ if __name__ == "__main__":
         print(f"case_id    : {result['case_id']}")
         print(f"language   : {result['language']}")
         print(f"explanation: {result['explanation']}")
+        print(f"english_translation: {result['english_translation']}")
 
         # Assertions
         assert result["case_id"] == case.case_id, "case_id must be echoed"
         assert result["language"] == case.preferred_language, "language must match case preference"
         assert isinstance(result["explanation"], str), "explanation must be a string"
         assert len(result["explanation"]) > 0, "explanation must be non-empty"
-        print("  [PASS] case_id, language, and explanation all valid")
+        assert isinstance(result["english_translation"], str), "english_translation must be a string"
+        print("  [PASS] case_id, language, explanation, and english_translation all valid")
 
     print("\n" + "=" * 60)
     print("All smoke tests passed.")

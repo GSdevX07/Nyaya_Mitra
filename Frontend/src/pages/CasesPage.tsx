@@ -73,8 +73,6 @@ export function CasesPage() {
 
   const loadData = async () => {
     setLoading(true);
-    const approvedIds = getApprovedFromStorage();
-    const declinedIds = getDeclinedFromStorage();
 
     // Fetch all cases & available cases from backend
     try {
@@ -85,12 +83,10 @@ export function CasesPage() {
       let unassignedList: BackendCaseSummary[] = [];
 
       if (allData.length > 0) {
-        // Backend returned data
-        assignedList = allData.filter(item => item.case.assignment_status === "ASSIGNED" || approvedIds.includes(item.case.case_id));
+        // Backend returned data: Trust the backend state as the single source of truth
+        assignedList = allData.filter(item => item.case.assignment_status === "ASSIGNED");
         unassignedList = allData.filter(item => 
-          (item.case.assignment_status === "AVAILABLE" || !item.case.assignment_status) &&
-          !approvedIds.includes(item.case.case_id) &&
-          !declinedIds.includes(item.case.case_id)
+          item.case.assignment_status === "AVAILABLE" || !item.case.assignment_status
         );
       } else {
         assignedList = [];

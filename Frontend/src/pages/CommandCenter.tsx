@@ -63,6 +63,7 @@ interface LogEntry {
 
 interface CaseDetail {
   case_id: string;
+  case: CaseRecord;
   eligibility: EligibilityResult;
   completeness: CompletenessResult;
   urgency_score: number;
@@ -289,25 +290,41 @@ function OverviewTab({ detail }: { detail: CaseDetail }) {
   );
 }
 
-function DraftTab({ detail, onApprove, approving }: { detail: CaseDetail; onApprove: () => void; approving: boolean }) {
+function DraftTab({ detail, onApprove, approving, isFiled }: { detail: CaseDetail; onApprove: () => void; approving: boolean; isFiled: boolean }) {
+  const [draftContent, setDraftContent] = useState("");
+
+  useEffect(() => {
+    setDraftContent(detail.draft?.drafted_document?.replaceAll("**", "") || "");
+  }, [detail.case.case_id, detail.draft?.drafted_document]);
+
   return (
     <div className="space-y-4">
       {detail.draft_ready ? (
         <>
-          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/8">
-            <pre className="whitespace-pre-wrap text-sm text-white/80 font-mono leading-relaxed">
-              {detail.draft?.drafted_document?.replaceAll("**", "")}
-            </pre>
+          <div className="rounded-xl bg-white/[0.02] border border-white/8 overflow-hidden">
+            <textarea
+              className="w-full h-[500px] bg-transparent p-4 text-sm text-white/90 font-mono leading-relaxed resize-none focus:outline-none focus:ring-1 focus:ring-white/20"
+              value={draftContent}
+              onChange={(e) => setDraftContent(e.target.value)}
+              disabled={isFiled}
+            />
           </div>
           <button
             onClick={onApprove}
-            disabled={approving}
-            className="w-full py-3 px-6 rounded-xl bg-emerald-500/90 hover:bg-emerald-500 text-white font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+            disabled={approving || isFiled}
+            className={`w-full py-3 px-6 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:cursor-not-allowed ${
+              isFiled
+                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                : "bg-emerald-500/90 hover:bg-emerald-500 text-white disabled:opacity-60"
+            }`}
           >
-            {approving
-              ? <><Loader2 className="w-4 h-4 animate-spin" /> Filing...</>
-              : <><ShieldCheck className="w-4 h-4" /> Approve &amp; File</>
-            }
+            {isFiled ? (
+              <><ShieldCheck className="w-4 h-4" /> Successfully Filed to Court</>
+            ) : approving ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> Filing...</>
+            ) : (
+              <><ShieldCheck className="w-4 h-4" /> Approve &amp; File</>
+            )}
           </button>
         </>
       ) : (
@@ -562,7 +579,7 @@ export function CommandCenter() {
                       <OverviewTab detail={selectedCase} />
                     </TabsContent>
                     <TabsContent value="draft" className="mt-4">
-                      <DraftTab detail={selectedCase} onApprove={handleApprove} approving={approving} />
+                      <DraftTab detail={selectedCase} onApprove={handleApprove} approving={approving} isFiled={approveMsg === "FILED"} />
                     </TabsContent>
                     <TabsContent value="family" className="mt-4">
                       <ExplanationTab detail={selectedCase} />

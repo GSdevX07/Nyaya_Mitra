@@ -34,7 +34,7 @@ export function CasesPage() {
   
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterType, setFilterType] = useState<"ALL" | "ELIGIBLE" | "MEDICAL" | "MISSING">("ALL");
+  const [filterType, setFilterType] = useState<"ALL" | "ELIGIBLE" | "INELIGIBLE" | "MEDICAL" | "MISSING">("ALL");
 
   // Selected case for Available Case modal review
   const [selectedAvailableCase, setSelectedAvailableCase] = useState<BackendCaseSummary | null>(null);
@@ -195,6 +195,9 @@ export function CasesPage() {
     if (filterType === "ELIGIBLE") {
       return c.custody_days >= Math.floor(c.max_sentence_days_for_offense / 2);
     }
+    if (filterType === "INELIGIBLE") {
+      return c.custody_days < Math.floor(c.max_sentence_days_for_offense / 2);
+    }
     if (filterType === "MEDICAL") {
       return c.urgency_flags.health_flag || c.urgency_flags.age >= 60;
     }
@@ -280,6 +283,7 @@ export function CasesPage() {
           {[
             { id: "ALL", label: "All" },
             { id: "ELIGIBLE", label: "BNSS 479 Eligible" },
+            { id: "INELIGIBLE", label: "Ineligible" },
             { id: "MEDICAL", label: "Medical Flags" },
             { id: "MISSING", label: "Missing Docs" },
           ].map(tab => (
@@ -343,7 +347,7 @@ export function CasesPage() {
                       </span>
                     ) : (
                       <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white/5 text-muted-foreground border border-white/10 flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> In Progress
+                        <Clock className="w-3 h-3" /> Ineligible
                       </span>
                     )}
                   </div>

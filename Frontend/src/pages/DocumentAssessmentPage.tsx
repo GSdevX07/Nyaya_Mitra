@@ -12,7 +12,7 @@ import {
   Search,
   BookOpen,
 } from "lucide-react";
-import { assessDocument, assessUploadedDocument, fetchSampleDocuments } from "@/lib/api";
+import { assessDocument, fetchSampleDocuments } from "@/lib/api";
 import { InkStamp } from "@/components/ui/InkStamp";
 
 interface SampleDoc {
@@ -69,7 +69,6 @@ export function DocumentAssessmentPage() {
   const [samples, setSamples] = useState<SampleDoc[]>([]);
   const [selectedSampleId, setSelectedSampleId] = useState<string>("sample-1");
   const [customText, setCustomText] = useState<string>("");
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [useCustomInput, setUseCustomInput] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [activeStep, setActiveStep] = useState<number>(6); // Default all completed
@@ -100,12 +99,7 @@ export function DocumentAssessmentPage() {
 
     try {
       const currentSample = samples.find((s) => s.id === selectedSampleId);
-      if (uploadedFile) {
-        const res = await assessUploadedDocument(uploadedFile);
-        setResult(res);
-        return;
-      }
-      const nameToAssess = docName || (useCustomInput ? "Pasted_Legal_Document.txt" : currentSample?.document_name);
+      const nameToAssess = docName || (useCustomInput ? "Custom_Uploaded_Document.pdf" : currentSample?.document_name);
       const textToAssess = textContent || (useCustomInput ? customText : currentSample?.preview_text);
 
       const res = await assessDocument(nameToAssess, textToAssess);
@@ -121,10 +115,8 @@ export function DocumentAssessmentPage() {
 
   // Initial auto-assessment on first load
   useEffect(() => {
-    if (!useCustomInput && !uploadedFile && samples.length > 0) {
-      handleRunAssessment();
-    }
-  }, [selectedSampleId, samples, useCustomInput, uploadedFile]);
+    handleRunAssessment();
+  }, [selectedSampleId]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -135,7 +127,7 @@ export function DocumentAssessmentPage() {
   return (
     <div className="p-4 md:p-8 w-full space-y-8 animate-in fade-in duration-300">
       {/* Top Banner Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border pb-6">
         <div>
           <div className="flex items-center gap-2 mb-1.5">
             <span className="px-3 py-1 rounded-md text-xs font-mono font-semibold bg-[#1F2A44] text-[#B08D57] border border-[#B08D57]/30 shadow-sm uppercase tracking-wider">
@@ -143,7 +135,7 @@ export function DocumentAssessmentPage() {
             </span>
             <span className="text-xs text-muted-foreground font-mono">End-to-End Legal Operations</span>
           </div>
-          <h1 className="text-3xl font-serif font-bold tracking-tight text-white flex items-center gap-3">
+          <h1 className="text-3xl font-serif font-bold tracking-tight text-primary flex items-center gap-3">
             Legal Document AI &amp; Preliminary Assessment Pipeline
           </h1>
           <p className="text-sm text-muted-foreground font-sans mt-1 max-w-3xl leading-relaxed">
@@ -154,7 +146,7 @@ export function DocumentAssessmentPage() {
         <button
           onClick={() => handleRunAssessment()}
           disabled={loading}
-          className="px-5 py-2.5 bg-[#1F2A44] text-white font-semibold rounded-lg text-sm border-b-2 border-[#B08D57] hover:bg-[#253454] transition-all flex items-center gap-2 shadow-md disabled:opacity-50"
+          className="px-5 py-2.5 bg-[#1F2A44] text-primary font-semibold rounded-sm text-sm border-b-2 border-[#B08D57] hover:bg-[#253454] transition-all flex items-center gap-2 shadow-md disabled:opacity-50"
         >
           {loading ? (
             <>
@@ -171,12 +163,12 @@ export function DocumentAssessmentPage() {
       </div>
 
       {/* Case-File Transmittal & Routing Slip */}
-      <div className="p-5 rounded-xl bg-[#0F141C] border border-white/10 shadow-xl space-y-4">
-        <div className="flex items-center justify-between border-b border-white/5 pb-3">
+      <div className="p-5 rounded bg-[#0F141C] border border-border shadow-xl space-y-4">
+        <div className="flex items-center justify-between border-b border-border pb-3">
           <div className="flex items-center gap-2">
             <Cpu className="w-4 h-4 text-[#B08D57]" />
-            <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-white/80">
-              Case-File Transmittal &amp; Routing Slip Pipeline Operations
+            <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground">
+              Case-File Transmittal &amp; Routing Slip — Pipeline Operations
             </h2>
           </div>
           {result && (
@@ -191,10 +183,10 @@ export function DocumentAssessmentPage() {
         <div className="grid grid-cols-1 md:grid-cols-7 gap-2 relative">
           {/* Node 1: Legal Document */}
           <div
-            className={`p-3 rounded-lg border text-center transition-all relative ${
+            className={`p-3 rounded-sm border text-center transition-all relative ${
               activeStep >= 1
-                ? "bg-[#162030] border-[#B08D57]/50 text-white shadow-md"
-                : "bg-white/[0.02] border-white/10 text-muted-foreground"
+                ? "bg-[#162030] border-[#B08D57]/50 text-primary shadow-md"
+                : "bg-card shadow-sm border-border text-muted-foreground"
             }`}
           >
             <div className="text-[10px] font-mono font-bold text-[#B08D57] mb-1">01 / INTAKE</div>
@@ -206,10 +198,10 @@ export function DocumentAssessmentPage() {
 
           {/* Node 2: Scanned Check */}
           <div
-            className={`p-3 rounded-lg border text-center transition-all relative ${
+            className={`p-3 rounded-sm border text-center transition-all relative ${
               activeStep >= 2
-                ? "bg-[#162030] border-[#B08D57]/50 text-white shadow-md"
-                : "bg-white/[0.02] border-white/10 text-muted-foreground"
+                ? "bg-[#162030] border-[#B08D57]/50 text-primary shadow-md"
+                : "bg-card shadow-sm border-border text-muted-foreground"
             }`}
           >
             <div className="text-[10px] font-mono font-bold text-[#B08D57] mb-1">02 / OCR</div>
@@ -221,10 +213,10 @@ export function DocumentAssessmentPage() {
 
           {/* Node 3: Text Extract */}
           <div
-            className={`p-3 rounded-lg border text-center transition-all relative ${
+            className={`p-3 rounded-sm border text-center transition-all relative ${
               activeStep >= 3
-                ? "bg-[#162030] border-[#B08D57]/50 text-white shadow-md"
-                : "bg-white/[0.02] border-white/10 text-muted-foreground"
+                ? "bg-[#162030] border-[#B08D57]/50 text-primary shadow-md"
+                : "bg-card shadow-sm border-border text-muted-foreground"
             }`}
           >
             <div className="text-[10px] font-mono font-bold text-[#B08D57] mb-1">03 / EXTRACT</div>
@@ -236,10 +228,10 @@ export function DocumentAssessmentPage() {
 
           {/* Node 4: IBM Data Prep */}
           <div
-            className={`p-3 rounded-lg border text-center transition-all relative ${
+            className={`p-3 rounded-sm border text-center transition-all relative ${
               activeStep >= 4
-                ? "bg-[#162030] border-[#B08D57]/50 text-white shadow-md"
-                : "bg-white/[0.02] border-white/10 text-muted-foreground"
+                ? "bg-[#162030] border-[#B08D57]/50 text-primary shadow-md"
+                : "bg-card shadow-sm border-border text-muted-foreground"
             }`}
           >
             <div className="text-[10px] font-mono font-bold text-[#B08D57] mb-1">04 / CLEAN</div>
@@ -251,10 +243,10 @@ export function DocumentAssessmentPage() {
 
           {/* Node 5: RAG Grounding */}
           <div
-            className={`p-3 rounded-lg border text-center transition-all relative ${
+            className={`p-3 rounded-sm border text-center transition-all relative ${
               activeStep >= 5
-                ? "bg-[#162030] border-[#B08D57]/50 text-white shadow-md"
-                : "bg-white/[0.02] border-white/10 text-muted-foreground"
+                ? "bg-[#162030] border-[#B08D57]/50 text-primary shadow-md"
+                : "bg-card shadow-sm border-border text-muted-foreground"
             }`}
           >
             <div className="text-[10px] font-mono font-bold text-[#B08D57] mb-1">05 / RAG</div>
@@ -266,10 +258,10 @@ export function DocumentAssessmentPage() {
 
           {/* Node 6: Granite LLM */}
           <div
-            className={`p-3 rounded-lg border text-center transition-all relative ${
+            className={`p-3 rounded-sm border text-center transition-all relative ${
               activeStep >= 6
-                ? "bg-[#162030] border-[#B08D57]/50 text-white shadow-md"
-                : "bg-white/[0.02] border-white/10 text-muted-foreground"
+                ? "bg-[#162030] border-[#B08D57]/50 text-primary shadow-md"
+                : "bg-card shadow-sm border-border text-muted-foreground"
             }`}
           >
             <div className="text-[10px] font-mono font-bold text-[#B08D57] mb-1">06 / REASON</div>
@@ -281,13 +273,13 @@ export function DocumentAssessmentPage() {
 
           {/* Node 7: Legal Officer Review */}
           <div
-            className={`p-3 rounded-lg border text-center transition-all relative ${
+            className={`p-3 rounded-sm border text-center transition-all relative ${
               activeStep >= 6
-                ? "bg-[#162030] border-emerald-500/50 text-white shadow-md"
-                : "bg-white/[0.02] border-white/10 text-muted-foreground"
+                ? "bg-[#162030] border-emerald-500/50 text-primary shadow-md"
+                : "bg-card shadow-sm border-border text-muted-foreground"
             }`}
           >
-            <div className="text-[10px] font-mono font-bold text-emerald-400 mb-1">07 / APPROVE</div>
+            <div className="text-[10px] font-mono font-bold text-foreground mb-1">07 / APPROVE</div>
             <div className="text-xs font-semibold font-serif">7. Officer Review</div>
             <div className="text-[10px] font-mono text-muted-foreground mt-1 truncate">
               Human-in-the-Loop
@@ -300,8 +292,8 @@ export function DocumentAssessmentPage() {
       {/* Preset Selector & Upload Section */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Sample Document Selector */}
-        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 space-y-4">
-          <h3 className="text-base font-semibold text-white flex items-center gap-2">
+        <div className="p-6 rounded bg-card shadow-sm border border-border space-y-4">
+          <h3 className="text-base font-semibold text-primary flex items-center gap-2">
             <BookOpen className="w-4 h-4 text-accent" /> Select Scanned Legal Document
           </h3>
           <div className="space-y-2">
@@ -310,16 +302,15 @@ export function DocumentAssessmentPage() {
                 key={sample.id}
                 onClick={() => {
                   setUseCustomInput(false);
-                  setUploadedFile(null);
                   setSelectedSampleId(sample.id);
                 }}
-                className={`w-full text-left p-3.5 rounded-xl border transition-all ${
+                className={`w-full text-left p-3.5 rounded border transition-all ${
                   !useCustomInput && selectedSampleId === sample.id
-                    ? "bg-accent/15 border-accent text-white shadow-md shadow-accent/10"
-                    : "bg-white/[0.02] border-white/10 text-muted-foreground hover:bg-white/[0.05]"
+                    ? "bg-accent/15 border-accent text-primary shadow-md shadow-accent/10"
+                    : "bg-card shadow-sm border-border text-muted-foreground hover:bg-card"
                 }`}
               >
-                <div className="font-semibold text-xs text-white">{sample.title}</div>
+                <div className="font-semibold text-xs text-primary">{sample.title}</div>
                 <div className="text-[11px] text-muted-foreground mt-1">{sample.subtitle}</div>
               </button>
             ))}
@@ -327,18 +318,15 @@ export function DocumentAssessmentPage() {
         </div>
 
         {/* Custom Text / Upload Field */}
-        <div className="md:col-span-2 p-6 rounded-2xl bg-white/[0.02] border border-white/10 space-y-4">
+        <div className="md:col-span-2 p-6 rounded bg-card shadow-sm border border-border space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-base font-semibold text-white flex items-center gap-2">
+            <h3 className="text-base font-semibold text-primary flex items-center gap-2">
               <FileText className="w-4 h-4 text-accent" /> Custom Legal Document Input
             </h3>
             <button
-              onClick={() => {
-                setUseCustomInput(!useCustomInput);
-                setUploadedFile(null);
-              }}
-              className={`text-xs px-3 py-1 rounded-lg border transition-all ${
-                useCustomInput ? "bg-accent text-accent-foreground border-accent font-semibold" : "bg-white/5 border-white/10 text-muted-foreground"
+              onClick={() => setUseCustomInput(!useCustomInput)}
+              className={`text-xs px-3 py-1 rounded-sm border transition-all ${
+                useCustomInput ? "bg-accent text-accent-foreground border-accent font-semibold" : "bg-secondary/50 border-border text-muted-foreground"
               }`}
             >
               {useCustomInput ? "Using Custom Input" : "Switch to Custom Text"}
@@ -346,25 +334,12 @@ export function DocumentAssessmentPage() {
           </div>
 
           <textarea
-            disabled={!useCustomInput || uploadedFile !== null}
+            disabled={!useCustomInput}
             value={useCustomInput ? customText : samples.find((s) => s.id === selectedSampleId)?.preview_text || ""}
             onChange={(e) => setCustomText(e.target.value)}
             placeholder="Paste raw handwritten/scanned legal remand order or FIR text here..."
-            className="w-full h-36 p-3.5 rounded-xl bg-black/40 border border-white/10 text-xs font-mono text-slate-300 focus:outline-none focus:border-accent disabled:opacity-60 resize-none"
+            className="w-full h-36 p-3.5 rounded bg-primary border border-border text-xs font-mono text-slate-300 focus:outline-none focus:border-accent disabled:opacity-60 resize-none"
           />
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3 text-xs">
-            <input
-              type="file"
-              accept="application/pdf,image/png,image/jpeg,image/tiff,image/webp,image/bmp"
-              onChange={(event) => {
-                const file = event.target.files?.[0] ?? null;
-                setUploadedFile(file);
-                if (file) setUseCustomInput(false);
-              }}
-              className="block w-full text-xs text-muted-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-accent/20 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-accent hover:file:bg-accent/30"
-            />
-            {uploadedFile && <span className="text-emerald-300 shrink-0">Ready: {uploadedFile.name}</span>}
-          </div>
         </div>
       </div>
 
@@ -372,13 +347,13 @@ export function DocumentAssessmentPage() {
       {result && (
         <div className="space-y-6">
           {/* Tabs */}
-          <div className="flex border-b border-white/10 gap-2">
+          <div className="flex border-b border-border gap-2">
             <button
               onClick={() => setActiveTab("granite")}
               className={`px-5 py-3 text-xs font-semibold border-b-2 flex items-center gap-2 transition-all ${
                 activeTab === "granite"
                   ? "border-accent text-accent bg-accent/10 rounded-t-xl"
-                  : "border-transparent text-muted-foreground hover:text-white"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
               <Brain className="w-4 h-4" /> 🧠 IBM Granite Preliminary Assessment
@@ -387,28 +362,28 @@ export function DocumentAssessmentPage() {
               onClick={() => setActiveTab("trocr")}
               className={`px-5 py-3 text-xs font-semibold border-b-2 flex items-center gap-2 transition-all ${
                 activeTab === "trocr"
-                  ? "border-blue-400 text-blue-400 bg-blue-500/10 rounded-t-xl"
-                  : "border-transparent text-muted-foreground hover:text-white"
+                  ? "border-blue-400 text-muted-foreground bg-blue-500/10 rounded-t-xl"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Sparkles className="w-4 h-4 text-blue-400" /> ✍️ TrOCR Extracted Text
+              <Sparkles className="w-4 h-4 text-muted-foreground" /> ✍️ TrOCR Extracted Text
             </button>
             <button
               onClick={() => setActiveTab("dataprep")}
               className={`px-5 py-3 text-xs font-semibold border-b-2 flex items-center gap-2 transition-all ${
                 activeTab === "dataprep"
-                  ? "border-emerald-400 text-emerald-400 bg-emerald-500/10 rounded-t-xl"
-                  : "border-transparent text-muted-foreground hover:text-white"
+                  ? "border-emerald-400 text-foreground bg-muted rounded-t-xl"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Database className="w-4 h-4 text-emerald-400" /> 📦 IBM Data Prep Kit Output
+              <Database className="w-4 h-4 text-foreground" /> 📦 IBM Data Prep Kit Output
             </button>
             <button
               onClick={() => setActiveTab("rag")}
               className={`px-5 py-3 text-xs font-semibold border-b-2 flex items-center gap-2 transition-all ${
                 activeTab === "rag"
                   ? "border-cyan-400 text-cyan-400 bg-cyan-500/10 rounded-t-xl"
-                  : "border-transparent text-muted-foreground hover:text-white"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
               <Search className="w-4 h-4 text-cyan-400" /> 🔎 RAG Statutory Citations
@@ -419,21 +394,21 @@ export function DocumentAssessmentPage() {
           {activeTab === "granite" && (
             <div className="space-y-6 animate-in fade-in duration-200">
               {/* Executive Summary Card */}
-              <div className="p-6 rounded-2xl bg-accent/10 border border-accent/30 space-y-6 relative overflow-hidden shadow-xl">
+              <div className="p-6 rounded bg-accent/10 border border-accent/30 space-y-6 relative overflow-hidden shadow-xl">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-accent/20 pb-4">
                   <div>
                     <span className="text-xs font-semibold uppercase tracking-wider text-accent">
                       {result.granite_assessment.model_name}
                     </span>
-                    <h2 className="text-2xl font-bold text-white mt-0.5">
-                      Preliminary Legal Assessment Report {result.granite_assessment.case_id}
+                    <h2 className="text-2xl font-bold text-primary mt-0.5">
+                      Preliminary Legal Assessment Report — {result.granite_assessment.case_id}
                     </h2>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
+                    <span className="px-3.5 py-1.5 rounded-sm text-xs font-bold bg-accent/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
                       <CheckCircle2 className="w-4 h-4" /> {result.granite_assessment.eligibility_status}
                     </span>
-                    <span className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    <span className="px-3.5 py-1.5 rounded-sm text-xs font-bold bg-muted-foreground/20 text-muted-foreground border border-border">
                       {result.granite_assessment.urgency_rating}
                     </span>
                   </div>
@@ -442,7 +417,7 @@ export function DocumentAssessmentPage() {
                 {/* Legal Summary */}
                 <div className="space-y-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Executive Assessment Summary</h3>
-                  <p className="text-sm text-slate-200 leading-relaxed bg-black/30 p-4 rounded-xl border border-white/5 font-sans">
+                  <p className="text-sm text-slate-200 leading-relaxed bg-primary p-4 rounded border border-border font-sans">
                     {result.granite_assessment.legal_summary}
                   </p>
                 </div>
@@ -452,7 +427,7 @@ export function DocumentAssessmentPage() {
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Key Statutory & Case Findings</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {result.granite_assessment.key_findings.map((finding, idx) => (
-                      <div key={idx} className="p-3 rounded-xl bg-white/[0.03] border border-white/10 flex items-start gap-3">
+                      <div key={idx} className="p-3 rounded bg-card/70 border border-border flex items-start gap-3">
                         <ShieldCheck className="w-5 h-5 text-accent shrink-0 mt-0.5" />
                         <span className="text-xs text-slate-200 leading-snug">{finding}</span>
                       </div>
@@ -461,14 +436,14 @@ export function DocumentAssessmentPage() {
                 </div>
 
                 {/* Action Box */}
-                <div className="p-4 rounded-xl bg-accent/20 border border-accent/40 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="p-4 rounded bg-accent/20 border border-accent/40 flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
                     <div className="text-xs font-bold text-accent uppercase tracking-wider">Recommended DLSA Action</div>
-                    <div className="text-sm font-semibold text-white mt-0.5">{result.granite_assessment.recommended_action}</div>
+                    <div className="text-sm font-semibold text-primary mt-0.5">{result.granite_assessment.recommended_action}</div>
                   </div>
                   <button
                     onClick={() => copyToClipboard(result.granite_assessment.ai_generated_report_draft)}
-                    className="px-4 py-2 bg-accent text-accent-foreground font-semibold rounded-xl text-xs hover:opacity-90 transition-all flex items-center gap-2 shrink-0"
+                    className="px-4 py-2 bg-accent text-accent-foreground font-semibold rounded text-xs hover:opacity-90 transition-all flex items-center gap-2 shrink-0"
                   >
                     {copied ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                     {copied ? "Copied Legal Petition" : "Copy Form 479 Petition Draft"}
@@ -478,7 +453,7 @@ export function DocumentAssessmentPage() {
                 {/* AI Draft Report Body */}
                 <div className="space-y-2 pt-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Full Generated Assessment Draft</h3>
-                  <pre className="p-4 rounded-xl bg-black/60 border border-white/10 text-xs font-mono text-slate-300 whitespace-pre-wrap leading-relaxed overflow-x-auto max-h-64">
+                  <pre className="p-4 rounded bg-primary border border-border text-xs font-mono text-slate-300 whitespace-pre-wrap leading-relaxed overflow-x-auto max-h-64">
                     {result.granite_assessment.ai_generated_report_draft?.replaceAll("**", "")}
                   </pre>
                 </div>
@@ -488,25 +463,25 @@ export function DocumentAssessmentPage() {
 
           {/* TAB 2: TrOCR Extracted Text */}
           {activeTab === "trocr" && (
-            <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 space-y-4 animate-in fade-in duration-200">
-              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+            <div className="p-6 rounded bg-card shadow-sm border border-border space-y-4 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between border-b border-border pb-4">
                 <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-blue-400" /> TrOCR Handwriting Optical Character Recognition
+                  <h3 className="text-base font-bold text-primary flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-muted-foreground" /> TrOCR Handwriting Optical Character Recognition
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Engine: <span className="font-mono text-blue-300">{result.ocr_engine_used}</span> • Confidence:{" "}
-                    <span className="font-bold text-emerald-400">{(result.detection_confidence * 100).toFixed(1)}%</span>
+                    <span className="font-bold text-foreground">{(result.detection_confidence * 100).toFixed(1)}%</span>
                   </p>
                 </div>
-                <span className="px-3 py-1 rounded-full text-xs font-mono bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                <span className="px-3 py-1 rounded-sm text-xs font-mono bg-blue-500/10 text-blue-300 border border-blue-500/20">
                   Scanned Doc Identified: YES
                 </span>
               </div>
 
               <div className="space-y-2">
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Raw Extracted Text Stream</div>
-                <pre className="p-5 rounded-xl bg-black/50 border border-white/10 text-xs font-mono text-slate-200 whitespace-pre-wrap leading-relaxed">
+                <pre className="p-5 rounded bg-primary border border-border text-xs font-mono text-slate-200 whitespace-pre-wrap leading-relaxed">
                   {result.raw_ocr_text}
                 </pre>
               </div>
@@ -515,11 +490,11 @@ export function DocumentAssessmentPage() {
 
           {/* TAB 3: IBM Data Prep Kit Output */}
           {activeTab === "dataprep" && (
-            <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 space-y-6 animate-in fade-in duration-200">
-              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+            <div className="p-6 rounded bg-card shadow-sm border border-border space-y-6 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between border-b border-border pb-4">
                 <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <Database className="w-4 h-4 text-emerald-400" /> IBM Data Prep Kit Transformation Engine
+                  <h3 className="text-base font-bold text-primary flex items-center gap-2">
+                    <Database className="w-4 h-4 text-foreground" /> IBM Data Prep Kit Transformation Engine
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Status: <span className="font-mono text-emerald-300">{result.structured_metadata.data_prep_kit_status}</span>
@@ -529,23 +504,23 @@ export function DocumentAssessmentPage() {
 
               {/* Extracted JSON Metadata Card */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="p-4 rounded-xl bg-black/40 border border-white/10">
+                <div className="p-4 rounded bg-primary border border-border">
                   <div className="text-[11px] text-muted-foreground">Extracted Case ID</div>
-                  <div className="text-lg font-bold text-white font-mono mt-1">{result.structured_metadata.case_id}</div>
+                  <div className="text-lg font-bold text-primary font-mono mt-1">{result.structured_metadata.case_id}</div>
                 </div>
-                <div className="p-4 rounded-xl bg-black/40 border border-white/10">
+                <div className="p-4 rounded bg-primary border border-border">
                   <div className="text-[11px] text-muted-foreground">Custody Duration</div>
                   <div className="text-lg font-bold text-accent font-mono mt-1">{result.structured_metadata.custody_days} Days</div>
                 </div>
-                <div className="p-4 rounded-xl bg-black/40 border border-white/10">
+                <div className="p-4 rounded bg-primary border border-border">
                   <div className="text-[11px] text-muted-foreground">Custody Ratio</div>
-                  <div className="text-lg font-bold text-emerald-400 font-mono mt-1">
+                  <div className="text-lg font-bold text-foreground font-mono mt-1">
                     {((result.structured_metadata.custody_fraction || 0) * 100).toFixed(0)}% of Max
                   </div>
                 </div>
-                <div className="p-4 rounded-xl bg-black/40 border border-white/10">
+                <div className="p-4 rounded bg-primary border border-border">
                   <div className="text-[11px] text-muted-foreground">Senior / Health Flag</div>
-                  <div className="text-lg font-bold text-amber-300 mt-1">
+                  <div className="text-lg font-bold text-muted-foreground mt-1">
                     {result.structured_metadata.is_senior_citizen ? "Yes (Senior)" : "No"}
                   </div>
                 </div>
@@ -554,7 +529,7 @@ export function DocumentAssessmentPage() {
               {/* Clean Prose Output */}
               <div className="space-y-2">
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Cleaned & Structured Prose Body</div>
-                <pre className="p-5 rounded-xl bg-black/50 border border-white/10 text-xs font-mono text-emerald-200/90 whitespace-pre-wrap leading-relaxed">
+                <pre className="p-5 rounded bg-primary border border-border text-xs font-mono text-emerald-200/90 whitespace-pre-wrap leading-relaxed">
                   {result.data_prep_kit_clean_text}
                 </pre>
               </div>
@@ -563,9 +538,9 @@ export function DocumentAssessmentPage() {
 
           {/* TAB 4: RAG Statutory Citations */}
           {activeTab === "rag" && (
-            <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 space-y-6 animate-in fade-in duration-200">
-              <div className="border-b border-white/10 pb-4">
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <div className="p-6 rounded bg-card shadow-sm border border-border space-y-6 animate-in fade-in duration-200">
+              <div className="border-b border-border pb-4">
+                <h3 className="text-base font-bold text-primary flex items-center gap-2">
                   <Search className="w-4 h-4 text-cyan-400" /> RAG Knowledge Retrieval Layer
                 </h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
@@ -575,16 +550,16 @@ export function DocumentAssessmentPage() {
 
               <div className="space-y-4">
                 {result.rag_statute_citations.map((citation, idx) => (
-                  <div key={idx} className="p-5 rounded-xl bg-cyan-950/20 border border-cyan-500/30 space-y-2">
+                  <div key={idx} className="p-5 rounded bg-cyan-950/20 border border-cyan-500/30 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                      <span className="px-2.5 py-1 rounded-sm text-xs font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                         {citation.code}
                       </span>
                       <span className="text-[11px] text-muted-foreground">Relevant for Bail Grounds</span>
                     </div>
-                    <div className="text-sm font-semibold text-white">{citation.title}</div>
+                    <div className="text-sm font-semibold text-primary">{citation.title}</div>
                     <p className="text-xs text-slate-300 leading-relaxed font-sans">{citation.relevance}</p>
-                    <div className="p-3 rounded-lg bg-black/40 border border-white/5 text-xs font-mono text-cyan-200/90">
+                    <div className="p-3 rounded-sm bg-primary border border-border text-xs font-mono text-cyan-200/90">
                       "{citation.snippet}"
                     </div>
                   </div>

@@ -32,15 +32,15 @@ export function HearingsPage() {
   return (
     <div className="p-4 md:p-8 w-full space-y-8 animate-in fade-in duration-300">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/5 pb-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border pb-6">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-accent/10 text-accent border border-accent/20">
+            <span className="px-2.5 py-0.5 rounded-sm text-xs font-semibold bg-accent/10 text-accent border border-accent/20">
               Judicial Motion Tracker
             </span>
             <span className="text-xs text-muted-foreground font-mono">Simulated Court Calendar</span>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Court Hearings</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-primary">Court Hearings (Demo Data)</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Track upcoming undertrial bail applications and remand reviews across judicial magistrate courts.
           </p>
@@ -57,22 +57,22 @@ export function HearingsPage() {
           {hearings.map(h => (
             <div
               key={h.id}
-              className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 hover:border-accent/40 transition-all backdrop-blur-md space-y-4 flex flex-col justify-between"
+              className="p-6 rounded bg-card shadow-sm border border-border hover:border-accent/40 transition-all backdrop-blur-md space-y-4 flex flex-col justify-between"
             >
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-xs font-semibold text-accent">{h.id}</span>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <span className="px-2.5 py-0.5 rounded-sm text-[10px] font-bold uppercase bg-muted text-foreground border border-border">
                     {h.status}
                   </span>
                 </div>
 
-                <h3 className="text-base font-semibold text-white">{h.hearing_type}</h3>
+                <h3 className="text-base font-semibold text-primary">{h.hearing_type}</h3>
 
-                <div className="space-y-2 text-xs text-muted-foreground pt-2 border-t border-white/5">
+                <div className="space-y-2 text-xs text-muted-foreground pt-2 border-t border-border">
                   <div className="flex items-center gap-2">
                     <Calendar className="w-3.5 h-3.5 text-accent" />
-                    <span>Hearing Date: <strong className="text-white">{h.hearing_date}</strong></span>
+                    <span>Hearing Date: <strong className="text-primary">{h.hearing_date}</strong></span>
                   </div>
                   <div className="flex items-center gap-2">
                     <MapPin className="w-3.5 h-3.5 text-accent" />
@@ -89,11 +89,11 @@ export function HearingsPage() {
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-white/5 flex items-center justify-between">
+              <div className="pt-4 border-t border-border flex items-center justify-between">
                 <span className="text-xs text-muted-foreground font-mono">{h.prisoner_name}</span>
                 <Link
                   to={`/case/${h.case_id}`}
-                  className="text-xs font-semibold text-white hover:text-accent transition-colors flex items-center gap-1"
+                  className="text-xs font-semibold text-primary hover:text-accent transition-colors flex items-center gap-1"
                 >
                   Case Dossier <ArrowRight className="w-3 h-3" />
                 </Link>

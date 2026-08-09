@@ -71,15 +71,15 @@ export function AvailableCaseModal({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-primary backdrop-blur-md">
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 15 }}
-          className="relative w-full max-w-3xl bg-[#0F172A] border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+          className="relative w-full max-w-3xl bg-[#0F172A] border border-border rounded shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         >
           {/* Header */}
-          <div className="p-6 border-b border-white/10 bg-white/[0.02] flex items-center justify-between">
+          <div className="p-6 border-b border-border bg-card shadow-sm flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-accent/10 text-accent border border-accent/20">
@@ -89,13 +89,13 @@ export function AvailableCaseModal({
                   Available Pro Bono Case
                 </span>
               </div>
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <h2 className="text-xl font-bold text-primary flex items-center gap-2">
                 Undertrial Case Review
               </h2>
             </div>
             <button
               onClick={onClose}
-              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-muted-foreground hover:text-white transition-colors"
+              className="p-2 rounded bg-secondary/50 hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -109,7 +109,7 @@ export function AvailableCaseModal({
           >
             {/* Scroll Lock Notice Banner */}
             {!hasScrolledToBottom && (
-              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-3 animate-pulse">
+              <div className="p-3.5 rounded bg-muted border border-border text-muted-foreground text-xs flex items-center gap-3 animate-pulse">
                 <ArrowDownCircle className="w-5 h-5 shrink-0" />
                 <div>
                   <span className="font-semibold block">Mandatory Review Required</span>
@@ -120,20 +120,20 @@ export function AvailableCaseModal({
 
             {/* Prisoner Overview Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/10">
+              <div className="p-4 rounded bg-card shadow-sm border border-border">
                 <div className="text-xs text-muted-foreground mb-1">Prisoner Offenses</div>
-                <div className="text-sm font-semibold text-white font-mono">{c.offense_sections.join(", ")}</div>
+                <div className="text-sm font-semibold text-primary font-mono">{c.offense_sections.join(", ")}</div>
               </div>
 
-              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/10">
+              <div className="p-4 rounded bg-card shadow-sm border border-border">
                 <div className="text-xs text-muted-foreground mb-1">Custody Duration</div>
-                <div className="text-sm font-semibold text-white font-mono">{c.custody_days} Days Served</div>
+                <div className="text-sm font-semibold text-primary font-mono">{c.custody_days} Days Served</div>
                 <div className="text-[10px] text-muted-foreground">50% Threshold: {threshold} days</div>
               </div>
 
-              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/10">
+              <div className="p-4 rounded bg-card shadow-sm border border-border">
                 <div className="text-xs text-muted-foreground mb-1">Jail & Detention Location</div>
-                <div className="text-sm font-semibold text-white flex items-center gap-1">
+                <div className="text-sm font-semibold text-primary flex items-center gap-1">
                   <Building2 className="w-3.5 h-3.5 text-accent shrink-0" />
                   {c.jail_location}
                 </div>
@@ -141,17 +141,17 @@ export function AvailableCaseModal({
             </div>
 
             {/* BNSS Statutory Eligibility Banner */}
-            <div className="p-4 rounded-xl bg-white/[0.02] border border-white/10 space-y-2">
+            <div className="p-4 rounded bg-card shadow-sm border border-border space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-accent uppercase tracking-wider flex items-center gap-1.5">
                   <Scale className="w-4 h-4" /> Section 479 BNSS Statutory Eligibility
                 </span>
                 {isEligible ? (
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                  <span className="px-2.5 py-0.5 rounded-sm text-xs font-bold bg-muted text-foreground border border-border flex items-center gap-1">
                     <CheckCircle className="w-3.5 h-3.5" /> High Priority Eligible
                   </span>
                 ) : (
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1">
+                  <span className="px-2.5 py-0.5 rounded-sm text-xs font-bold bg-muted text-muted-foreground border border-border flex items-center gap-1">
                     <Clock className="w-3.5 h-3.5" /> Approaching Threshold
                   </span>
                 )}
@@ -162,13 +162,13 @@ export function AvailableCaseModal({
             </div>
 
             {/* ACCUSED PARENTS / RELATIVE CONTACT DETAILS (CRITICAL REQUIREMENT) */}
-            <div className="p-5 rounded-2xl bg-accent/5 border border-accent/20 space-y-4">
+            <div className="p-5 rounded bg-accent/5 border border-accent/20 space-y-4">
               <div className="flex items-center gap-2">
-                <div className="p-2 rounded-lg bg-accent/10 text-accent">
+                <div className="p-2 rounded-sm bg-accent/10 text-accent">
                   <User className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
+                  <h3 className="text-sm font-bold text-primary uppercase tracking-wider font-mono">
                     Accused Family & Guardian Contact Details
                   </h3>
                   <p className="text-xs text-muted-foreground">
@@ -179,9 +179,9 @@ export function AvailableCaseModal({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
                 {/* Relative Name & Relation */}
-                <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 space-y-1">
+                <div className="p-3.5 rounded bg-card/70 border border-border space-y-1">
                   <div className="text-[11px] text-muted-foreground uppercase font-mono">Parent / Relative Name & Relation</div>
-                  <div className="text-sm font-semibold text-white flex items-center gap-2">
+                  <div className="text-sm font-semibold text-primary flex items-center gap-2">
                     <span>{relativeName}</span>
                     <span className="px-2 py-0.5 rounded text-[10px] bg-accent/10 text-accent border border-accent/20">
                       {relativeRelation}
@@ -190,21 +190,21 @@ export function AvailableCaseModal({
                 </div>
 
                 {/* Relative Phone Number */}
-                <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 space-y-1">
+                <div className="p-3.5 rounded bg-card/70 border border-border space-y-1">
                   <div className="text-[11px] text-muted-foreground uppercase font-mono">Contact Mobile Phone Number</div>
-                  <div className="text-sm font-semibold text-emerald-400 font-mono flex items-center gap-2">
-                    <Phone className="w-4 h-4 text-emerald-400" />
+                  <div className="text-sm font-semibold text-foreground font-mono flex items-center gap-2">
+                    <Phone className="w-4 h-4 text-foreground" />
                     <span>{relativePhone}</span>
                   </div>
                 </div>
               </div>
 
               {/* Permanent Address */}
-              <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 space-y-1">
+              <div className="p-3.5 rounded bg-card/70 border border-border space-y-1">
                 <div className="text-[11px] text-muted-foreground uppercase font-mono flex items-center gap-1">
                   <MapPin className="w-3.5 h-3.5 text-accent" /> Permanent Family Residential Address
                 </div>
-                <div className="text-sm font-medium text-white/90">
+                <div className="text-sm font-medium text-primary">
                   {permanentAddress}
                 </div>
               </div>
@@ -221,10 +221,10 @@ export function AvailableCaseModal({
                   return (
                     <div
                       key={doc}
-                      className={`p-3 rounded-xl border flex items-center justify-between text-xs font-medium ${
+                      className={`p-3 rounded border flex items-center justify-between text-xs font-medium ${
                         isPresent
-                          ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400"
-                          : "bg-amber-500/5 border-amber-500/20 text-amber-400"
+                          ? "bg-accent/5 border-border text-foreground"
+                          : "bg-muted-foreground/5 border-border text-muted-foreground"
                       }`}
                     >
                       <span className="capitalize">{doc.replace(/_/g, " ")}</span>
@@ -246,21 +246,21 @@ export function AvailableCaseModal({
             </div>
 
             {/* Additional Legal Flags */}
-            <div className="p-4 rounded-xl bg-white/[0.02] border border-white/10 space-y-2">
+            <div className="p-4 rounded bg-card shadow-sm border border-border space-y-2">
               <div className="text-xs font-semibold text-muted-foreground">Urgency & Risk Attributes</div>
               <div className="flex flex-wrap gap-2 text-xs">
-                <span className="px-2.5 py-1 rounded bg-white/5 text-white/80 border border-white/10">
+                <span className="px-2.5 py-1 rounded bg-secondary/50 text-muted-foreground border border-border">
                   Age: {c.urgency_flags.age} Yrs
                 </span>
                 {c.urgency_flags.health_flag && (
-                  <span className="px-2.5 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <span className="px-2.5 py-1 rounded bg-muted text-muted-foreground border border-border">
                     Medical Condition Flagged
                   </span>
                 )}
-                <span className="px-2.5 py-1 rounded bg-white/5 text-muted-foreground border border-white/10">
+                <span className="px-2.5 py-1 rounded bg-secondary/50 text-muted-foreground border border-border">
                   {c.urgency_flags.repeat_offender ? "Prior Conviction Record" : "First Time Offender"}
                 </span>
-                <span className="px-2.5 py-1 rounded bg-white/5 text-muted-foreground border border-white/10">
+                <span className="px-2.5 py-1 rounded bg-secondary/50 text-muted-foreground border border-border">
                   Language: {c.preferred_language.toUpperCase()}
                 </span>
               </div>
@@ -268,15 +268,15 @@ export function AvailableCaseModal({
           </div>
 
           {/* Footer Actions */}
-          <div className="p-4 border-t border-white/10 bg-white/[0.02] flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="p-4 border-t border-border bg-card shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="text-xs text-muted-foreground">
               {hasScrolledToBottom ? (
-                <span className="text-emerald-400 flex items-center gap-1 font-medium">
-                  <Check className="w-4 h-4 text-emerald-400" /> Full details reviewed. You can now approve & take this case.
+                <span className="text-foreground flex items-center gap-1 font-medium">
+                  <Check className="w-4 h-4 text-foreground" /> Full details reviewed. You can now approve & take this case.
                 </span>
               ) : (
-                <span className="text-amber-400 flex items-center gap-1 font-medium">
-                  <ArrowDownCircle className="w-4 h-4 text-amber-400" /> Scroll to the bottom of the modal to unlock Approve button.
+                <span className="text-muted-foreground flex items-center gap-1 font-medium">
+                  <ArrowDownCircle className="w-4 h-4 text-muted-foreground" /> Scroll to the bottom of the modal to unlock Approve button.
                 </span>
               )}
             </div>
@@ -284,7 +284,7 @@ export function AvailableCaseModal({
             <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
               <button
                 onClick={() => onDecline(c.case_id)}
-                className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 shrink-0"
+                className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 rounded text-xs font-semibold transition-colors flex items-center gap-1.5 shrink-0"
               >
                 <ThumbsDown className="w-4 h-4" /> Decline & Hide
               </button>
@@ -292,10 +292,10 @@ export function AvailableCaseModal({
               <button
                 disabled={!hasScrolledToBottom}
                 onClick={() => onApprove(c.case_id)}
-                className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg flex items-center gap-2 shrink-0 ${
+                className={`px-5 py-2.5 rounded text-xs font-bold transition-all shadow-lg flex items-center gap-2 shrink-0 ${
                   hasScrolledToBottom
                     ? "bg-accent text-accent-foreground hover:bg-accent/90 shadow-accent/20 cursor-pointer"
-                    : "bg-white/10 text-white/40 border border-white/10 cursor-not-allowed"
+                    : "bg-secondary text-muted-foreground border border-border cursor-not-allowed"
                 }`}
               >
                 <Check className="w-4 h-4" /> Approve & Take Case

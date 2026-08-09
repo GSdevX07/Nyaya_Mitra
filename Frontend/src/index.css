@@ -4,43 +4,57 @@
 
 @layer base {
   :root {
-    --background: 240 10% 4%;
-    --foreground: 60 9% 94%;
-    --card: 240 6% 6%;
-    --card-foreground: 60 9% 94%;
-    --popover: 240 10% 4%;
-    --popover-foreground: 60 9% 94%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 12%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 55%;
-    --accent: 43 96% 56%;
-    --accent-foreground: 0 0% 4%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 43 96% 56%;
-    --radius: 0.25rem;
+    /* ═══════════════════════════════════════════
+       NEWSPAPER THEME — High Contrast Greyscale
+       Warm newsprint background + Sharp dark ink text + Distinct borders
+       ═══════════════════════════════════════════ */
 
-    /* The Case File Tokens */
-    --paper: #F1EFE6;
-    --paper-dim: #E8E4D6;
-    --rule: #D9D4C2;
-    --ink: #26283B;
-    --ink-muted: #5B5D72;
-    --navy: #1F2A44;
-    --brass: #B08D57;
+    --background: 40 6% 91%;          /* Warm newsprint background: #E8E6E1 */
+    --foreground: 0 0% 10%;           /* Deep dark ink text: #1A1A1A */
 
-    --sage: #8CA189;
-    --sage-bg: #E4E9DF;
-    --stamp-red: #A85043;
-    --stamp-red-bg: #EFDFDA;
-    --ochre: #BB8A34;
-    --ochre-bg: #EFE3C6;
-    --thread-red: #B4453A;
+    --card: 40 8% 96%;                /* Clean paper surface: #F5F4F1 */
+    --card-foreground: 0 0% 10%;      /* Deep dark ink: #1A1A1A */
+
+    --popover: 40 8% 96%;
+    --popover-foreground: 0 0% 10%;
+
+    --primary: 0 0% 14%;              /* Dark charcoal header/button background: #242424 */
+    --primary-foreground: 40 6% 94%;  /* Crisp off-white text for dark containers: #F0EEE9 */
+
+    --secondary: 0 0% 84%;           /* Solid light-grey highlight: #D6D6D6 */
+    --secondary-foreground: 0 0% 10%;
+
+    --muted: 0 0% 80%;               /* Mid-grey container fill: #CCCCCC */
+    --muted-foreground: 0 0% 28%;     /* High contrast body/label text: #474747 (WCAG AAA compliant) */
+
+    --accent: 0 0% 20%;               /* Dark accent: #333333 */
+    --accent-foreground: 40 6% 94%;
+
+    --destructive: 0 50% 32%;         /* Deep muted red: #7A2929 */
+    --destructive-foreground: 40 6% 94%;
+
+    --border: 0 0% 65%;              /* Distinct grey border for strong structure: #A6A6A6 */
+    --input: 0 0% 98%;               /* Crisp light background for form inputs: #FAFAFA */
+    --ring: 0 0% 14%;                 /* Focus ring: dark charcoal */
+
+    --radius: 0.125rem;               /* Sharp corners for newspaper editorial style */
+
+    /* The Case File Tokens — greyscale edition */
+    --paper: #EDECEA;
+    --paper-dim: #E0DFDB;
+    --rule: #A6A6A6;
+    --ink: #1A1A1A;
+    --ink-muted: #474747;
+    --navy: #242424;
+    --brass: #525252;
+
+    --sage: #384E42;
+    --sage-bg: #D8E0D8;
+    --stamp-red: #6E3B33;
+    --stamp-red-bg: #E4DAD7;
+    --ochre: #5E502B;
+    --ochre-bg: #E4DFC8;
+    --thread-red: #6E3B33;
   }
 }
 
@@ -50,13 +64,30 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Public Sans', system-ui, -apple-system, sans-serif;
+    font-family: 'Source Serif 4', 'Lora', Georgia, serif;
+    font-size: 15px;
+    line-height: 1.7;
+    color: hsl(var(--foreground));
   }
   html {
     scroll-behavior: smooth;
   }
-  h1, h2, h3, .font-display {
-    font-family: 'Fraunces', serif;
+
+  /* Newspaper headline hierarchy */
+  h1, h2, h3, h4, h5, h6, .font-display {
+    font-family: 'Playfair Display', Georgia, serif;
+    letter-spacing: -0.01em;
+    color: hsl(var(--foreground));
+  }
+  h1 { font-weight: 900; }
+  h2 { font-weight: 700; }
+  h3, h4 { font-weight: 600; }
+
+  /* Newspaper column layout */
+  .newspaper-columns {
+    column-count: 2;
+    column-gap: 2rem;
+    column-rule: 1px solid hsl(var(--border));
   }
 }
 
@@ -64,7 +95,7 @@
 .ink-stamp {
   font-family: 'IBM Plex Mono', monospace;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   border-width: 1.5px;
   border-style: solid;
   transition: transform 60ms ease-out;
@@ -84,42 +115,23 @@
   right: 0;
   width: 12px;
   height: 12px;
-  background: linear-gradient(225deg, transparent 50%, rgba(255, 255, 255, 0.08) 50%);
+  background: linear-gradient(225deg, transparent 50%, rgba(0, 0, 0, 0.08) 50%);
   pointer-events: none;
-}
-
-/* Film grain */
-.film-grain {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  pointer-events: none;
-  opacity: 0.035;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
 }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: hsl(var(--muted)); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 1px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--foreground)); }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-@keyframes ambient-pulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 0.6; }
-}
-.ambient-glow { animation: ambient-pulse 4s ease-in-out infinite; }
-
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-.shimmer {
-  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.03) 50%, transparent 100%);
-  background-size: 200% 100%;
-  animation: shimmer 3s ease-in-out infinite;
+/* Newspaper section divider */
+.section-rule {
+  border: none;
+  height: 2px;
+  background: hsl(var(--border));
+  margin: 2rem 0;
 }

@@ -182,15 +182,15 @@ export function CasesPage() {
   return (
     <div className="p-4 md:p-8 w-full space-y-8 animate-in fade-in duration-300">
       {/* Top Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/5 pb-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border pb-6">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-accent/10 text-accent border border-accent/20">
+            <span className="px-2.5 py-0.5 rounded-sm text-xs font-semibold bg-accent/10 text-accent border border-accent/20">
               Live Advocate Queue
             </span>
             <span className="text-xs text-muted-foreground font-mono">Synced with FastAPI Backend</span>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Undertrial Cases Management</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-primary">Undertrial Cases Management</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Review pro bono undertrial cases, verify parents/relative contacts & address, scroll-approve to take cases into your active queue.
           </p>
@@ -198,20 +198,20 @@ export function CasesPage() {
 
         <button
           onClick={loadData}
-          className="self-start md:self-auto px-4 py-2 bg-white/5 border border-white/10 text-white hover:bg-white/10 rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+          className="self-start md:self-auto px-4 py-2 bg-secondary/50 border border-border text-primary hover:bg-secondary rounded text-sm font-medium transition-colors flex items-center gap-2"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Refresh Cases
         </button>
       </div>
 
       {/* Main Tab Navigation: My Cases vs Available Cases */}
-      <div className="flex items-center gap-3 border-b border-white/10 pb-4">
+      <div className="flex items-center gap-3 border-b border-border pb-4">
         <button
           onClick={() => setActiveMainTab("MY_CASES")}
-          className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 ${
+          className={`px-5 py-2.5 rounded text-sm font-semibold transition-all flex items-center gap-2 ${
             activeMainTab === "MY_CASES"
               ? "bg-accent text-accent-foreground shadow-lg shadow-accent/20"
-              : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
+              : "bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground"
           }`}
         >
           <Briefcase className="w-4 h-4" />
@@ -220,16 +220,16 @@ export function CasesPage() {
 
         <button
           onClick={() => setActiveMainTab("AVAILABLE_CASES")}
-          className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 relative ${
+          className={`px-5 py-2.5 rounded text-sm font-semibold transition-all flex items-center gap-2 relative ${
             activeMainTab === "AVAILABLE_CASES"
               ? "bg-accent text-accent-foreground shadow-lg shadow-accent/20"
-              : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
+              : "bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground"
           }`}
         >
-          <Sparkles className="w-4 h-4 text-emerald-400" />
+          <Sparkles className="w-4 h-4 text-foreground" />
           Available Cases to Take Up ({availableCases.length})
           {availableCases.length > 0 && (
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping absolute -top-1 -right-1" />
+            <span className="w-2.5 h-2.5 rounded-sm bg-emerald-400 animate-ping absolute -top-1 -right-1" />
           )}
         </button>
       </div>
@@ -244,7 +244,7 @@ export function CasesPage() {
             placeholder="Filter by ID, prisoner name, IPC section..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-white/[0.03] border border-white/10 rounded-xl text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-accent transition-colors"
+            className="w-full pl-10 pr-4 py-2 bg-card/70 border border-border rounded text-sm text-primary placeholder:text-muted-foreground focus:outline-none focus:border-accent transition-colors"
           />
         </div>
 
@@ -261,10 +261,10 @@ export function CasesPage() {
             <button
               key={tab.id}
               onClick={() => setFilterType(tab.id as any)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all shrink-0 ${
+              className={`px-3 py-1.5 rounded-sm text-xs font-medium transition-all shrink-0 ${
                 filterType === tab.id
-                  ? "bg-white/20 text-white font-bold"
-                  : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
+                  ? "bg-muted text-primary font-bold"
+                  : "bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground"
               }`}
             >
               {tab.label}
@@ -282,16 +282,16 @@ export function CasesPage() {
         <div className="flex flex-col items-center justify-center min-h-[40vh] gap-6 text-center">
           <WifiOff className="w-12 h-12 text-muted-foreground" />
           <div>
-            <h2 className="text-lg font-semibold text-white mb-2">Backend Connection Lost</h2>
+            <h2 className="text-lg font-semibold text-primary mb-2">Backend Connection Lost</h2>
             <p className="text-sm text-muted-foreground">Live case data unavailable. Ensure the FastAPI server is running on localhost:8000.</p>
           </div>
-          <button onClick={loadData} className="px-4 py-2 bg-accent text-accent-foreground rounded-xl text-sm font-medium flex items-center gap-2">
+          <button onClick={loadData} className="px-4 py-2 bg-accent text-accent-foreground rounded text-sm font-medium flex items-center gap-2">
             <RefreshCw className="w-4 h-4" /> Retry Connection
           </button>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="p-16 text-center bg-white/[0.01] border border-white/5 rounded-2xl space-y-2">
-          <div className="text-lg font-semibold text-white">No cases match your filters</div>
+        <div className="p-16 text-center bg-card shadow-sm border border-border rounded space-y-2">
+          <div className="text-lg font-semibold text-primary">No cases match your filters</div>
           <p className="text-sm text-muted-foreground">
             {activeMainTab === "AVAILABLE_CASES"
               ? "All available cases have been taken up or reviewed. Check back soon!"
@@ -314,7 +314,7 @@ export function CasesPage() {
             return (
               <div
                 key={c.case_id}
-                className="group relative bg-white/[0.02] border border-white/10 hover:border-accent/40 rounded-2xl p-6 transition-all duration-300 backdrop-blur-md flex flex-col justify-between hover:shadow-xl hover:shadow-accent/5 space-y-5"
+                className="group relative bg-card shadow-sm border border-border hover:border-accent/40 rounded p-6 transition-all duration-300 backdrop-blur-md flex flex-col justify-between hover:shadow-xl hover:shadow-accent/5 space-y-5"
               >
                 <div className="space-y-4">
                   {/* Card Header */}
@@ -323,16 +323,16 @@ export function CasesPage() {
                       <span className="font-mono text-xs font-semibold text-accent tracking-wider">
                         {c.case_id}
                       </span>
-                      <h3 className="text-base font-semibold text-white group-hover:text-accent transition-colors">
+                      <h3 className="text-base font-semibold text-primary group-hover:text-accent transition-colors">
                         {c.name}
                       </h3>
                     </div>
                     {isEligible ? (
-                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                      <span className="px-2.5 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider bg-muted text-foreground border border-border flex items-center gap-1">
                         <CheckCircle className="w-3 h-3" /> Eligible
                       </span>
                     ) : (
-                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white/5 text-muted-foreground border border-white/10 flex items-center gap-1">
+                      <span className="px-2.5 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider bg-secondary/50 text-muted-foreground border border-border flex items-center gap-1">
                         <Clock className="w-3 h-3" /> Ineligible
                       </span>
                     )}
@@ -340,14 +340,14 @@ export function CasesPage() {
 
                   {/* Offense & Detention Badges */}
                   <div className="flex flex-wrap gap-2 text-xs">
-                    <span className="px-2 py-0.5 rounded bg-white/5 text-white/80 border border-white/5 font-mono">
+                    <span className="px-2 py-0.5 rounded bg-secondary/50 text-muted-foreground border border-border font-mono">
                       {c.offense_sections.join(", ")}
                     </span>
-                    <span className="px-2 py-0.5 rounded bg-white/5 text-muted-foreground border border-white/5">
+                    <span className="px-2 py-0.5 rounded bg-secondary/50 text-muted-foreground border border-border">
                       Age: {c.urgency_flags.age}
                     </span>
                     {c.urgency_flags.health_flag && (
-                      <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1">
+                      <span className="px-2 py-0.5 rounded bg-muted text-muted-foreground border border-border flex items-center gap-1">
                         <ShieldAlert className="w-3 h-3" /> Medical Flag
                       </span>
                     )}
@@ -359,10 +359,10 @@ export function CasesPage() {
                       <span>Custody: {c.custody_days}d</span>
                       <span>{thresholdLabel}: {thresholdDays}d</span>
                     </div>
-                    <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                    <div className="w-full h-1.5 bg-secondary/50 rounded-sm overflow-hidden">
                       <div
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          isEligible ? "bg-emerald-500" : "bg-accent"
+                        className={`h-full rounded-sm transition-all duration-500 ${
+                          isEligible ? "bg-accent" : "bg-accent"
                         }`}
                         style={{
                           width: `${Math.min(100, (c.custody_days / thresholdDays) * 100)}%`,
@@ -372,16 +372,16 @@ export function CasesPage() {
                   </div>
 
                   {/* FAMILY CONTACT PREVIEW */}
-                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1 text-xs">
+                  <div className="p-3 rounded bg-card shadow-sm border border-border space-y-1 text-xs">
                     <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <UserCheck className="w-3 h-3 text-accent" /> {c.relative_relation || "Parent/Relative"}:
                       </span>
-                      <span className="font-semibold text-white">{c.relative_name || "Ramesh Kumar"}</span>
+                      <span className="font-semibold text-primary">{c.relative_name || "Ramesh Kumar"}</span>
                     </div>
-                    <div className="flex items-center justify-between text-[11px] text-emerald-400 font-mono">
+                    <div className="flex items-center justify-between text-[11px] text-foreground font-mono">
                       <span className="flex items-center gap-1">
-                        <Phone className="w-3 h-3 text-emerald-400" /> Mobile:
+                        <Phone className="w-3 h-3 text-foreground" /> Mobile:
                       </span>
                       <span>{c.relative_phone || "+91 98765 11001"}</span>
                     </div>
@@ -389,7 +389,7 @@ export function CasesPage() {
 
                   {/* Document Warning */}
                   {missingDocs.length > 0 && (
-                    <div className="p-2.5 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2">
+                    <div className="p-2.5 rounded-sm bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2">
                       <AlertCircle className="w-4 h-4 shrink-0" />
                       <span>Missing: {missingDocs.map(d => d.replace("_", " ")).join(", ")}</span>
                     </div>
@@ -397,7 +397,7 @@ export function CasesPage() {
                 </div>
 
                 {/* Card Action Footer */}
-                <div className="pt-4 border-t border-white/5 flex items-center justify-between">
+                <div className="pt-4 border-t border-border flex items-center justify-between">
                   <span className="text-xs text-muted-foreground truncate max-w-[160px]">
                     {c.jail_location}
                   </span>
@@ -408,14 +408,14 @@ export function CasesPage() {
                         setSelectedAvailableCase(item);
                         setIsModalOpen(true);
                       }}
-                      className="px-3.5 py-1.5 bg-accent/10 hover:bg-accent/20 border border-accent/30 text-accent rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5"
+                      className="px-3.5 py-1.5 bg-accent/10 hover:bg-accent/20 border border-accent/30 text-accent rounded text-xs font-semibold transition-all flex items-center gap-1.5"
                     >
                       <Eye className="w-3.5 h-3.5" /> Review & Take Case
                     </button>
                   ) : (
                     <Link
                       to={`/case/${c.case_id}`}
-                      className="text-xs font-semibold text-white group-hover:text-accent flex items-center gap-1 transition-colors"
+                      className="text-xs font-semibold text-primary group-hover:text-accent flex items-center gap-1 transition-colors"
                     >
                       Analyze Case <ArrowUpRight className="w-3.5 h-3.5" />
                     </Link>

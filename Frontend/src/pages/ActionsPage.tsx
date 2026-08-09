@@ -44,15 +44,15 @@ export function ActionsPage() {
   return (
     <div className="p-4 md:p-8 w-full space-y-8 animate-in fade-in duration-300">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/5 pb-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border pb-6">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-accent/10 text-accent border border-accent/20">
+            <span className="px-2.5 py-0.5 rounded-sm text-xs font-semibold bg-accent/10 text-accent border border-accent/20">
               Agentic Automation Queue
             </span>
             <span className="text-xs text-muted-foreground font-mono">Status Tracking & Legal Dispatch</span>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Automated Legal Actions</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-primary">Automated Legal Actions</h1>
           <p className="text-sm text-muted-foreground mt-1">
             One-click execution queue for auto-drafted BNSS 479 petitions, DLSA reminders, and missing document notices.
           </p>
@@ -69,7 +69,7 @@ export function ActionsPage() {
           {actions.map(act => (
             <div
               key={act.id}
-              className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 hover:border-accent/40 transition-all backdrop-blur-md flex flex-col md:flex-row md:items-center justify-between gap-4"
+              className="p-6 rounded bg-card shadow-sm border border-border hover:border-accent/40 transition-all backdrop-blur-md flex flex-col md:flex-row md:items-center justify-between gap-4"
             >
               <div className="space-y-1.5 flex-1">
                 <div className="flex items-center gap-3">
@@ -79,14 +79,14 @@ export function ActionsPage() {
                   </span>
                   <span className="text-xs text-muted-foreground font-mono">Case: {act.case_id}</span>
                 </div>
-                <h3 className="text-base font-semibold text-white">{act.action_type}</h3>
+                <h3 className="text-base font-semibold text-primary">{act.action_type}</h3>
                 <p className="text-xs text-muted-foreground">{act.description}</p>
               </div>
 
-              <div className="flex items-center gap-4 shrink-0 border-t md:border-t-0 border-white/5 pt-4 md:pt-0">
+              <div className="flex items-center gap-4 shrink-0 border-t md:border-t-0 border-border pt-4 md:pt-0">
                 <Link
                   to={`/case/${act.case_id}`}
-                  className="text-xs font-medium text-muted-foreground hover:text-white transition-colors flex items-center gap-1"
+                  className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
                 >
                   View Case <ArrowRight className="w-3 h-3" />
                 </Link>
@@ -94,7 +94,7 @@ export function ActionsPage() {
                 <button
                   onClick={() => handleTrigger(act.id)}
                   disabled={triggeringId === act.id}
-                  className="px-4 py-2 bg-accent text-accent-foreground font-semibold rounded-xl text-xs hover:opacity-90 transition-opacity flex items-center gap-2 shadow-md shadow-accent/20"
+                  className="px-4 py-2 bg-accent text-accent-foreground font-semibold rounded text-xs hover:opacity-90 transition-opacity flex items-center gap-2 shadow-md shadow-accent/20"
                 >
                   {triggeringId === act.id ? (
                     <Clock className="w-4 h-4 animate-spin" />

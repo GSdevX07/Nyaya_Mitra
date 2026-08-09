@@ -23,6 +23,12 @@ export interface BackendCaseSummary {
     };
     jail_location: string;
     preferred_language: string;
+    relative_name?: string;
+    relative_relation?: string;
+    relative_phone?: string;
+    permanent_address?: string;
+    assignment_status?: string;
+    assigned_lawyer_id?: string;
   };
   days_overdue: number;
   urgency_score: number;
@@ -36,6 +42,64 @@ export async function fetchCases(): Promise<BackendCaseSummary[]> {
   } catch (err) {
     console.warn("Backend API unavailable, falling back to mock data:", err);
     return [];
+  }
+}
+
+export async function fetchAvailableCases(): Promise<BackendCaseSummary[]> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/cases/available`);
+    if (!res.ok) throw new Error("Failed to fetch available cases");
+    return await res.json();
+  } catch (err) {
+    console.warn("Backend API available cases unavailable:", err);
+    return [];
+  }
+}
+
+export async function takeUpCase(caseId: string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/cases/${caseId}/take`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error("Take up case failed");
+    return await res.json();
+  } catch (err) {
+    console.error("Error taking up case:", err);
+    throw err;
+  }
+}
+
+export async function declineCase(caseId: string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/cases/${caseId}/decline`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error("Decline case failed");
+    return await res.json();
+  } catch (err) {
+    console.error("Error declining case:", err);
+    throw err;
+  }
+}
+
+export async function fetchLawyerProfile() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/lawyer/profile`);
+    if (!res.ok) throw new Error("Failed to fetch lawyer profile");
+    return await res.json();
+  } catch (err) {
+    console.warn("Backend API lawyer profile fallback:", err);
+    return {
+      id: "Legal Officer 104",
+      full_name: "Adv. Rajesh Sharma",
+      bar_association_id: "DL/2018/49281",
+      email: "rajesh.sharma@nyayamitra.org",
+      phone: "+91 98112 34567",
+      specialization: "Undertrial Defense & Section 479 BNSS",
+      cases_taken: 4,
+      status: "Active Pro Bono Counsel",
+      organization: "Delhi Legal Services Authority (DLSA)",
+    };
   }
 }
 
@@ -169,3 +233,33 @@ export async function fetchNotifications() {
     return [];
   }
 }
+
+export async function fetchSampleDocuments() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/cases/sample-documents`);
+    if (!res.ok) throw new Error("Failed to fetch sample documents");
+    return await res.json();
+  } catch (err) {
+    console.warn("Backend API sample-documents unavailable:", err);
+    return [];
+  }
+}
+
+export async function assessDocument(documentName?: string, providedText?: string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/cases/assess-document`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        document_name: documentName || "scanned_handwritten_remand.pdf",
+        provided_text: providedText || undefined,
+      }),
+    });
+    if (!res.ok) throw new Error("Document assessment API error");
+    return await res.json();
+  } catch (err) {
+    console.error("Error in assessDocument:", err);
+    throw err;
+  }
+}
+

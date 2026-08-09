@@ -27,9 +27,11 @@ from __future__ import annotations
 import hashlib
 import json
 import datetime
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile, Body
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from app.agents.orchestrator import process_case
 from app.agents.prioritization_agent import prioritize_cases
@@ -39,6 +41,7 @@ from app.database import (
     init_db, get_all_cases, get_case, update_case_status, update_case_documents,
     add_evidence, get_all_evidence, get_evidence_item, get_all_notifications
 )
+from app.document_pipeline import execute_full_document_pipeline, DocumentPipelineResult
 
 
 # ── App initialisation ────────────────────────────────────────────────────────
@@ -92,6 +95,11 @@ MOCK_DB: list[CaseRecord] = [
         urgency_flags=UrgencyFlags(age=28, health_flag=False, repeat_offender=False),
         jail_location="Sub-Jail, synthetic",
         preferred_language="en",
+        relative_name="Ramesh Kumar",
+        relative_relation="Father",
+        relative_phone="+91 98765 11001",
+        permanent_address="Plot 42, Gandhi Nagar, Sector 4, Chennai, TN - 600001",
+        assignment_status="AVAILABLE",
     ),
 
     # UTP-0007 — Eligible first-time offender, senior citizen + health flag, all docs
@@ -109,6 +117,11 @@ MOCK_DB: list[CaseRecord] = [
         urgency_flags=UrgencyFlags(age=63, health_flag=True, repeat_offender=False),
         jail_location="District Jail, synthetic",
         preferred_language="hi",
+        relative_name="Sunita Devi",
+        relative_relation="Spouse / Wife",
+        relative_phone="+91 98765 77007",
+        permanent_address="Flat 12B, Old City Suburb, Jaipur, RJ - 302001",
+        assignment_status="AVAILABLE",
     ),
 
     # UTP-0012 — Not yet eligible repeat offender, missing docs
@@ -126,6 +139,11 @@ MOCK_DB: list[CaseRecord] = [
         urgency_flags=UrgencyFlags(age=34, health_flag=False, repeat_offender=True),
         jail_location="Central Jail, synthetic",
         preferred_language="ta",
+        relative_name="Mohd. Ahmed",
+        relative_relation="Brother",
+        relative_phone="+91 98765 12012",
+        permanent_address="House 88, Shivaji Road, Bengaluru, KA - 560002",
+        assignment_status="AVAILABLE",
     ),
 
     # UTP-0015 — Eligible but missing a key document (tests Completeness Agent)
@@ -143,6 +161,11 @@ MOCK_DB: list[CaseRecord] = [
         urgency_flags=UrgencyFlags(age=40, health_flag=False, repeat_offender=True),
         jail_location="Central Jail, synthetic",
         preferred_language="kn",
+        relative_name="Anand Singh",
+        relative_relation="Father",
+        relative_phone="+91 98765 15015",
+        permanent_address="Village Rampur, Post Office Sub-Jail Zone, Lucknow, UP - 226001",
+        assignment_status="AVAILABLE",
     ),
 
     # UTP-0021 — Eligible first-time offender, elderly + health flag, all docs
@@ -160,6 +183,11 @@ MOCK_DB: list[CaseRecord] = [
         urgency_flags=UrgencyFlags(age=67, health_flag=True, repeat_offender=False),
         jail_location="District Jail, synthetic",
         preferred_language="te",
+        relative_name="Kamla Prasad",
+        relative_relation="Son / Guardian",
+        relative_phone="+91 98765 21021",
+        permanent_address="H.No 304, Green Avenue, Hyderabad, TS - 500001",
+        assignment_status="AVAILABLE",
     ),
 ]
 
@@ -222,6 +250,36 @@ def get_cases():
     ]
 
 
+@app.get("/cases/available", tags=["Available Cases"])
+def get_available_cases():
+    """
+    Return all available undertrial cases that can be taken up by advocates.
+
+    Excludes cases that have already been assigned or declined.
+    """
+    available = [c for c in MOCK_DB if c.assignment_status == "AVAILABLE"]
+    case_evaluations = []
+    for case in available:
+        days_overdue = max(
+            0,
+            case.custody_days - (case.max_sentence_days_for_offense // 2),
+        )
+        case_evaluations.append({
+            "case": case,
+            "days_overdue": days_overdue,
+        })
+
+    sorted_queue = prioritize_cases(case_evaluations)
+    return [
+        {
+            "case": entry["case"].model_dump(),
+            "days_overdue": entry["days_overdue"],
+            "urgency_score": entry["urgency_score"],
+        }
+        for entry in sorted_queue
+    ]
+
+
 @app.get("/cases/{case_id}", tags=["Cases"])
 def get_case_by_id(case_id: str):
     """
@@ -238,35 +296,65 @@ def get_case_by_id(case_id: str):
     return process_case(case)
 
 
-@app.post("/cases/{case_id}/approve", tags=["Cases"])
-def approve_case(case_id: str):
+@app.post("/cases/{case_id}/take", tags=["Available Cases"])
+def take_up_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
     """
-    Human-lawyer approval gate.
+    Assign an available case to the specified lawyer upon full review & scroll approval.
 
     This endpoint represents the mandatory sign-off that must happen before
     a bail application draft is considered 'filed'. It is a real UI button
     in the lawyer dashboard — not a slide claim.
-
-    In production this would:
-      - Record the approving lawyer's ID and timestamp in the database
-      - Trigger the Status Tracking Agent to advance state to 'Filed'
-      - Notify the Notification Agent to send a confirmation alert
     """
     case = _find_case(case_id)
 
     # Persist state transitions: APPROVED → then immediately FILED
-    # Both transitions happen in one atomic endpoint call so UI truth matches backend.
     update_case_status(case_id, CaseState.APPROVED)
     update_case_status(case_id, CaseState.FILED)
+    
+    case.assignment_status = "ASSIGNED"
+    case.assigned_lawyer_id = lawyer_id
 
     return {
+        "status": "success",
         "case_id": case_id,
-        "status": "FILED",
-        "message": "Approved by Human Lawyer — bail application submitted to court.",
+        "message": f"Approved by Human Lawyer — bail application submitted to court. Assigned to {lawyer_id}",
         "next_step": "Status Tracking Agent will monitor hearing schedule.",
         "offense_sections": case.offense_sections,
         "jail_location": case.jail_location,
+        "case": case.model_dump(),
     }
+
+
+@app.post("/cases/{case_id}/decline", tags=["Available Cases"])
+def decline_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
+    """
+    Decline an available case so it is hidden and will not be presented to this lawyer again.
+    """
+    case = _find_case(case_id)
+    case.assignment_status = "DECLINED"
+    return {
+        "status": "declined",
+        "message": f"Case {case_id} declined by {lawyer_id}. Will not show again.",
+        "case_id": case_id,
+    }
+
+
+@app.get("/lawyer/profile", tags=["Lawyer Profile"])
+def get_lawyer_profile(lawyer_id: str = "Legal Officer 104"):
+    """Return profile details and statistics for the advocate / legal officer."""
+    assigned_count = sum(1 for c in MOCK_DB if c.assignment_status == "ASSIGNED")
+    return {
+        "id": "Legal Officer 104",
+        "full_name": "Adv. Rajesh Sharma",
+        "bar_association_id": "DL/2018/49281",
+        "email": "rajesh.sharma@nyayamitra.org",
+        "phone": "+91 98112 34567",
+        "specialization": "Undertrial Defense & Section 479 BNSS",
+        "cases_taken": 3 + assigned_count,
+        "status": "Active Pro Bono Counsel",
+        "organization": "Delhi Legal Services Authority (DLSA)",
+    }
+
 
 
 # ── Additional Module Endpoints ────────────────────────────────────────────────
@@ -590,3 +678,86 @@ def get_notifications():
             "read": bool(row["is_read"])
         })
     return notifications
+
+
+# ── Document Processing & Assessment Pipeline Endpoints ─────────────────────────
+
+class AssessDocumentPayload(BaseModel):
+    document_name: str = "scanned_handwritten_remand.pdf"
+    provided_text: Optional[str] = None
+
+
+@app.post("/cases/assess-document", tags=["Document AI Pipeline"], response_model=DocumentPipelineResult)
+def assess_legal_document(payload: Optional[AssessDocumentPayload] = Body(default=None)):
+    """
+    Executes the 7-stage Document AI pipeline:
+    📄 Document Intake → ✍️ Scanned/TrOCR OCR → 📦 IBM Data Prep Kit → 🔎 RAG → 🧠 IBM Granite → Preliminary Assessment
+    """
+    doc_name = payload.document_name if payload else "scanned_handwritten_remand.pdf"
+    text_content = payload.provided_text if payload else None
+
+    result = execute_full_document_pipeline(
+        file_bytes=None,
+        document_name=doc_name,
+        provided_text=text_content
+    )
+    return result
+
+
+@app.get("/cases/sample-documents", tags=["Document AI Pipeline"])
+def get_sample_documents():
+    """
+    Retrieve pre-built scanned & handwritten legal document samples for quick demonstration.
+    """
+    return [
+        {
+            "id": "sample-1",
+            "title": "Scanned Handwritten Bail Remand Order (UTP-0007)",
+            "subtitle": "Senior Citizen • IPC 379 • Sub-Jail District Court",
+            "document_name": "UTP-0007_Handwritten_Remand_Note.pdf",
+            "preview_text": (
+                "Handwritten Bail Remand Note - Sub-Jail Magistrate Court\n"
+                "Date: 14/02/2025\n"
+                "Accused Name: Ramesh Kumar (UTP-0007)\n"
+                "Offense Sections: IPC Section 379 / BNSS Section 303\n"
+                "Date of Arrest: 02-11-2024\n"
+                "Total Days in Custody: 410 days\n"
+                "Max Statutory Sentence for Offense: 730 days (2 years)\n"
+                "Health Record / Medical Status: Patient suffers from chronic severe hypertension and joint arthritis. Senior Citizen aged 63 years.\n"
+                "Prior Bail Status: Previous bail application rejected on 10/12/2024 due to missing charge sheet copy.\n"
+                "Magistrate Note: Defense counsel submitted plea under Section 479 BNSS alleging undertrial period exceeds 50 percent of maximum sentence."
+            ),
+        },
+        {
+            "id": "sample-2",
+            "title": "Handwritten FIR Record Extract (UTP-0001)",
+            "subtitle": "First-Time Offender • IPC 323 • Central Jail",
+            "document_name": "UTP-0001_Handwritten_FIR_Extract.png",
+            "preview_text": (
+                "Handwritten FIR Extract - Station House Officer\n"
+                "Case ID: UTP-0001\n"
+                "Accused Name: Suresh Patel\n"
+                "Offense: IPC Section 323 (Voluntarily causing hurt)\n"
+                "Arrest Date: 10-01-2025\n"
+                "Custody Duration: 200 days\n"
+                "Max Imprisonment Period: 365 days\n"
+                "Prior Convictions: None (First-time offender)\n"
+                "Doc Check: Charge sheet filed and remand order attached."
+            ),
+        },
+        {
+            "id": "sample-3",
+            "title": "Scanned Case Summary & Custody Certificate (UTP-0021)",
+            "subtitle": "Medical Priority • IPC 325 • High Priority Bench",
+            "document_name": "UTP-0021_Medical_Custody_Cert.pdf",
+            "preview_text": (
+                "Scanned Custody Certificate & Medical Evaluation\n"
+                "Case ID: UTP-0021\n"
+                "Offense: IPC 325\n"
+                "Arrest Date: 15-08-2024\n"
+                "Days in Custody: 360 days\n"
+                "Max Sentence: 1095 days\n"
+                "Medical Note: Emergency cardiac review requested by Jail Superintendent. Requires urgent medical bail hearing."
+            ),
+        },
+    ]

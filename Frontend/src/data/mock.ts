@@ -40,6 +40,11 @@ export interface Case {
   legalSources: LegalSource[];
   timeline: { date: string; title: string; status: "completed" | "current" | "stalled" | "pending"; description?: string }[];
   flagReasoning: string[];
+  relativeName?: string;
+  relativeRelation?: string;
+  relativePhone?: string;
+  permanentAddress?: string;
+  assignmentStatus?: "AVAILABLE" | "ASSIGNED" | "DECLINED";
 }
 
 export const MOCK_CASES: Case[] = [
@@ -54,6 +59,11 @@ export const MOCK_CASES: Case[] = [
     urgency: "URGENT",
     readinessScore: 82,
     eligibilityScore: 100,
+    relativeName: "Ramesh Kumar",
+    relativeRelation: "Father",
+    relativePhone: "+91 98765 11001",
+    permanentAddress: "Plot 42, Gandhi Nagar, Sector 4, Chennai, TN - 600001",
+    assignmentStatus: "AVAILABLE",
     flagReasoning: [
       "Custody duration extracted: 913 days",
       "Maximum sentence identified: 3 years (1095 days)",

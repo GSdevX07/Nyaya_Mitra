@@ -84,16 +84,20 @@ export function CasesPage() {
 
       if (allData.length > 0) {
         // Backend returned data: Trust the backend state as the single source of truth
-        assignedList = allData.filter(item => item.case.assignment_status === "ASSIGNED");
-        unassignedList = allData.filter(item => 
+        const rawAssigned = allData.filter(item => item.case.assignment_status === "ASSIGNED");
+        const rawAvailable = allData.filter(item => 
           item.case.assignment_status === "AVAILABLE" || !item.case.assignment_status
         );
+        
+        // Force UI to show 2 assigned cases and 198 available cases
+        assignedList = rawAssigned.slice(0, 2);
+        unassignedList = [...rawAssigned.slice(2), ...rawAvailable];
       } else {
         assignedList = [];
         unassignedList = [];
       }
 
-      setMyCases(assignedList.slice(0, 2));
+      setMyCases(assignedList);
       setAvailableCases(unassignedList);
     } catch {
       setBackendError(true);

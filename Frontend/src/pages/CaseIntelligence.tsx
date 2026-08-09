@@ -299,26 +299,26 @@ export function CaseIntelligence() {
           )}
 
           {/* Draft */}
-          {draftReady && draft.content && (
+          {draftReady && draft.drafted_document && (
             <section className="space-y-4">
               <h2 className="text-xl font-medium tracking-tight uppercase text-white flex items-center gap-2">
                 <FileText className="w-5 h-5 text-accent" /> Auto-Generated Bail Application Draft
               </h2>
               <div className="p-6 rounded-xl border border-accent/20 bg-accent/5 font-serif text-sm text-white/90 leading-relaxed whitespace-pre-wrap">
-                {draft.content}
+                {(draft.drafted_document as string).replaceAll("**", "")}
               </div>
             </section>
           )}
 
           {/* Plain-language explanation */}
-          {explanation.plain_language_explanation && (
+          {explanation.explanation && (
             <section className="space-y-4">
               <h2 className="text-xl font-medium tracking-tight uppercase text-white flex items-center gap-2">
                 <Activity className="w-5 h-5 text-accent" /> Family Explanation
                 <span className="text-xs font-normal text-muted-foreground normal-case ml-2">Language: {c.preferred_language}</span>
               </h2>
               <div className="p-6 rounded-xl border border-white/5 bg-white/[0.02] text-white/90 leading-relaxed">
-                {explanation.plain_language_explanation}
+                {explanation.explanation as string}
               </div>
             </section>
           )}

@@ -255,9 +255,11 @@ def get_available_cases():
     """
     Return all available undertrial cases that can be taken up by advocates.
 
-    Excludes cases that have already been assigned or declined.
+    Reads from SQLite so assignment status is always consistent with the
+    last take_up_case / decline_case call.
     """
-    available = [c for c in MOCK_DB if c.assignment_status == "AVAILABLE"]
+    all_cases = get_all_cases()  # ← SQLite, not MOCK_DB
+    available = [c for c in all_cases if c.assignment_status == "AVAILABLE"]
     case_evaluations = []
     for case in available:
         days_overdue = max(
@@ -277,6 +279,88 @@ def get_available_cases():
             "urgency_score": entry["urgency_score"],
         }
         for entry in sorted_queue
+    ]
+
+
+# ── Document AI Pipeline endpoints — MUST be before /cases/{case_id} ──────────
+# FastAPI resolves GET routes in registration order; if these appear after the
+# parameterised route, "sample-documents" gets matched as case_id.
+
+class AssessDocumentPayload(BaseModel):
+    document_name: str = "scanned_handwritten_remand.pdf"
+    provided_text: Optional[str] = None
+
+
+@app.post("/cases/assess-document", tags=["Document AI Pipeline"], response_model=DocumentPipelineResult)
+def assess_legal_document(payload: Optional[AssessDocumentPayload] = Body(default=None)):
+    """
+    Executes the 7-stage Document AI pipeline:
+    Document Intake -> TrOCR OCR -> IBM Data Prep Kit -> RAG -> IBM Granite -> Preliminary Assessment
+    """
+    doc_name = payload.document_name if payload else "scanned_handwritten_remand.pdf"
+    text_content = payload.provided_text if payload else None
+    result = execute_full_document_pipeline(
+        file_bytes=None,
+        document_name=doc_name,
+        provided_text=text_content
+    )
+    return result
+
+
+@app.get("/cases/sample-documents", tags=["Document AI Pipeline"])
+def get_sample_documents():
+    """Retrieve pre-built scanned & handwritten legal document samples for quick demonstration."""
+    return [
+        {
+            "id": "sample-1",
+            "title": "Scanned Handwritten Bail Remand Order (UTP-0007)",
+            "subtitle": "Senior Citizen \u2022 IPC 379 \u2022 Sub-Jail District Court",
+            "document_name": "UTP-0007_Handwritten_Remand_Note.pdf",
+            "preview_text": (
+                "Handwritten Bail Remand Note - Sub-Jail Magistrate Court\n"
+                "Date: 14/02/2025\n"
+                "Accused Name: Ramesh Kumar (UTP-0007)\n"
+                "Offense Sections: IPC Section 379 / BNSS Section 303\n"
+                "Date of Arrest: 02-11-2024\n"
+                "Total Days in Custody: 410 days\n"
+                "Max Statutory Sentence for Offense: 730 days (2 years)\n"
+                "Health Record / Medical Status: Patient suffers from chronic severe hypertension and joint arthritis. Senior Citizen aged 63 years.\n"
+                "Prior Bail Status: Previous bail application rejected on 10/12/2024 due to missing charge sheet copy.\n"
+                "Magistrate Note: Defense counsel submitted plea under Section 479 BNSS alleging undertrial period exceeds 50 percent of maximum sentence."
+            ),
+        },
+        {
+            "id": "sample-2",
+            "title": "Handwritten FIR Record Extract (UTP-0001)",
+            "subtitle": "First-Time Offender \u2022 IPC 323 \u2022 Central Jail",
+            "document_name": "UTP-0001_Handwritten_FIR_Extract.png",
+            "preview_text": (
+                "Handwritten FIR Extract - Station House Officer\n"
+                "Case ID: UTP-0001\n"
+                "Accused Name: Suresh Patel\n"
+                "Offense: IPC Section 323 (Voluntarily causing hurt)\n"
+                "Arrest Date: 10-01-2025\n"
+                "Custody Duration: 200 days\n"
+                "Max Imprisonment Period: 365 days\n"
+                "Prior Convictions: None (First-time offender)\n"
+                "Doc Check: Charge sheet filed and remand order attached."
+            ),
+        },
+        {
+            "id": "sample-3",
+            "title": "Scanned Case Summary & Custody Certificate (UTP-0021)",
+            "subtitle": "Medical Priority \u2022 IPC 325 \u2022 High Priority Bench",
+            "document_name": "UTP-0021_Medical_Custody_Cert.pdf",
+            "preview_text": (
+                "Scanned Custody Certificate & Medical Evaluation\n"
+                "Case ID: UTP-0021\n"
+                "Offense: IPC 325\n"
+                "Arrest Date: 15-08-2024\n"
+                "Days in Custody: 360 days\n"
+                "Max Sentence: 1095 days\n"
+                "Medical Note: Emergency cardiac review requested by Jail Superintendent. Requires urgent medical bail hearing."
+            ),
+        },
     ]
 
 
@@ -310,9 +394,21 @@ def take_up_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
     # Persist state transitions: APPROVED → then immediately FILED
     update_case_status(case_id, CaseState.APPROVED)
     update_case_status(case_id, CaseState.FILED)
-    
-    case.assignment_status = "ASSIGNED"
-    case.assigned_lawyer_id = lawyer_id
+
+    # Persist assignment into SQLite so get_available_cases reflects the change
+    import json
+    from app.database import get_db_connection
+    with get_db_connection() as conn:
+        cursor = conn.execute("SELECT data FROM cases WHERE case_id = ?", (case_id,))
+        row = cursor.fetchone()
+        if row:
+            case_data = json.loads(row["data"])
+            case_data["assignment_status"] = "ASSIGNED"
+            case_data["assigned_lawyer_id"] = lawyer_id
+            conn.execute(
+                "UPDATE cases SET data = ? WHERE case_id = ?",
+                (json.dumps(case_data), case_id)
+            )
 
     return {
         "status": "success",
@@ -331,7 +427,21 @@ def decline_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
     Decline an available case so it is hidden and will not be presented to this lawyer again.
     """
     case = _find_case(case_id)
-    case.assignment_status = "DECLINED"
+
+    # Persist DECLINED into SQLite
+    import json
+    from app.database import get_db_connection
+    with get_db_connection() as conn:
+        cursor = conn.execute("SELECT data FROM cases WHERE case_id = ?", (case_id,))
+        row = cursor.fetchone()
+        if row:
+            case_data = json.loads(row["data"])
+            case_data["assignment_status"] = "DECLINED"
+            conn.execute(
+                "UPDATE cases SET data = ? WHERE case_id = ?",
+                (json.dumps(case_data), case_id)
+            )
+
     return {
         "status": "declined",
         "message": f"Case {case_id} declined by {lawyer_id}. Will not show again.",
@@ -339,10 +449,45 @@ def decline_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
     }
 
 
+@app.post("/cases/{case_id}/approve", tags=["Cases"])
+def approve_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
+    """
+    Human-in-the-loop approval gate — called from the Case Intelligence page.
+
+    The lawyer reviews the full orchestrator output and clicks 'Approve & File'.
+    This persists the FILED status and ASSIGNED assignment into SQLite.
+    """
+    case = _find_case(case_id)
+
+    update_case_status(case_id, CaseState.APPROVED)
+    update_case_status(case_id, CaseState.FILED)
+
+    import json
+    from app.database import get_db_connection
+    with get_db_connection() as conn:
+        cursor = conn.execute("SELECT data FROM cases WHERE case_id = ?", (case_id,))
+        row = cursor.fetchone()
+        if row:
+            case_data = json.loads(row["data"])
+            case_data["assignment_status"] = "ASSIGNED"
+            case_data["assigned_lawyer_id"] = lawyer_id
+            conn.execute(
+                "UPDATE cases SET data = ? WHERE case_id = ?",
+                (json.dumps(case_data), case_id)
+            )
+
+    return {
+        "status": "FILED",
+        "case_id": case_id,
+        "message": f"Case {case_id} approved and filed by {lawyer_id}.",
+    }
+
+
 @app.get("/lawyer/profile", tags=["Lawyer Profile"])
 def get_lawyer_profile(lawyer_id: str = "Legal Officer 104"):
     """Return profile details and statistics for the advocate / legal officer."""
-    assigned_count = sum(1 for c in MOCK_DB if c.assignment_status == "ASSIGNED")
+    # Count from SQLite — reflects actual persisted assignment state
+    assigned_count = sum(1 for c in get_all_cases() if c.assignment_status == "ASSIGNED")
     return {
         "id": "Legal Officer 104",
         "full_name": "Adv. Rajesh Sharma",
@@ -350,7 +495,7 @@ def get_lawyer_profile(lawyer_id: str = "Legal Officer 104"):
         "email": "rajesh.sharma@nyayamitra.org",
         "phone": "+91 98112 34567",
         "specialization": "Undertrial Defense & Section 479 BNSS",
-        "cases_taken": 3 + assigned_count,
+        "cases_taken": assigned_count,
         "status": "Active Pro Bono Counsel",
         "organization": "Delhi Legal Services Authority (DLSA)",
     }
@@ -678,86 +823,3 @@ def get_notifications():
             "read": bool(row["is_read"])
         })
     return notifications
-
-
-# ── Document Processing & Assessment Pipeline Endpoints ─────────────────────────
-
-class AssessDocumentPayload(BaseModel):
-    document_name: str = "scanned_handwritten_remand.pdf"
-    provided_text: Optional[str] = None
-
-
-@app.post("/cases/assess-document", tags=["Document AI Pipeline"], response_model=DocumentPipelineResult)
-def assess_legal_document(payload: Optional[AssessDocumentPayload] = Body(default=None)):
-    """
-    Executes the 7-stage Document AI pipeline:
-    📄 Document Intake → ✍️ Scanned/TrOCR OCR → 📦 IBM Data Prep Kit → 🔎 RAG → 🧠 IBM Granite → Preliminary Assessment
-    """
-    doc_name = payload.document_name if payload else "scanned_handwritten_remand.pdf"
-    text_content = payload.provided_text if payload else None
-
-    result = execute_full_document_pipeline(
-        file_bytes=None,
-        document_name=doc_name,
-        provided_text=text_content
-    )
-    return result
-
-
-@app.get("/cases/sample-documents", tags=["Document AI Pipeline"])
-def get_sample_documents():
-    """
-    Retrieve pre-built scanned & handwritten legal document samples for quick demonstration.
-    """
-    return [
-        {
-            "id": "sample-1",
-            "title": "Scanned Handwritten Bail Remand Order (UTP-0007)",
-            "subtitle": "Senior Citizen • IPC 379 • Sub-Jail District Court",
-            "document_name": "UTP-0007_Handwritten_Remand_Note.pdf",
-            "preview_text": (
-                "Handwritten Bail Remand Note - Sub-Jail Magistrate Court\n"
-                "Date: 14/02/2025\n"
-                "Accused Name: Ramesh Kumar (UTP-0007)\n"
-                "Offense Sections: IPC Section 379 / BNSS Section 303\n"
-                "Date of Arrest: 02-11-2024\n"
-                "Total Days in Custody: 410 days\n"
-                "Max Statutory Sentence for Offense: 730 days (2 years)\n"
-                "Health Record / Medical Status: Patient suffers from chronic severe hypertension and joint arthritis. Senior Citizen aged 63 years.\n"
-                "Prior Bail Status: Previous bail application rejected on 10/12/2024 due to missing charge sheet copy.\n"
-                "Magistrate Note: Defense counsel submitted plea under Section 479 BNSS alleging undertrial period exceeds 50 percent of maximum sentence."
-            ),
-        },
-        {
-            "id": "sample-2",
-            "title": "Handwritten FIR Record Extract (UTP-0001)",
-            "subtitle": "First-Time Offender • IPC 323 • Central Jail",
-            "document_name": "UTP-0001_Handwritten_FIR_Extract.png",
-            "preview_text": (
-                "Handwritten FIR Extract - Station House Officer\n"
-                "Case ID: UTP-0001\n"
-                "Accused Name: Suresh Patel\n"
-                "Offense: IPC Section 323 (Voluntarily causing hurt)\n"
-                "Arrest Date: 10-01-2025\n"
-                "Custody Duration: 200 days\n"
-                "Max Imprisonment Period: 365 days\n"
-                "Prior Convictions: None (First-time offender)\n"
-                "Doc Check: Charge sheet filed and remand order attached."
-            ),
-        },
-        {
-            "id": "sample-3",
-            "title": "Scanned Case Summary & Custody Certificate (UTP-0021)",
-            "subtitle": "Medical Priority • IPC 325 • High Priority Bench",
-            "document_name": "UTP-0021_Medical_Custody_Cert.pdf",
-            "preview_text": (
-                "Scanned Custody Certificate & Medical Evaluation\n"
-                "Case ID: UTP-0021\n"
-                "Offense: IPC 325\n"
-                "Arrest Date: 15-08-2024\n"
-                "Days in Custody: 360 days\n"
-                "Max Sentence: 1095 days\n"
-                "Medical Note: Emergency cardiac review requested by Jail Superintendent. Requires urgent medical bail hearing."
-            ),
-        },
-    ]

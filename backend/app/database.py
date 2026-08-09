@@ -175,12 +175,18 @@ def get_evidence_item(evidence_id: str) -> dict | None:
     return None
 
 def add_notification(case_id: str, title: str, message: str, type: str) -> str:
-    """Insert a new notification and return its generated ID."""
-    notif_id = f"NOTIF-{case_id}-{datetime.datetime.now(datetime.timezone.utc).strftime('%H%M%S')}"
+    """Insert a new notification only if an identical one doesn't already exist.
+    
+    Uses a stable ID based on case_id + type to prevent duplicate notifications
+    from being created every time a case detail page is loaded.
+    """
+    # Stable ID: one notification per case_id per type per UTC-day
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
+    notif_id = f"NOTIF-{case_id}-{type}-{today}"
     timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
     with get_db_connection() as conn:
         conn.execute(
-            "INSERT INTO notifications (id, case_id, title, message, type, timestamp, is_read) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO notifications (id, case_id, title, message, type, timestamp, is_read) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (notif_id, case_id, title, message, type, timestamp, 0)
         )
     return notif_id

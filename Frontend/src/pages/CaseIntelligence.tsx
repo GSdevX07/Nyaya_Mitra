@@ -1,7 +1,8 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, FileText, CheckCircle2, AlertTriangle, AlertCircle, Scale, Calculator, Link as LinkIcon, Download, PenTool, Check, X, Activity, Loader2, RefreshCw } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
-import { fetchCaseById, approveCaseInBackend, uploadDocument } from "@/lib/api";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { fetchCaseById, approveCaseInBackend, uploadDocumentFile } from "@/lib/api";
+import { jsPDF } from "jspdf";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,9 @@ export function CaseIntelligence() {
   const [approving, setApproving] = useState(false);
   const [approvalDone, setApprovalDone] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [pendingDocType, setPendingDocType] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -54,15 +58,47 @@ export function CaseIntelligence() {
     }
   };
 
-  const handleUploadDoc = async (docType: string) => {
+  const handleUploadDoc = (docType: string) => {
     if (!id) return;
-    setUploadingDoc(docType);
+    setPendingDocType(docType);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !pendingDocType || !id) return;
+    
+    setUploadingDoc(pendingDocType);
     try {
-      await uploadDocument(id, docType);
+      await uploadDocumentFile(id, pendingDocType, file);
       await load(); // Re-run orchestrator to get updated completeness
+    } catch (err: any) {
+      alert("Failed to upload document: " + err.message);
     } finally {
       setUploadingDoc(null);
+      setPendingDocType(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  };
+
+  const generatePDF = () => {
+    if (!c.case_id) return;
+    const doc = new jsPDF();
+    doc.setFont("helvetica", "bold");
+    doc.text(`REQUEST FOR MISSING DOCUMENTS`, 20, 20);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Case ID: ${c.case_id}`, 20, 30);
+    doc.text(`Date: ${new Date().toLocaleDateString()}`, 20, 40);
+    doc.text(`The following documents are missing and required to proceed:`, 20, 50);
+    
+    let y = 60;
+    (caseData?.completeness?.missing_docs || []).forEach((docName: string, index: number) => {
+      doc.text(`${index + 1}. ${docName.replace(/_/g, " ")}`, 25, y);
+      y += 10;
+    });
+    
+    doc.text("Please submit these documents to the system immediately.", 20, y + 10);
+    doc.save(`Missing_Docs_Request_${c.case_id}.pdf`);
   };
 
   // ── Loading / Error states ────────────────────────────────────────────────
@@ -369,6 +405,15 @@ export function CaseIntelligence() {
           {/* Document Readiness */}
           <section className="p-6 rounded-xl border border-white/5 bg-white/[0.02] space-y-6">
             <h2 className="text-lg font-medium tracking-tight uppercase text-white">Document Readiness</h2>
+            
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              style={{ display: 'none' }} 
+              accept=".pdf,image/png,image/jpeg,image/jpg" 
+              onChange={handleFileChange} 
+            />
+
             <div className="space-y-3">
               {(c.required_docs || []).map((doc: string) => {
                 const isPresent = (c.present_docs || []).includes(doc);
@@ -403,7 +448,10 @@ export function CaseIntelligence() {
               <div className="mt-4 p-4 bg-accent/5 border border-accent/10 rounded-lg">
                 <div className="text-xs font-medium text-accent uppercase tracking-wider mb-2">Action Required</div>
                 <p className="text-xs text-muted-foreground mb-3">Upload missing documents to trigger the Completeness Agent and unlock the drafting pipeline.</p>
-                <button className="w-full py-2 bg-white/5 hover:bg-white/10 text-white text-xs font-medium rounded transition-colors flex items-center justify-center gap-2">
+                <button 
+                  onClick={generatePDF}
+                  className="w-full py-2 bg-white/5 hover:bg-white/10 text-white text-xs font-medium rounded transition-colors flex items-center justify-center gap-2"
+                >
                   <Download className="w-3 h-3" /> Generate Request PDF
                 </button>
               </div>

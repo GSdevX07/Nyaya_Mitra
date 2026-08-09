@@ -373,7 +373,7 @@ export function CommandCenter() {
     setQueueLoading(true);
     fetch("http://127.0.0.1:8000/cases")
       .then((r) => r.json())
-      .then((data) => setCases(data))
+      .then((data) => setCases(data.filter((d: QueueEntry) => d.case.assignment_status === "ASSIGNED")))
       .catch((e) => console.error("Failed to fetch queue:", e))
       .finally(() => setQueueLoading(false));
   }, []);

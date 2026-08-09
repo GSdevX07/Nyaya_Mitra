@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import {
   FileText,
-  Scan,
   Cpu,
   Database,
   Brain,
@@ -9,13 +8,12 @@ import {
   Sparkles,
   Copy,
   RefreshCw,
-  Zap,
   ShieldCheck,
   Search,
   BookOpen,
-  FileCheck,
 } from "lucide-react";
 import { assessDocument, fetchSampleDocuments } from "@/lib/api";
+import { InkStamp } from "@/components/ui/InkStamp";
 
 interface SampleDoc {
   id: string;
@@ -31,6 +29,7 @@ interface PipelineResult {
   detection_confidence: number;
   ocr_engine_used: string;
   raw_ocr_text: string;
+  extracted_text?: string;
   data_prep_kit_clean_text: string;
   structured_metadata: {
     case_id?: string;
@@ -62,6 +61,7 @@ interface PipelineResult {
     recommended_action: string;
     ai_generated_report_draft: string;
   };
+  llm_used?: string;
   processing_time_ms: number;
 }
 
@@ -123,8 +123,6 @@ export function DocumentAssessmentPage() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
-import { InkStamp } from "@/components/ui/InkStamp";
 
   return (
     <div className="p-4 md:p-8 w-full space-y-8 animate-in fade-in duration-300">

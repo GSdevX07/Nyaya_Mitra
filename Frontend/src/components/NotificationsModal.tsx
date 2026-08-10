@@ -47,7 +47,7 @@ export function NotificationsModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-end pt-16 pr-6 bg-primary backdrop-blur-xs animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-start justify-end pt-16 pr-6 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div

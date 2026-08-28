@@ -222,6 +222,16 @@ export function Landing() {
               </motion.div>
             ))}
           </div>
+
+          {/* Institutional Model Note */}
+          <div className="mt-12 p-6 rounded border border-primary/20 bg-primary/5 text-center max-w-3xl mx-auto space-y-2">
+            <h4 className="text-sm font-serif font-bold text-foreground">
+              Institutional & Social-Impact Deployment Model
+            </h4>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Proposed institutional operations and coordination platform for Legal Services Authorities (DLSA/SLSA) and correctional services, potentially supported through appropriate government programmes, grants, CSR initiatives, philanthropic or other institutional funding mechanisms.
+            </p>
+          </div>
         </div>
       </section>
 

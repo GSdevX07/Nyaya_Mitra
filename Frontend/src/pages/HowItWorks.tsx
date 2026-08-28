@@ -8,7 +8,7 @@ const pipelineSteps = [
     label: "CASE RECORDS INTAKE",
     icon: FileCheck,
     title: "Digitization & Ingestion",
-    desc: "Ingests scanned prison registers, FIR copies, remand notes, and custody logs. Normalizes raw unstructured data into machine-readable JSON schemas.",
+    desc: "Ingests scanned prison registers, FIR copies, remand notes, and custody logs. Normalizes raw unstructured records into canonical JSON schemas with data source provenance.",
     badge: "Input Layer"
   },
   {
@@ -16,39 +16,39 @@ const pipelineSteps = [
     label: "DOC INTELLIGENCE",
     icon: Eye,
     title: "OCR & Key Fact Extraction",
-    desc: "Extracts critical judicial metadata: arrest dates, sections charged, sentence lengths, and prior bail orders using domain-specific vision-language models.",
+    desc: "Extracts critical judicial metadata: arrest dates, sections charged, statutory terms, and prior bail orders using domain-specific vision-language models.",
     badge: "Extraction Engine"
   },
   {
     step: "03",
-    label: "ELIGIBILITY RADAR",
+    label: "SECTION 479 RULE ENGINE",
     icon: Scale,
-    title: "Statutory Threshold Math",
-    desc: "Applies deterministic, zero-hallucination legal rules (e.g. BNSS Section 479 / IPC half-sentence custody thresholds) to compute exact days overdue.",
-    badge: "Deterministic Math"
+    title: "Versioned Statutory Math",
+    desc: "Applies versioned deterministic Section 479 BNSS legal rules (evaluating 1/3 first-time proviso, 1/2 general threshold, countable vs excluded delay, capital offence and multiple proceedings exceptions) to produce an eligibility signal for human legal review.",
+    badge: "Deterministic Rules"
   },
   {
     step: "04",
-    label: "EVIDENCE CHAIN",
+    label: "GROUNDED STATUTORY RAG",
     icon: Shield,
-    title: "Statute RAG & Grounding",
-    desc: "Queries ChromaDB vector stores for relevant Indian Penal Code provisions and judicial precedents, attaching strict citations to every claim.",
-    badge: "Vector Retrieval"
+    title: "Statutory Law & Citations",
+    desc: "Grounds analysis in verified criminal enactments (BNSS 2023, BNS 2023, IPC 1860) with exact statutory titles, section numbers, and effective-date context.",
+    badge: "Statutory Retrieval"
   },
   {
     step: "05",
-    label: "AUTOMATED DRAFTING",
+    label: "PETITION DRAFTING",
     icon: Activity,
-    title: "Bail Petition Generation",
-    desc: "Drafts formal bail applications formatted to Indian court standards, highlighting missing records and exact legal justification.",
-    badge: "LLM Agent"
+    title: "Formal Petition Preparation",
+    desc: "Drafts formal Section 479 bail applications formatted to Indian court standards, highlighting missing records, countable detention facts, and legal justification.",
+    badge: "AI Agent"
   },
   {
     step: "06",
-    label: "HUMAN REVIEW GATE",
+    label: "MANDATORY ADVOCATE GATEWAY",
     icon: Users,
-    title: "Legal Officer Approval",
-    desc: "Every AI output requires explicit human review and e-signature before filing. The system never submits applications autonomously.",
+    title: "Human Legal Sign-Off",
+    desc: "Every AI petition requires explicit review, editing, and sign-off by a licensed panel advocate before procedural court filing. The system never executes autonomous court filings.",
     badge: "Human-in-the-Loop"
   }
 ];

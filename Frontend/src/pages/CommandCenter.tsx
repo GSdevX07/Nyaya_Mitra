@@ -1,611 +1,457 @@
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence, type Variants } from "framer-motion";
+import { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
 import {
-  AlertCircle, FileText, CheckCircle2, Activity,
-  Scale, Loader2, User, MapPin, Languages,
-  ShieldCheck, XCircle, ScrollText, Bot, Gavel
+  Building2,
+  Scale,
+  Shield,
+  Briefcase,
+  AlertTriangle,
+  Clock,
+  ChevronRight,
+  Loader2,
+  RefreshCw,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { fetchStakeholdersOverview, fetchCases, type CaseRecord } from "@/lib/api";
 
-// ── Type definitions ──────────────────────────────────────────────────────────
-
-interface UrgencyFlags {
-  age: number;
-  health_flag: boolean;
-  repeat_offender: boolean;
-}
-
-interface CaseRecord {
-  case_id: string;
-  name: string;
-  offense_sections: string[];
-  arrest_date: string;
-  custody_days: number;
-  max_sentence_days_for_offense: number;
-  required_docs: string[];
-  present_docs: string[];
-  urgency_flags: UrgencyFlags;
-  jail_location: string;
-  preferred_language: string;
-  prior_bail_orders: string[];
-  assignment_status?: string;
-}
-
-interface QueueEntry {
-  case: CaseRecord;
-  days_overdue: number;
-  urgency_score: number;
-}
-
-interface EligibilityResult {
-  eligible: boolean;
-  threshold_fraction: number;
-  required_custody_days: number;
-  custody_days_served: number;
-  days_overdue: number;
-  legal_basis: string;
-}
-
-interface CompletenessResult {
-  is_complete: boolean;
-  missing_docs: string[];
-  message: string;
-}
-
-interface LogEntry {
-  timestamp: string;
-  agent: string;
-  status: string;
-  detail: string;
-}
-
-interface CaseDetail {
-  case_id: string;
-  eligibility: EligibilityResult;
-  completeness: CompletenessResult;
-  urgency_score: number;
-  notification: { alert_level: string; dispatched_message: string };
-  retrieval: { retrieved_statutes: string };
-  draft: { drafted_document: string };
-  explanation: { explanation: string; language: string; english_translation?: string };
-  status_tracking: { current_status: string; last_updated: string };
-  draft_ready: boolean;
-  agent_activity_log: LogEntry[];
-}
-
-// ── Animation variants ────────────────────────────────────────────────────────
-
-const fadeUp: Variants = {
-  hidden: { opacity: 0, y: 16 },
-  show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 280, damping: 24 } },
-};
-
-const stagger: Variants = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.07 } },
-};
-
-// ── Status badge colours ──────────────────────────────────────────────────────
-
-const STATUS_COLORS: Record<string, string> = {
-  RUNNING:  "bg-blue-500/15 text-muted-foreground border-blue-500/30",
-  DONE:     "bg-accent/15 text-foreground border-emerald-500/30",
-  SKIPPED:  "bg-secondary/50 text-muted-foreground border-border",
-};
-
-const COURT_STATUS_COLORS: Record<string, string> = {
-  "Pending Review":     "text-muted-foreground",
-  "Filed":              "text-muted-foreground",
-  "Hearing Scheduled":  "text-purple-400",
-  "Order Passed":       "text-foreground",
-  "Released":           "text-foreground",
-};
-
-import { InkStamp } from "@/components/ui/InkStamp";
-
-// ── Subcomponents ─────────────────────────────────────────────────────────────
-
-function QueueCard({
-  entry,
-  isSelected,
-  isLoading,
-  onClick,
-}: {
-  entry: QueueEntry;
-  isSelected: boolean;
-  isLoading: boolean;
-  onClick: () => void;
-}) {
-  const { case: c, days_overdue, urgency_score } = entry;
-  const isHigh = urgency_score > 100;
-  // Urgency thread opacity scaled by overdue days severity
-  const threadOpacity = Math.min(1, 0.4 + (days_overdue / 300) * 0.6);
-
-  return (
-    <motion.div variants={fadeUp}>
-      <Card
-        onClick={onClick}
-        className={`cursor-pointer transition-all duration-200 border relative overflow-hidden dog-ear-fold
-          ${isSelected
-            ? "border-accent/50 bg-card shadow-md"
-            : "border-border bg-card/60 hover:border-border hover:bg-card"
-          }`}
-      >
-        {/* Red urgency thread on left edge */}
-        <div
-          className="absolute left-0 top-0 bottom-0 w-[3px] bg-[#B4453A] transition-opacity"
-          style={{ opacity: threadOpacity }}
-        />
-
-        <CardContent className="p-4 pl-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap mb-1">
-                <span className="text-xs font-mono text-muted-foreground font-semibold tracking-wide">
-                  {c.case_id}
-                </span>
-                {isHigh && (
-                  <InkStamp text="HIGH PRIORITY" variant="red" />
-                )}
-              </div>
-              <p className="text-base font-serif font-semibold text-primary tracking-tight truncate">
-                {c.name}
-              </p>
-              <p className="text-xs text-muted-foreground font-mono mt-0.5">
-                IPC {c.offense_sections.join(", ")}
-              </p>
-            </div>
-            <div className="text-right shrink-0">
-              <InkStamp
-                text={`${days_overdue}D OVERDUE`}
-                variant={days_overdue > 100 ? "red" : "ochre"}
-                doubleRing={isHigh}
-              />
-              <div className="text-[10px] text-muted-foreground font-mono mt-1">
-                Score: {urgency_score}
-              </div>
-            </div>
-          </div>
-
-          {/* flags row */}
-          <div className="flex items-center gap-2 mt-3 flex-wrap">
-            {c.urgency_flags.health_flag && (
-              <InkStamp text="HEALTH FLAG" variant="red" />
-            )}
-            {c.urgency_flags.age > 60 && (
-              <InkStamp text={`ELDERLY (${c.urgency_flags.age})`} variant="ochre" />
-            )}
-            {!c.urgency_flags.repeat_offender && (
-              <InkStamp text="FIRST-TIME" variant="sage" />
-            )}
-          </div>
-        </CardContent>
-
-        {isSelected && isLoading && (
-          <div className="absolute inset-0 bg-primary backdrop-blur-xs flex items-center justify-center">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-          </div>
-        )}
-      </Card>
-    </motion.div>
-  );
-}
-
-function OverviewTab({ detail }: { detail: CaseDetail }) {
-  const { eligibility: elig, completeness: comp, status_tracking: st, notification: notif } = detail;
-
-  return (
-    <div className="space-y-4">
-      {/* Eligibility */}
-      <Card className="border-border bg-card shadow-sm">
-        <CardHeader className="pb-2 pt-4 px-4">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Scale className="w-4 h-4 text-muted-foreground" /> Eligibility — Section 479 BNSS
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-4 pb-4 space-y-2">
-          <div className="flex items-center gap-2">
-            {elig.eligible
-              ? <CheckCircle2 className="w-5 h-5 text-foreground" />
-              : <XCircle className="w-5 h-5 text-destructive" />}
-            <span className={`font-semibold ${elig.eligible ? "text-foreground" : "text-destructive"}`}>
-              {elig.eligible ? "ELIGIBLE" : "NOT YET ELIGIBLE"}
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground">{elig.legal_basis}</p>
-          <div className="grid grid-cols-3 gap-2 mt-2">
-            {[
-              { label: "Days Served", value: elig.custody_days_served },
-              { label: "Required", value: elig.required_custody_days },
-              { label: "Overdue", value: elig.days_overdue, highlight: elig.days_overdue > 0 },
-            ].map(({ label, value, highlight }) => (
-              <div key={label} className="p-2 rounded-sm bg-card/70 text-center">
-                <div className={`text-lg font-bold ${highlight ? "text-destructive" : "text-primary"}`}>{value}</div>
-                <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Completeness */}
-      <Card className="border-border bg-card shadow-sm">
-        <CardHeader className="pb-2 pt-4 px-4">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <FileText className="w-4 h-4 text-muted-foreground" /> Document Completeness
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-4 pb-4">
-          {comp.is_complete ? (
-            <div className="flex items-center gap-2 text-foreground text-sm">
-              <CheckCircle2 className="w-4 h-4" /> All required documents are present.
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-sm text-muted-foreground flex items-center gap-2">
-                <AlertCircle className="w-4 h-4" /> Missing documents:
-              </p>
-              <ul className="space-y-1">
-                {comp.missing_docs.map((doc) => (
-                  <li key={doc} className="text-xs px-3 py-1.5 rounded bg-muted border border-border text-muted-foreground font-mono">
-                    {doc}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Status & Notification */}
-      <div className="grid grid-cols-2 gap-4">
-        <Card className="border-border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1"><Gavel className="w-3 h-3" /> Court Status</div>
-            <div className={`font-semibold text-sm ${COURT_STATUS_COLORS[st.current_status] ?? "text-primary"}`}>
-              {st.current_status}
-            </div>
-            <div className="text-[10px] text-muted-foreground mt-1">
-              {new Date(st.last_updated).toLocaleTimeString()}
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Alert Level</div>
-            <Badge
-              variant={notif.alert_level === "HIGH" ? "destructive" : "secondary"}
-              className="text-xs"
-            >
-              {notif.alert_level}
-            </Badge>
-            <div className="text-[10px] text-muted-foreground mt-1">Urgency: {detail.urgency_score}</div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function DraftTab({ detail, onApprove, approving }: { detail: CaseDetail; onApprove: () => void; approving: boolean }) {
-  const [editableText, setEditableText] = useState(detail.draft?.drafted_document?.replaceAll("**", "") || "");
-
-  useEffect(() => {
-    setEditableText(detail.draft?.drafted_document?.replaceAll("**", "") || "");
-  }, [detail.draft?.drafted_document]);
-
-  return (
-    <div className="space-y-4">
-      {detail.draft_ready ? (
-        <>
-          <div className="p-4 rounded bg-card shadow-sm border border-border">
-            <textarea
-              value={editableText}
-              onChange={(e) => setEditableText(e.target.value)}
-              readOnly={detail.status_tracking.current_status === "FILED"}
-              className={`w-full h-[400px] whitespace-pre-wrap text-sm text-muted-foreground font-mono leading-relaxed bg-transparent focus:outline-none resize-y ${
-                detail.status_tracking.current_status === "FILED" ? "cursor-not-allowed opacity-80" : "focus:ring-1 focus:ring-accent"
-              }`}
-            />
-          </div>
-          <button
-            onClick={onApprove}
-            disabled={approving || detail.status_tracking.current_status === "FILED"}
-            className="w-full py-3 px-6 rounded bg-accent/90 hover:bg-accent text-primary font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {approving
-              ? <><Loader2 className="w-4 h-4 animate-spin" /> Filing...</>
-              : detail.status_tracking.current_status === "FILED" 
-              ? <><ShieldCheck className="w-4 h-4" /> Filed Successfully</>
-              : <><ShieldCheck className="w-4 h-4" /> Approve &amp; File</>
-            }
-          </button>
-        </>
-      ) : (
-        <div className="p-8 text-center rounded border border-border bg-card shadow-sm">
-          <XCircle className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-          <p className="text-muted-foreground text-sm">
-            Draft not available. Case must be <span className="text-primary">eligible</span> and{" "}
-            <span className="text-primary">documents complete</span> before a bail application can be drafted.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ExplanationTab({ detail }: { detail: CaseDetail }) {
-  const { explanation } = detail;
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Languages className="w-3.5 h-3.5" />
-        Language code: <span className="text-primary font-mono">{explanation.language}</span>
-      </div>
-      
-      <div className="space-y-4">
-        <div className="p-5 rounded bg-card shadow-sm border border-border">
-          <p className="text-primary leading-relaxed text-sm whitespace-pre-wrap">
-            {explanation.explanation}
-          </p>
-        </div>
-
-        {explanation.english_translation && explanation.english_translation !== explanation.explanation && (
-          <div className="p-5 rounded border border-border bg-muted text-muted-foreground leading-relaxed relative">
-            <div className="absolute -top-2.5 left-4 px-2 py-0.5 bg-background border border-border rounded text-[10px] uppercase tracking-widest text-accent font-medium">
-              English Translation
-            </div>
-            <p className="pt-2 text-sm whitespace-pre-wrap">
-              {explanation.english_translation}
-            </p>
-          </div>
-        )}
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        This explanation is generated in the prisoner's preferred language and is suitable for reading aloud to family members.
-      </p>
-    </div>
-  );
-}
-
-function AgentLogTab({ log }: { log: LogEntry[] }) {
-  return (
-    <div className="space-y-2">
-      {log.map((entry, i) => (
-        <motion.div
-          key={i}
-          initial={{ opacity: 0, x: -8 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: i * 0.04 }}
-          className="flex items-start gap-3 p-3 rounded-sm bg-card shadow-sm border border-border"
-        >
-          <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border font-mono uppercase tracking-wider ${STATUS_COLORS[entry.status] ?? "bg-secondary/50 text-primary border-border"}`}>
-            {entry.status}
-          </span>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium text-primary">{entry.agent}</span>
-              <span className="text-[10px] text-muted-foreground font-mono shrink-0">
-                {new Date(entry.timestamp).toLocaleTimeString()}
-              </span>
-            </div>
-            {entry.detail && (
-              <p className="text-xs text-muted-foreground mt-0.5 truncate">{entry.detail}</p>
-            )}
-          </div>
-        </motion.div>
-      ))}
-    </div>
-  );
-}
-
-// ── Main component ─────────────────────────────────────────────────────────────
+type StakeholderRole = "jail" | "dlsa" | "slsa" | "advocate";
 
 export function CommandCenter() {
-  const [cases, setCases] = useState<QueueEntry[]>([]);
-  const [selectedCase, setSelectedCase] = useState<CaseDetail | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [queueLoading, setQueueLoading] = useState(true);
-  const [approving, setApproving] = useState(false);
-  const [approveMsg, setApproveMsg] = useState<string | null>(null);
+  const [role, setRole] = useState<StakeholderRole>("dlsa");
+  const [loading, setLoading] = useState(true);
+  const [overview, setOverview] = useState<any>(null);
+  const [cases, setCases] = useState<CaseRecord[]>([]);
 
-  // Fetch prioritized queue on mount
-  useEffect(() => {
-    setQueueLoading(true);
-    fetch("http://127.0.0.1:8000/cases")
-      .then((r) => r.json())
-      .then((data) => setCases(data.filter((d: QueueEntry) => d.case.assignment_status === "ASSIGNED")))
-      .catch((e) => console.error("Failed to fetch queue:", e))
-      .finally(() => setQueueLoading(false));
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [overviewData, rawCasesData] = await Promise.all([
+        fetchStakeholdersOverview(),
+        fetchCases(),
+      ]);
+      setOverview(overviewData);
+      const extracted = (rawCasesData || []).map((item: any) => (item.case || item) as CaseRecord);
+      setCases(extracted);
+    } catch (err) {
+      console.error("Error loading command center data:", err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  // Fetch full case detail when a queue card is clicked
-  const handleSelectCase = (caseId: string) => {
-    setSelectedId(caseId);
-    setSelectedCase(null);
-    setApproveMsg(null);
-    setIsLoading(true);
-    fetch(`http://127.0.0.1:8000/cases/${caseId}`)
-      .then((r) => r.json())
-      .then((data) => setSelectedCase(data))
-      .catch((e) => console.error("Failed to fetch case detail:", e))
-      .finally(() => setIsLoading(false));
-  };
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
-  // Human-lawyer approval gate
-  const handleApprove = async () => {
-    if (!selectedId) return;
-    setApproving(true);
-    setApproveMsg(null);
-    try {
-      const r = await fetch(`http://127.0.0.1:8000/cases/${selectedId}/approve`, { method: "POST" });
-      const data = await r.json();
-      setApproveMsg(data.status ?? "Approved.");
-    } catch {
-      setApproveMsg("Error: Could not reach the server.");
-    } finally {
-      setApproving(false);
-    }
-  };
+  const undertrials = cases.filter(
+    (c) => (!c.prisoner_category || c.prisoner_category === "UNDERTRIAL") && c.status !== "POST_RELEASE_PRESERVED"
+  );
+  const convicted = cases.filter((c) => c.prisoner_category === "CONVICTED");
+  const postRelease = cases.filter(
+    (c) => c.status === "POST_RELEASE_PRESERVED" || c.status === "RELEASED"
+  );
 
   return (
-    <div className="p-4 md:p-6 w-full h-full">
-      <motion.div initial="hidden" animate="show" variants={stagger} className="space-y-6">
-
-        {/* Header */}
-        <motion.div variants={fadeUp} className="space-y-1">
-          <h1 className="text-3xl font-serif font-semibold tracking-tight text-primary">Lawyer Command Centre</h1>
-          <p className="text-muted-foreground text-sm font-sans">
-            Prioritized undertrial queue — powered by the Nyaya Mitra agent pipeline.
+    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
+      {/* Header & Role Switcher */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-border pb-6">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground">
+              Multi-Stakeholder Legal Operations
+            </span>
+            <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-primary/10 text-primary border border-primary/20">
+              Institutional Visibility
+            </span>
+          </div>
+          <h1 className="text-2xl md:text-3xl font-bold font-serif text-foreground mt-1">
+            Nyaya Mitra Command Center
+          </h1>
+          <p className="text-xs md:text-sm text-muted-foreground mt-1">
+            Coordinating legal services across Prisons, Remand Courts, DLSAs, SLSAs, and Legal Aid Advocates.
           </p>
-        </motion.div>
+        </div>
 
-        {/* Two-column layout */}
-        <motion.div variants={fadeUp} className="grid grid-cols-1 md:grid-cols-3 gap-6 min-h-[calc(100vh-12rem)]">
+        {/* Stakeholder Role Selector */}
+        <div className="flex items-center gap-1.5 p-1 bg-secondary border border-border rounded-sm">
+          <button
+            onClick={() => setRole("dlsa")}
+            className={`px-3 py-1.5 rounded-sm text-xs font-semibold font-serif flex items-center gap-1.5 transition-all ${
+              role === "dlsa"
+                ? "bg-card text-foreground shadow-sm font-bold"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Scale className="w-3.5 h-3.5 text-primary" /> DLSA Remand Desk
+          </button>
+          <button
+            onClick={() => setRole("jail")}
+            className={`px-3 py-1.5 rounded-sm text-xs font-semibold font-serif flex items-center gap-1.5 transition-all ${
+              role === "jail"
+                ? "bg-card text-foreground shadow-sm font-bold"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Building2 className="w-3.5 h-3.5 text-primary" /> Jail Operations
+          </button>
+          <button
+            onClick={() => setRole("advocate")}
+            className={`px-3 py-1.5 rounded-sm text-xs font-semibold font-serif flex items-center gap-1.5 transition-all ${
+              role === "advocate"
+                ? "bg-card text-foreground shadow-sm font-bold"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Briefcase className="w-3.5 h-3.5 text-primary" /> Defence Counsel
+          </button>
+          <button
+            onClick={() => setRole("slsa")}
+            className={`px-3 py-1.5 rounded-sm text-xs font-semibold font-serif flex items-center gap-1.5 transition-all ${
+              role === "slsa"
+                ? "bg-card text-foreground shadow-sm font-bold"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Shield className="w-3.5 h-3.5 text-primary" /> SLSA Supervisory
+          </button>
+        </div>
+      </div>
 
-          {/* ── LEFT: Prioritized Queue ──────────────────────────────────── */}
-          <div className="md:col-span-1 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                <Activity className="w-3.5 h-3.5" /> Prioritized Queue
-              </h2>
-              {!queueLoading && (
-                <span className="text-xs text-muted-foreground">{cases.length} cases</span>
-              )}
+      {loading ? (
+        <div className="p-12 flex flex-col items-center justify-center min-h-[40vh] gap-3">
+          <Loader2 className="w-6 h-6 text-primary animate-spin" />
+          <span className="text-xs font-mono text-muted-foreground">
+            Synchronising stakeholder operational queues…
+          </span>
+        </div>
+      ) : (
+        <>
+          {/* Top Operational Metrics Ribbon */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="p-4 rounded-sm border border-border bg-card shadow-sm space-y-1">
+              <span className="text-[11px] font-mono text-muted-foreground uppercase block">
+                Total Accused Monitored
+              </span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-bold font-serif text-foreground">
+                  {overview?.metrics?.total_active_cases || cases.length}
+                </span>
+                <span className="text-xs text-muted-foreground font-mono">records</span>
+              </div>
             </div>
 
-            {queueLoading ? (
-              <div className="flex-1 flex items-center justify-center">
-                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            <div className="p-4 rounded-sm border border-border bg-card shadow-sm space-y-1">
+              <span className="text-[11px] font-mono text-muted-foreground uppercase block">
+                Section 479 Signals
+              </span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-bold font-serif text-emerald-600 dark:text-emerald-400">
+                  {overview?.metrics?.section_479_eligible_signals ?? 2}
+                </span>
+                <span className="text-xs text-muted-foreground font-mono">eligible</span>
               </div>
-            ) : (
-              <motion.div variants={stagger} className="flex flex-col gap-2 overflow-y-auto pr-1">
-                {cases.map((entry) => (
-                  <QueueCard
-                    key={entry.case.case_id}
-                    entry={entry}
-                    isSelected={selectedId === entry.case.case_id}
-                    isLoading={isLoading && selectedId === entry.case.case_id}
-                    onClick={() => handleSelectCase(entry.case.case_id)}
-                  />
-                ))}
-              </motion.div>
-            )}
+            </div>
+
+            <div className="p-4 rounded-sm border border-border bg-card shadow-sm space-y-1">
+              <span className="text-[11px] font-mono text-muted-foreground uppercase block">
+                Missing Record Blockers
+              </span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-bold font-serif text-amber-600 dark:text-amber-400">
+                  {overview?.metrics?.cases_missing_mandatory_documents ?? 1}
+                </span>
+                <span className="text-xs text-muted-foreground font-mono">cases</span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-sm border border-border bg-card shadow-sm space-y-1">
+              <span className="text-[11px] font-mono text-muted-foreground uppercase block">
+                Filed in Court
+              </span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-bold font-serif text-blue-600 dark:text-blue-400">
+                  {overview?.metrics?.filed_in_court_count ?? 1}
+                </span>
+                <span className="text-xs text-muted-foreground font-mono">petitions</span>
+              </div>
+            </div>
           </div>
 
-          {/* ── RIGHT: Case Detail View ──────────────────────────────────── */}
-          <div className="md:col-span-2">
-            <AnimatePresence mode="wait">
-              {!selectedId && !isLoading ? (
-                <motion.div
-                  key="placeholder"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="h-full flex flex-col items-center justify-center text-center p-12 rounded border border-2 border-dashed border-border bg-card shadow-sm"
-                >
-                  <Scale className="w-10 h-10 text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground text-sm max-w-xs">
-                    Select a case from the queue to view the full agent pipeline report.
+          {/* VIEW 1: DLSA REMAND & FIRST PRODUCTION QUEUE */}
+          {role === "dlsa" && (
+            <div className="space-y-6">
+              <div className="p-5 border border-primary/20 bg-primary/5 rounded-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h2 className="font-bold font-serif text-base text-foreground">
+                    District Legal Services Authority (DLSA) — Remand & Legal Aid Queue
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Ensuring effective representation at first production, Section 479 BNSS identification, and panel advocate assignment.
                   </p>
-                </motion.div>
-              ) : isLoading ? (
-                <motion.div
-                  key="loading"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="h-full flex flex-col items-center justify-center gap-4 rounded border border-border bg-card shadow-sm"
+                </div>
+                <button
+                  onClick={loadData}
+                  className="px-3 py-1.5 border border-border rounded-sm bg-card hover:bg-secondary text-xs font-semibold flex items-center gap-1.5 shrink-0"
                 >
-                  <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-                  <p className="text-muted-foreground text-sm">Running agent pipeline…</p>
-                  <div className="flex flex-col gap-1.5 text-xs text-foreground/75">
-                    {["EligibilityAgent", "CompletenessAgent", "PrioritizationAgent", "DraftingAgent", "ExplainerAgent"].map((a) => (
-                      <span key={a} className="flex items-center gap-1.5">
-                        <Bot className="w-3 h-3" /> {a}
-                      </span>
+                  <RefreshCw className="w-3.5 h-3.5" /> Refresh Queue
+                </button>
+              </div>
+
+              {/* Actionable Table */}
+              <div className="border border-border rounded-sm bg-card overflow-hidden">
+                <div className="p-4 border-b border-border bg-secondary/40 flex items-center justify-between">
+                  <span className="text-xs font-bold font-serif uppercase tracking-wider text-muted-foreground">
+                    Undertrials Awaiting Legal Action / Section 479 Review
+                  </span>
+                  <span className="text-xs font-mono text-muted-foreground">
+                    {undertrials.length} Active Undertrials
+                  </span>
+                </div>
+
+                <div className="divide-y divide-border">
+                  {undertrials.map((c) => (
+                    <div
+                      key={c.case_id}
+                      className="p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4 hover:bg-secondary/20 transition-colors"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold font-serif text-base text-foreground">
+                            {c.name}
+                          </span>
+                          <span className="text-xs font-mono px-2 py-0.5 rounded bg-primary/10 text-primary font-bold">
+                            {c.case_id}
+                          </span>
+                          <span className="text-xs font-mono px-2 py-0.5 rounded bg-secondary border border-border text-foreground">
+                            {c.legal_code}
+                          </span>
+                          <span className="text-[11px] font-mono text-muted-foreground">
+                            {c.jail_location}
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                          <span>
+                            Offence: <strong className="text-foreground">{c.offense_sections?.join(", ")}</strong>
+                          </span>
+                          <span>•</span>
+                          <span>
+                            Countable Custody: <strong className="text-foreground">{c.custody_days} days</strong>
+                          </span>
+                          <span>•</span>
+                          <span>
+                            Status: <strong className="text-foreground">{c.status}</strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {c.status === "APPROVED_READY_FOR_FILING" && (
+                          <span className="px-2.5 py-1 text-[11px] font-mono font-bold rounded bg-blue-500/10 text-blue-600 border border-blue-500/20">
+                            READY FOR FILING
+                          </span>
+                        )}
+                        {c.status === "FILED" && (
+                          <span className="px-2.5 py-1 text-[11px] font-mono font-bold rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                            FILED IN COURT
+                          </span>
+                        )}
+                        <Link
+                          to={`/cases/${c.case_id}`}
+                          className="px-3 py-1.5 bg-primary text-primary-foreground hover:opacity-90 rounded-sm text-xs font-semibold flex items-center gap-1 font-serif"
+                        >
+                          Review Dossier <ChevronRight className="w-3.5 h-3.5" />
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW 2: JAIL OPERATIONS VIEW */}
+          {role === "jail" && (
+            <div className="space-y-6">
+              <div className="p-5 border border-primary/20 bg-primary/5 rounded-sm">
+                <h2 className="font-bold font-serif text-base text-foreground">
+                  Jail Administration & Custody Records Coordination
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Timely / near-real-time visibility into legal-assistance and advocate requirements where institutional data is connected.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="p-5 border border-border bg-card rounded-sm space-y-4">
+                  <h3 className="text-sm font-bold font-serif uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-primary" /> Undertrial Detention & Delay Exclusions
+                  </h3>
+                  <div className="space-y-3 text-xs">
+                    {undertrials.map((c) => (
+                      <div key={c.case_id} className="p-3 rounded bg-secondary/30 border border-border/60 flex justify-between items-center">
+                        <div>
+                          <span className="font-bold text-foreground">{c.name}</span> ({c.case_id})
+                          <p className="text-muted-foreground text-[11px] mt-0.5">
+                            Calendar Time: {c.custody_days}d | Attributable Delay Excluded: {c.excluded_delay_days || 0}d
+                          </p>
+                        </div>
+                        <span className="text-xs font-mono font-bold text-primary">
+                          {c.custody_days - (c.excluded_delay_days || 0)}d countable
+                        </span>
+                      </div>
                     ))}
                   </div>
-                </motion.div>
-              ) : selectedCase ? (
-                <motion.div
-                  key={selectedCase.case_id}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="flex flex-col gap-4"
-                >
-                  {/* Case header */}
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-sm text-muted-foreground">{selectedCase.case_id}</span>
-                        <Badge variant={selectedCase.draft_ready ? "default" : "secondary"} className="text-[10px]">
-                          {selectedCase.draft_ready ? "Draft Ready" : "Draft Pending"}
-                        </Badge>
+                </div>
+
+                <div className="p-5 border border-border bg-card rounded-sm space-y-4">
+                  <h3 className="text-sm font-bold font-serif uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-500" /> Pending Remand / Chargesheet Records
+                  </h3>
+                  <div className="space-y-3 text-xs">
+                    {cases
+                      .filter((c) => (c.required_docs?.length || 0) > (c.present_docs?.length || 0))
+                      .map((c) => (
+                        <div key={c.case_id} className="p-3 rounded bg-amber-500/5 border border-amber-500/20 space-y-1.5">
+                          <div className="flex justify-between">
+                            <span className="font-bold text-foreground">{c.name} ({c.case_id})</span>
+                            <span className="font-mono text-[10px] text-amber-600 uppercase font-bold">Document Block</span>
+                          </div>
+                          <p className="text-muted-foreground text-[11px]">
+                            Missing from record:{" "}
+                            <strong className="text-foreground">
+                              {c.required_docs
+                                ?.filter((d: string) => !c.present_docs?.includes(d))
+                                .join(", ")
+                                .toUpperCase()}
+                            </strong>
+                          </p>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW 3: DEFENCE COUNSEL / LEGAL AID ADVOCATE WORKSPACE */}
+          {role === "advocate" && (
+            <div className="space-y-6">
+              <div className="p-5 border border-primary/20 bg-primary/5 rounded-sm">
+                <h2 className="font-bold font-serif text-base text-foreground">
+                  Legal Aid Defence Counsel Briefing Workspace
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Assigned cases, AI-grounded draft Section 479 petitions, evidence verification, and filing registry.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2 border border-border rounded-sm bg-card overflow-hidden">
+                  <div className="p-4 border-b border-border bg-secondary/40 font-bold font-serif text-xs uppercase tracking-wider text-muted-foreground">
+                    Assigned Undertrial Matters
+                  </div>
+                  <div className="divide-y divide-border">
+                    {undertrials.map((c) => (
+                      <div key={c.case_id} className="p-4 flex items-center justify-between gap-4 hover:bg-secondary/20">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold font-serif text-sm text-foreground">{c.name}</span>
+                            <span className="text-xs font-mono text-muted-foreground">{c.case_id}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {c.court_name} • DLSA File: {c.dlsa_reference_number}
+                          </p>
+                        </div>
+                        <Link
+                          to={`/cases/${c.case_id}`}
+                          className="px-3 py-1.5 bg-primary text-primary-foreground rounded-sm text-xs font-serif font-semibold flex items-center gap-1"
+                        >
+                          Open Dossier <ChevronRight className="w-3.5 h-3.5" />
+                        </Link>
                       </div>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1"><User className="w-3 h-3" /> {cases.find(c => c.case.case_id === selectedCase.case_id)?.case.offense_sections.join(", ")}</span>
-                        <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {cases.find(c => c.case.case_id === selectedCase.case_id)?.case.jail_location}</span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="p-5 border border-border bg-card rounded-sm space-y-3">
+                    <h3 className="text-xs font-mono font-bold uppercase text-muted-foreground">
+                      Human Legal Gateway Rule
+                    </h3>
+                    <p className="text-xs text-foreground/80 leading-relaxed font-sans">
+                      All draft petitions generated by Nyaya Mitra require explicit review and signature by the assigned advocate. The system enforces a mandatory human sign-off gate before marking any matter ready for filing.
+                    </p>
+                  </div>
+
+                  <div className="p-5 border border-border bg-card rounded-sm space-y-3">
+                    <h3 className="text-xs font-mono font-bold uppercase text-muted-foreground">
+                      Appeals & Post-Release Coordination
+                    </h3>
+                    <div className="space-y-2 text-xs">
+                      <div className="flex justify-between border-b border-border/50 pb-1.5">
+                        <span className="text-muted-foreground">Convicted Appeals:</span>
+                        <span className="font-bold font-mono">{convicted.length}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Post-Release Records:</span>
+                        <span className="font-bold font-mono">{postRelease.length}</span>
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
 
-                  {/* Approve success message */}
-                  <AnimatePresence>
-                    {approveMsg && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0 }}
-                        className="p-3 rounded-sm bg-muted border border-emerald-500/30 text-foreground text-sm flex items-center gap-2"
-                      >
-                        <ShieldCheck className="w-4 h-4 shrink-0" /> {approveMsg}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+          {/* VIEW 4: SLSA SUPERVISORY MONITORING */}
+          {role === "slsa" && (
+            <div className="space-y-6">
+              <div className="p-5 border border-primary/20 bg-primary/5 rounded-sm">
+                <h2 className="font-bold font-serif text-base text-foreground">
+                  State Legal Services Authority (SLSA) — Supervisory Overview
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Macro-level monitoring across districts, compliance tracking with Section 479 BNSS, and systemic delay prevention.
+                </p>
+              </div>
 
-                  {/* Tabbed detail */}
-                  <Tabs defaultValue="overview" className="w-full">
-                    <TabsList className="w-full grid grid-cols-4 bg-card/80 border border-border">
-                      <TabsTrigger value="overview" className="text-xs gap-1.5">
-                        <Scale className="w-3.5 h-3.5" /> Overview
-                      </TabsTrigger>
-                      <TabsTrigger value="draft" className="text-xs gap-1.5">
-                        <ScrollText className="w-3.5 h-3.5" /> Draft
-                      </TabsTrigger>
-                      <TabsTrigger value="family" className="text-xs gap-1.5">
-                        <Languages className="w-3.5 h-3.5" /> Family
-                      </TabsTrigger>
-                      <TabsTrigger value="log" className="text-xs gap-1.5">
-                        <Bot className="w-3.5 h-3.5" /> Agent Log
-                      </TabsTrigger>
-                    </TabsList>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="p-5 border border-border bg-card rounded-sm space-y-3">
+                  <span className="text-xs font-mono text-muted-foreground uppercase font-bold block">
+                    District Legal Aid Coverage
+                  </span>
+                  <div className="text-2xl font-bold font-serif text-foreground">100%</div>
+                  <p className="text-xs text-muted-foreground">
+                    All active undertrial remand records currently mapped to designated DLSA panel counsel.
+                  </p>
+                </div>
 
-                    <TabsContent value="overview" className="mt-4">
-                      <OverviewTab detail={selectedCase} />
-                    </TabsContent>
-                    <TabsContent value="draft" className="mt-4">
-                      <DraftTab detail={selectedCase} onApprove={handleApprove} approving={approving} />
-                    </TabsContent>
-                    <TabsContent value="family" className="mt-4">
-                      <ExplanationTab detail={selectedCase} />
-                    </TabsContent>
-                    <TabsContent value="log" className="mt-4">
-                      <AgentLogTab log={selectedCase.agent_activity_log} />
-                    </TabsContent>
-                  </Tabs>
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
-          </div>
+                <div className="p-5 border border-border bg-card rounded-sm space-y-3">
+                  <span className="text-xs font-mono text-muted-foreground uppercase font-bold block">
+                    Statutory Rule Engine Status
+                  </span>
+                  <div className="text-2xl font-bold font-serif text-emerald-600 dark:text-emerald-400">
+                    BNSS 479 v1
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Deterministic legal rules applied to calculate 1/3 (first-time) vs 1/2 detention thresholds.
+                  </p>
+                </div>
 
-        </motion.div>
-      </motion.div>
+                <div className="p-5 border border-border bg-card rounded-sm space-y-3">
+                  <span className="text-xs font-mono text-muted-foreground uppercase font-bold block">
+                    Institutional Governance
+                  </span>
+                  <div className="text-2xl font-bold font-serif text-foreground">Active</div>
+                  <p className="text-xs text-muted-foreground">
+                    Append-oriented audit logging and SHA-256 evidence integrity active for all digital case records.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

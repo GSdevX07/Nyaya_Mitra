@@ -54,6 +54,10 @@ def evaluate_completeness(case: CaseRecord) -> dict:
     required = set(case.required_docs)
     present = set(case.present_docs)
     missing_docs: list[str] = sorted(required - present)   # sorted for stable output
+    
+    # Document blockers: remand order and charge sheet are mandatory blockers for Section 479 petitions
+    mandatory_blockers = {"remand_order", "charge_sheet", "trial_court_judgment"}
+    blocking_docs = [d for d in missing_docs if d in mandatory_blockers]
 
     # ── 2. Early return if nothing is missing ────────────────────────────────
     if not missing_docs:
@@ -61,40 +65,25 @@ def evaluate_completeness(case: CaseRecord) -> dict:
             "case_id": case.case_id,
             "is_complete": True,
             "missing_docs": [],
-            "message": "All required documents are present.",
+            "blocking_docs": [],
+            "blocks_petition_filing": False,
+            "message": "All required documents are present in the digital case dossier.",
         }
 
     # ── 3. LLM phrases the alert (only reaches here when docs ARE missing) ───
-    missing_docs_list = ", ".join(missing_docs)
-
-    prompt = (
-        f"Draft a polite, one-sentence automated alert to the prison records office "
-        f"requesting the following missing documents for case {case.case_id}: "
-        f"{missing_docs_list}. "
-        f"Do not include pleasantries or email signatures, just the requested sentence."
+    missing_docs_list = ", ".join(d.replace("_", " ").title() for d in missing_docs)
+    message = (
+        f"Missing {missing_docs_list}. Please upload these records or coordinate "
+        f"with the relevant police station/records clerk to proceed."
     )
-    system = "You are an automated legal-aid system assistant."
-
-    try:
-        message = generate(prompt=prompt, system=system)
-    except RuntimeError as exc:
-        # All LLM providers failed degrade gracefully with a plain-text alert
-        # so the structured data (missing_docs) is still usable downstream.
-        message = (
-            f"ALERT: The following documents are missing for case "
-            f"{case.case_id} and must be submitted to proceed with the "
-            f"bail application: {missing_docs_list}."
-        )
-        import logging
-        logging.getLogger(__name__).error(
-            "completeness_agent: LLM unavailable, using fallback message. Error: %s", exc
-        )
 
     # ── 4. Return full result dict ───────────────────────────────────────────
     return {
         "case_id": case.case_id,
         "is_complete": False,
         "missing_docs": missing_docs,
+        "blocking_docs": blocking_docs,
+        "blocks_petition_filing": len(blocking_docs) > 0,
         "message": message,
     }
 

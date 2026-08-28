@@ -1,19 +1,33 @@
-import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, FileText, CheckCircle2, AlertTriangle, AlertCircle, Scale, Calculator, Link as LinkIcon, Download, PenTool, Check, X, Activity, Loader2, RefreshCw } from "lucide-react";
+import { useParams, useNavigate } from "react-router-dom";
+import {
+  ArrowLeft,
+  FileText,
+  CheckCircle2,
+  AlertTriangle,
+  AlertCircle,
+  Calculator,
+  Shield,
+  Clock,
+  User,
+  FileCheck,
+  Send,
+  Upload,
+  Download,
+  RefreshCw,
+  Loader2,
+  Bookmark,
+} from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
-import { fetchCaseById, approveCaseInBackend, uploadDocumentFile } from "@/lib/api";
+import {
+  fetchCaseById,
+  approveCaseInBackend,
+  fileCaseInCourt,
+  uploadDocumentFile,
+  verifyEvidence,
+  type TimelineEvent,
+  type LegalNeedItem,
+} from "@/lib/api";
 import { jsPDF } from "jspdf";
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function statusColor(status: string) {
-  if (status.includes("FILED") || status.includes("RELEASED") || status.includes("ORDER_PASSED")) return "text-foreground";
-  if (status.includes("APPROVED") || status.includes("DRAFT_READY") || status.includes("ELIGIBLE")) return "text-accent";
-  if (status.includes("MISSING") || status.includes("MANUAL_REVIEW")) return "text-muted-foreground";
-  return "text-muted-foreground";
-}
-
-// ── Component ─────────────────────────────────────────────────────────────────
 
 export function CaseIntelligence() {
   const { id } = useParams<{ id: string }>();
@@ -23,10 +37,12 @@ export function CaseIntelligence() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
-  const [approvalDone, setApprovalDone] = useState(false);
+  const [filing, setFiling] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
   const [editableDraft, setEditableDraft] = useState<string>("");
-  const [rejectStatus, setRejectStatus] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"dossier" | "draft" | "timeline" | "evidence" | "statutes">("dossier");
+  const [verifyingEvidenceId, setVerifyingEvidenceId] = useState<string | null>(null);
+  const [evidenceVerificationResult, setEvidenceVerificationResult] = useState<any>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [pendingDocType, setPendingDocType] = useState<string | null>(null);
@@ -39,27 +55,44 @@ export function CaseIntelligence() {
       const data = await fetchCaseById(id);
       if (!data) throw new Error("Not found");
       setCaseData(data);
-      if (data.draft_ready && data.draft?.drafted_document) {
+      if (data.draft?.drafted_document) {
         setEditableDraft((data.draft.drafted_document as string).replaceAll("**", ""));
       }
     } catch {
-      setError(`Could not load case ${id}. Is the backend running at localhost:8000?`);
+      setError(`Could not load case ${id}. Ensure the backend is online at localhost:8000.`);
     } finally {
       setLoading(false);
     }
   }, [id]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const handleApprove = async () => {
     if (!id) return;
     setApproving(true);
     try {
       await approveCaseInBackend(id);
-      setApprovalDone(true);
-      await load(); // Refresh data to reflect new FILED status
+      await load();
+      setActiveTab("draft");
+    } catch (err: any) {
+      alert("Approval error: " + err.message);
     } finally {
       setApproving(false);
+    }
+  };
+
+  const handleFileInCourt = async () => {
+    if (!id) return;
+    setFiling(true);
+    try {
+      await fileCaseInCourt(id);
+      await load();
+    } catch (err: any) {
+      alert("Filing error: " + err.message);
+    } finally {
+      setFiling(false);
     }
   };
 
@@ -72,13 +105,13 @@ export function CaseIntelligence() {
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !pendingDocType || !id) return;
-    
+
     setUploadingDoc(pendingDocType);
     try {
       await uploadDocumentFile(id, pendingDocType, file);
-      await load(); // Re-run orchestrator to get updated completeness
+      await load();
     } catch (err: any) {
-      alert("Failed to upload document: " + err.message);
+      alert("Upload failed: " + err.message);
     } finally {
       setUploadingDoc(null);
       setPendingDocType(null);
@@ -86,32 +119,44 @@ export function CaseIntelligence() {
     }
   };
 
-  const generatePDF = () => {
+  const handleVerifyEvidence = async (eviId: string) => {
+    setVerifyingEvidenceId(eviId);
+    try {
+      const res = await verifyEvidence(eviId);
+      setEvidenceVerificationResult(res);
+    } catch (err: any) {
+      alert("Evidence verification error: " + err.message);
+    } finally {
+      setVerifyingEvidenceId(null);
+    }
+  };
+
+  const generateBailDraftPDF = () => {
     if (!c.case_id) return;
     const doc = new jsPDF();
     doc.setFont("helvetica", "bold");
-    doc.text(`REQUEST FOR MISSING DOCUMENTS`, 20, 20);
+    doc.setFontSize(14);
+    doc.text("IN THE COURT OF THE PRINCIPAL DISTRICT & SESSIONS JUDGE", 20, 20);
+    doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
-    doc.text(`Case ID: ${c.case_id}`, 20, 30);
-    doc.text(`Date: ${new Date().toLocaleDateString()}`, 20, 40);
-    doc.text(`The following documents are missing and required to proceed:`, 20, 50);
-    
-    let y = 60;
-    (caseData?.completeness?.missing_docs || []).forEach((docName: string, index: number) => {
-      doc.text(`${index + 1}. ${docName.replace(/_/g, " ")}`, 25, y);
-      y += 10;
-    });
-    
-    doc.text("Please submit these documents to the system immediately.", 20, y + 10);
-    doc.save(`Missing_Docs_Request_${c.case_id}.pdf`);
+    doc.text(`BAIL APPLICATION UNDER SECTION 479 BNSS — CASE: ${c.case_id}`, 20, 28);
+    doc.text(`ACCUSED: ${c.name}`, 20, 34);
+    doc.text(`DATE: ${new Date().toLocaleDateString()}`, 20, 40);
+
+    doc.line(20, 44, 190, 44);
+
+    const splitText = doc.splitTextToSize(editableDraft || "Draft text not available.", 170);
+    doc.text(splitText, 20, 52);
+    doc.save(`Bail_Petition_${c.case_id}.pdf`);
   };
 
-  // ── Loading / Error states ────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="p-8 flex flex-col items-center justify-center min-h-[60vh] gap-4">
-        <Loader2 className="w-8 h-8 text-accent animate-spin" />
-        <p className="text-muted-foreground">Running 8-agent pipeline for Case #{id}…</p>
+      <div className="p-12 flex flex-col items-center justify-center min-h-[60vh] gap-4">
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+        <p className="text-muted-foreground font-mono text-sm">
+          Compiling Accused Dossier & Evaluating Statutory Rule Engine for #{id}…
+        </p>
       </div>
     );
   }
@@ -121,485 +166,590 @@ export function CaseIntelligence() {
       <div className="p-8 max-w-xl mx-auto flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center">
         <AlertCircle className="w-12 h-12 text-destructive" />
         <div>
-          <h2 className="text-xl font-semibold text-primary mb-2">Backend Connection Lost</h2>
-          <p className="text-muted-foreground text-sm">{error || "Live case data unavailable."}</p>
+          <h2 className="text-xl font-bold text-foreground mb-2">Dossier Unavailable</h2>
+          <p className="text-muted-foreground text-sm">{error || "Case record could not be loaded."}</p>
         </div>
-        <div className="flex gap-3">
-          <button onClick={load} className="px-4 py-2 bg-accent text-accent-foreground rounded-sm text-sm font-medium flex items-center gap-2">
-            <RefreshCw className="w-4 h-4" /> Retry Connection
-          </button>
-          <button onClick={() => navigate(-1)} className="px-4 py-2 bg-secondary/50 text-primary rounded-sm text-sm font-medium">
-            Go Back
-          </button>
-        </div>
+        <button onClick={load} className="px-4 py-2 bg-primary text-primary-foreground rounded-sm text-sm font-semibold flex items-center gap-2">
+          <RefreshCw className="w-4 h-4" /> Retry
+        </button>
       </div>
     );
   }
 
-  // ── Destructure orchestrator response ─────────────────────────────────────
   const c = caseData.case || {};
   const eligibility = caseData.eligibility || {};
   const completeness = caseData.completeness || {};
   const retrieval = caseData.retrieval || {};
-  // const draft = caseData.draft || {};
   const explanation = caseData.explanation || {};
-  const statusTracking = caseData.status_tracking || {};
-  const agentLog = caseData.agent_activity_log || [];
-  const draftReady = caseData.draft_ready || false;
-  const llmProvider: string = caseData.llm_provider || "";
+  const legalNeeds: LegalNeedItem[] = c.legal_needs || [];
+  const timeline: TimelineEvent[] = c.timeline || [];
 
-  const missingDocs: string[] = completeness.missing_docs || [];
-  const legalSources: any[] = retrieval.sources || [];
-  const currentStatus: string = c.status || statusTracking.current_status || "DETECTED";
-  const isManualReview = eligibility.legal_basis?.includes("MANUAL_REVIEW");
-
-  // Build evidence chain from eligibility data
-  const evidenceChain = [
-    { id: 1, type: "FACT", title: "Arrest & Custody Record", description: `Arrested: ${c.arrest_date} | In custody: ${eligibility.custody_days_served ?? c.custody_days} days` },
-    { id: 2, type: "LEGAL_SOURCE", title: "Section 479 BNSS", description: `Threshold: ${(eligibility.threshold_fraction * 100).toFixed(0)}% of max sentence (${eligibility.required_custody_days} days required)` },
-    { id: 3, type: "CALCULATION", title: "Threshold Calculation", description: `ceil(${c.max_sentence_days_for_offense} × ${eligibility.threshold_fraction?.toFixed(4)}) = ${eligibility.required_custody_days} days` },
-    {
-      id: 4, type: eligibility.eligible ? "AI_INTERPRETATION" : "FACT",
-      title: eligibility.eligible ? "ELIGIBLE — Threshold Exceeded" : "NOT YET ELIGIBLE",
-      description: eligibility.eligible
-        ? `${eligibility.days_overdue} days overdue — bail application recommended`
-        : `${eligibility.required_custody_days - (eligibility.custody_days_served ?? 0)} more days needed`
-    },
-  ];
+  const isReadyForFiling = c.status === "APPROVED_READY_FOR_FILING";
+  const isFiled = c.status === "FILED";
+  const approvalDone = isReadyForFiling || isFiled;
 
   return (
-    <div className="p-4 md:p-8 w-full space-y-12 animate-in fade-in duration-300">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
+      <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".pdf,image/*" />
 
-      {/* Header */}
-      <div className="space-y-6">
-        <Link to="/cases" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-          <ArrowLeft className="w-4 h-4" /> Back to Cases Directory
-        </Link>
-
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-          <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <h1 className="text-4xl font-semibold tracking-tight text-primary">CASE #{c.case_id}</h1>
-              {isManualReview ? (
-                <span className="px-3 py-1 rounded-sm text-xs font-semibold border uppercase tracking-wider bg-muted text-muted-foreground border-border">MANUAL REVIEW</span>
-              ) : eligibility.eligible ? (
-                <span className="px-3 py-1 rounded-sm text-xs font-semibold border uppercase tracking-wider bg-muted text-foreground border-border">ELIGIBLE</span>
-              ) : (
-                <span className="px-3 py-1 rounded-sm text-xs font-semibold border uppercase tracking-wider bg-secondary/50 text-muted-foreground border-border">IN PROGRESS</span>
-              )}
+      {/* Top Breadcrumb & Actions */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate("/cases")}
+            className="p-2 border border-border rounded-sm hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono text-muted-foreground uppercase">{c.case_id}</span>
+              <span className="text-xs px-2 py-0.5 rounded font-bold font-mono bg-primary/15 text-primary">
+                {c.prisoner_category}
+              </span>
+              <span className="text-xs px-2 py-0.5 rounded font-bold font-mono bg-secondary border border-border text-foreground">
+                {c.legal_code}
+              </span>
+              <span className="text-[11px] px-2 py-0.5 rounded font-mono text-muted-foreground border border-border">
+                {c.data_source_status}
+              </span>
             </div>
-
-            <div className="flex flex-wrap gap-6 text-sm">
-              <div className="space-y-1">
-                <span className="text-muted-foreground uppercase tracking-wider text-xs">Case ID</span>
-                <p className="text-primary font-mono font-medium">{c.case_id}</p>
-              </div>
-              <div className="w-px bg-secondary" />
-              <div className="space-y-1">
-                <span className="text-muted-foreground uppercase tracking-wider text-xs">Custody Duration</span>
-                <p className="text-primary font-medium text-lg">{c.custody_days} days</p>
-              </div>
-              <div className="w-px bg-secondary" />
-              <div className="space-y-1">
-                <span className="text-muted-foreground uppercase tracking-wider text-xs">Offence</span>
-                <p className="text-primary font-medium">{c.offense_sections?.join(", ")}</p>
-              </div>
-              <div className="w-px bg-secondary" />
-              <div className="space-y-1">
-                <span className="text-muted-foreground uppercase tracking-wider text-xs">Age</span>
-                <p className="text-primary font-medium">{c.urgency_flags?.age} yrs {c.urgency_flags?.health_flag ? "🏥" : ""}</p>
-              </div>
-              <div className="w-px bg-secondary" />
-              <div className="space-y-1">
-                <span className="text-muted-foreground uppercase tracking-wider text-xs">Facility</span>
-                <p className="text-primary font-medium">{c.jail_location}</p>
-              </div>
-            </div>
+            <h1 className="text-2xl font-bold font-serif text-foreground">{c.name}</h1>
           </div>
+        </div>
 
-          <div className="bg-card/70 border border-border px-6 py-4 rounded text-right">
-            <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mb-1">Case Status</div>
-            <div className={`text-lg font-semibold ${statusColor(currentStatus)}`}>{currentStatus.replace(/_/g, " ")}</div>
-            {eligibility.eligible && eligibility.days_overdue > 0 && (
-              <div className="text-xs text-destructive mt-1">{eligibility.days_overdue} DAYS OVERDUE</div>
-            )}
-          </div>
+        {/* Workflow Action Gate */}
+        <div className="flex items-center gap-2">
+          {!approvalDone && (
+            <button
+              onClick={handleApprove}
+              disabled={approving || !eligibility.eligible || !completeness.is_complete}
+              className={`px-4 py-2 rounded-sm text-xs font-bold font-serif uppercase tracking-wider flex items-center gap-2 shadow-sm transition-all ${
+                eligibility.eligible && completeness.is_complete
+                  ? "bg-primary text-primary-foreground hover:opacity-90"
+                  : "bg-muted text-muted-foreground cursor-not-allowed border border-border"
+              }`}
+            >
+              {approving ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck className="w-4 h-4" />}
+              Approve & Mark Ready for Filing
+            </button>
+          )}
+
+          {isReadyForFiling && (
+            <button
+              onClick={handleFileInCourt}
+              disabled={filing}
+              className="px-4 py-2 rounded-sm text-xs font-bold font-serif uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2 shadow-sm"
+            >
+              {filing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              Record Filing in Court Registry
+            </button>
+          )}
+
+          {isFiled && (
+            <span className="px-3 py-1.5 rounded-sm bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold font-mono flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4" /> FILED IN COURT
+            </span>
+          )}
+
+          <button
+            onClick={generateBailDraftPDF}
+            className="px-3 py-2 border border-border rounded-sm hover:bg-secondary text-xs font-medium flex items-center gap-1.5"
+            title="Download PDF petition"
+          >
+            <Download className="w-4 h-4" /> PDF
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      {/* Identified Legal Needs Alerts */}
+      {legalNeeds.length > 0 && (
+        <div className="space-y-2">
+          {legalNeeds.map((need, idx) => (
+            <div
+              key={idx}
+              className={`p-3 rounded-sm border flex items-start justify-between gap-3 text-xs ${
+                need.urgency === "URGENT"
+                  ? "bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300"
+                  : need.blocking_bail_workflow
+                  ? "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300"
+                  : "bg-blue-500/10 border-blue-500/30 text-blue-700 dark:text-blue-300"
+              }`}
+            >
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold uppercase font-mono tracking-wider">
+                    {need.title}
+                  </span>
+                  <p className="mt-0.5 text-foreground/80">{need.description}</p>
+                </div>
+              </div>
+              <span className="font-mono text-[10px] uppercase px-2 py-0.5 rounded border border-current font-bold shrink-0">
+                {need.urgency}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
-        {/* Left Column */}
-        <div className="lg:col-span-2 space-y-8">
+      {/* Navigation Tabs */}
+      <div className="flex border-b border-border gap-2 text-sm font-serif">
+        {[
+          { key: "dossier", label: "Accused Dossier" },
+          { key: "draft", label: "Bail Petition Draft" },
+          { key: "timeline", label: "Case Timeline & Provenance" },
+          { key: "evidence", label: "Document Vault & SHA-256" },
+          { key: "statutes", label: "Grounded Statutory Law" },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key as any)}
+            className={`px-4 py-2 border-b-2 font-semibold transition-all ${
+              activeTab === tab.key
+                ? "border-primary text-foreground font-bold"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-          {/* Why Flagged */}
-          <section className="p-8 rounded border border-border bg-card shadow-sm space-y-6 relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-8 opacity-5"><AlertCircle className="w-48 h-48" /></div>
-            <div className="relative z-10">
-              <h2 className="text-xl font-medium tracking-tight text-primary mb-6 uppercase">Why this case requires attention</h2>
-              <div className="space-y-4">
-                <div className="flex items-start gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-foreground shrink-0 mt-0.5" />
-                  <span className="text-primary leading-relaxed">
-                    Served <strong>{eligibility.custody_days_served}</strong> days against a maximum sentence of <strong>{c.max_sentence_days_for_offense}</strong> days ({c.offense_sections?.join(", ")}).
+      {/* TAB 1: ACCUSED DOSSIER & DETERMINISTIC ENGINE */}
+      {activeTab === "dossier" && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column: Accused Particulars & Case Metadata */}
+          <div className="space-y-6 lg:col-span-1">
+            <div className="p-5 border border-border bg-card rounded-sm space-y-4">
+              <h3 className="text-sm font-bold font-serif uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                <User className="w-4 h-4 text-primary" /> Case & Custody Identifiers
+              </h3>
+
+              <div className="space-y-2.5 text-xs">
+                <div className="flex justify-between border-b border-border/50 pb-1.5">
+                  <span className="text-muted-foreground">CNR Number:</span>
+                  <span className="font-mono font-bold text-foreground">{c.cnr_number || "Pending eCourts Generation"}</span>
+                </div>
+                <div className="flex justify-between border-b border-border/50 pb-1.5">
+                  <span className="text-muted-foreground">FIR Reference:</span>
+                  <span className="font-mono text-foreground">{c.fir_number}</span>
+                </div>
+                <div className="flex justify-between border-b border-border/50 pb-1.5">
+                  <span className="text-muted-foreground">Police Station:</span>
+                  <span className="text-foreground">{c.police_station}</span>
+                </div>
+                <div className="flex justify-between border-b border-border/50 pb-1.5">
+                  <span className="text-muted-foreground">Court Jurisdiction:</span>
+                  <span className="text-foreground text-right">{c.court_name}</span>
+                </div>
+                <div className="flex justify-between border-b border-border/50 pb-1.5">
+                  <span className="text-muted-foreground">DLSA File No:</span>
+                  <span className="font-mono text-foreground">{c.dlsa_reference_number}</span>
+                </div>
+                <div className="flex justify-between border-b border-border/50 pb-1.5">
+                  <span className="text-muted-foreground">Facility / Jail:</span>
+                  <span className="text-foreground text-right">{c.jail_location}</span>
+                </div>
+                <div className="flex justify-between border-b border-border/50 pb-1.5">
+                  <span className="text-muted-foreground">Offence Charged:</span>
+                  <span className="font-bold text-foreground">{c.offense_sections?.join(", ")}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Arrest Date:</span>
+                  <span className="font-mono text-foreground">{c.arrest_date}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Contextual Urgency & Health Trigger */}
+            <div className="p-5 border border-border bg-card rounded-sm space-y-3">
+              <h3 className="text-sm font-bold font-serif uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                <Clock className="w-4 h-4 text-primary" /> Contextual Urgency & Health
+              </h3>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Age:</span>
+                  <span className="font-bold text-foreground">{c.urgency_flags?.age} years</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Health Condition Flag:</span>
+                  <span className={`font-bold ${c.urgency_flags?.health_flag ? "text-red-500" : "text-emerald-500"}`}>
+                    {c.urgency_flags?.health_flag ? "Documented Medical Condition" : "No Medical Alert"}
                   </span>
                 </div>
-                <div className="flex items-start gap-3">
-                  <Scale className="w-5 h-5 text-muted-foreground shrink-0 mt-0.5" />
-                  <span className="text-primary leading-relaxed">{eligibility.legal_basis}</span>
-                </div>
-                {eligibility.eligible && (
-                  <div className="flex items-start gap-3">
-                    <CheckCircle2 className="w-5 h-5 text-foreground shrink-0 mt-0.5" />
-                    <span className="text-primary leading-relaxed">
-                      Required threshold: <strong>{eligibility.required_custody_days}</strong> days (using <code className="text-accent text-xs">math.ceil</code> for legal safety).
-                      Overdue by <strong className="text-destructive">{eligibility.days_overdue}</strong> days.
+                {c.urgency_flags?.health_details && (
+                  <p className="p-2.5 rounded bg-muted/40 text-[11px] text-foreground/80 border border-border/60">
+                    <strong>Medical Note:</strong> {c.urgency_flags.health_details}
+                    <br />
+                    <span className="text-[10px] text-muted-foreground italic">
+                      (Contextual information for advocate review; does not constitute autonomous medical bail)
+                    </span>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Authorised Family Portal Info */}
+            <div className="p-5 border border-border bg-card rounded-sm space-y-2.5">
+              <h3 className="text-sm font-bold font-serif uppercase tracking-wider text-muted-foreground">
+                Authorised Family Contact
+              </h3>
+              <div className="space-y-1.5 text-xs">
+                <p><strong className="text-muted-foreground">Contact:</strong> {c.relative_name} ({c.relative_relation})</p>
+                <p><strong className="text-muted-foreground">Phone:</strong> <span className="font-mono">{c.relative_phone}</span></p>
+                <p><strong className="text-muted-foreground">Address:</strong> {c.permanent_address}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Versioned Section 479 BNSS Rule Engine & Multilingual Summary */}
+          <div className="space-y-6 lg:col-span-2">
+            {/* Versioned Rule Engine Card */}
+            <div className="p-6 border border-border bg-card rounded-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-border pb-3">
+                <div className="flex items-center gap-2">
+                  <Calculator className="w-5 h-5 text-primary" />
+                  <div>
+                    <h3 className="font-bold font-serif text-base text-foreground">
+                      Section 479 BNSS Versioned Rule Engine
+                    </h3>
+                    <span className="text-[11px] font-mono text-muted-foreground">
+                      Engine: {eligibility.rule_version || "BNSS_479_RULESET_V1_2023"}
                     </span>
                   </div>
-                )}
-                {isManualReview && (
-                  <div className="mt-4 p-4 bg-muted border border-border rounded-sm text-muted-foreground text-sm">
-                    ⚠️ This case requires manual legal review before any bail action can be taken.
-                  </div>
-                )}
+                </div>
+                <span
+                  className={`px-3 py-1 text-xs font-mono font-bold uppercase rounded ${
+                    eligibility.eligible
+                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                      : "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                  }`}
+                >
+                  {eligibility.eligible ? "THRESHOLD SATISFIED" : "REVIEW REQUIRED"}
+                </span>
               </div>
 
-              {missingDocs.length > 0 && (
-                <div className="mt-6 pt-6 border-t border-border space-y-3">
-                  {missingDocs.map((doc: string) => (
-                    <div key={doc} className="flex items-start gap-3 text-muted-foreground">
-                      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-                      <span className="leading-relaxed">Missing: <strong>{doc.replace(/_/g, " ")}</strong></span>
-                    </div>
-                  ))}
+              {/* Traceable Calculations Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                <div className="p-3 rounded bg-secondary/50 border border-border">
+                  <span className="text-[10px] font-mono text-muted-foreground uppercase block">Total Elapsed</span>
+                  <span className="text-lg font-bold font-mono text-foreground">
+                    {eligibility.total_elapsed_calendar_days || c.custody_days}d
+                  </span>
                 </div>
-              )}
+                <div className="p-3 rounded bg-secondary/50 border border-border">
+                  <span className="text-[10px] font-mono text-muted-foreground uppercase block">Excluded Delay</span>
+                  <span className="text-lg font-bold font-mono text-amber-500">
+                    {eligibility.excluded_delay_days || c.excluded_delay_days || 0}d
+                  </span>
+                </div>
+                <div className="p-3 rounded bg-secondary/50 border border-border">
+                  <span className="text-[10px] font-mono text-muted-foreground uppercase block">Countable Custody</span>
+                  <span className="text-lg font-bold font-mono text-foreground">
+                    {eligibility.countable_custody_days || c.custody_days}d
+                  </span>
+                </div>
+                <div className="p-3 rounded bg-secondary/50 border border-border">
+                  <span className="text-[10px] font-mono text-muted-foreground uppercase block">Required Threshold</span>
+                  <span className="text-lg font-bold font-mono text-foreground">
+                    {eligibility.required_custody_days || "—"}d
+                  </span>
+                </div>
+              </div>
 
-              <div className="mt-8 flex gap-4 text-xs font-medium uppercase tracking-widest text-muted-foreground">
-                <div className="flex items-center gap-1"><FileText className="w-4 h-4 text-foreground" /> FACT</div>
-                <div className="flex items-center gap-1"><Calculator className="w-4 h-4 text-muted-foreground" /> CALCULATION</div>
-                <div className="flex items-center gap-1"><Scale className="w-4 h-4 text-muted-foreground" /> LEGAL SOURCE</div>
-                <div className="flex items-center gap-1"><Activity className="w-4 h-4 text-accent" /> AI INTERPRETATION</div>
+              {/* Status Framing Alert */}
+              <div className="p-3.5 rounded bg-primary/5 border border-primary/20 text-xs text-foreground/90 space-y-1">
+                <p className="font-semibold">{eligibility.statutory_signal || eligibility.legal_basis}</p>
+                <p className="text-[11px] text-muted-foreground">
+                  <strong>Statutory Framing:</strong> The engine evaluates whether documented facts appear to satisfy Section 479 conditions. The result is an eligibility signal for human legal review, not an automatic release entitlement.
+                </p>
+              </div>
+
+              {/* Exceptions Checklist */}
+              <div className="border-t border-border pt-3">
+                <h4 className="text-xs font-mono font-bold text-muted-foreground uppercase mb-2">
+                  Statutory Exceptions & Provisos Evaluated
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className={`w-3.5 h-3.5 ${c.punishable_by_death_or_life ? "text-red-500" : "text-emerald-500"}`} />
+                    <span>Capital / Life Imprisonment Exclusion: <strong>{c.punishable_by_death_or_life ? "Excluded" : "Cleared"}</strong></span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className={`w-3.5 h-3.5 ${c.multiple_active_cases ? "text-amber-500" : "text-emerald-500"}`} />
+                    <span>Multiple Pending Cases Proviso: <strong>{c.multiple_active_cases ? "Review Required" : "Single Case"}</strong></span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Offender Category: <strong>{c.urgency_flags?.repeat_offender ? "General (1/2 Threshold)" : "First-Time (1/3 Proviso)"}</strong></span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Delay Attribution: <strong>{c.excluded_delay_days > 0 ? `${c.excluded_delay_days}d Excluded` : "Zero Excluded Delay"}</strong></span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Legal Validation Disclaimer */}
+              <p className="text-[10px] font-mono text-muted-foreground border-t border-border pt-2 italic">
+                * Legal Validation Requirement: The complete Section 479 rule interpretation must be validated against the authoritative statutory text and reviewed by qualified legal counsel before production deployment.
+              </p>
+            </div>
+
+            {/* Document Completeness Checklist */}
+            <div className="p-6 border border-border bg-card rounded-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-border pb-2">
+                <h3 className="font-bold font-serif text-sm uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-primary" /> Required Case Records & Blockers
+                </h3>
+                <span className={`text-xs font-mono font-bold ${completeness.is_complete ? "text-emerald-500" : "text-amber-500"}`}>
+                  {completeness.is_complete ? "All Documents Present" : "Missing Records Required"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                {c.required_docs?.map((docType: string) => {
+                  const isPresent = c.present_docs?.includes(docType);
+                  return (
+                    <div
+                      key={docType}
+                      className={`p-3 rounded border flex items-center justify-between gap-2 ${
+                        isPresent ? "bg-emerald-500/5 border-emerald-500/30" : "bg-amber-500/5 border-amber-500/30"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {isPresent ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                        )}
+                        <span className="font-medium text-foreground">{docType.replace(/_/g, " ").toUpperCase()}</span>
+                      </div>
+
+                      {!isPresent && (
+                        <button
+                          onClick={() => handleUploadDoc(docType)}
+                          disabled={uploadingDoc === docType}
+                          className="px-2 py-1 bg-primary text-primary-foreground rounded text-[10px] font-bold uppercase hover:opacity-90 flex items-center gap-1"
+                        >
+                          {uploadingDoc === docType ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                          Upload
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
-          </section>
 
-          {/* Evidence Chain */}
-          <section className="space-y-4">
-            <h2 className="text-xl font-medium tracking-tight uppercase text-primary flex items-center gap-2">
-              <LinkIcon className="w-5 h-5 text-accent" /> Evidence Chain
-            </h2>
-            <div className="p-6 rounded border border-border bg-card shadow-sm space-y-6 relative">
-              <div className="absolute left-8 top-10 bottom-10 w-px bg-secondary" />
-              {evidenceChain.map((node) => (
-                <div key={node.id} className="relative z-10 pl-10">
-                  <div className={`absolute left-0 top-1.5 w-4 h-4 rounded-sm border-2 ${
-                    node.type === "FACT" ? "border-emerald-500 bg-background" :
-                    node.type === "CALCULATION" ? "border-blue-500 bg-background" :
-                    node.type === "LEGAL_SOURCE" ? "border-amber-500 bg-background" :
-                    "border-accent bg-accent"
-                  }`} />
-                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">{node.type}</div>
-                  <div className="text-primary font-medium">{node.title}</div>
-                  <div className="text-sm text-muted-foreground mt-1">{node.description}</div>
-                </div>
-              ))}
+            {/* Multilingual Plain Language Summary for Accused & Family */}
+            <div className="p-6 border border-border bg-card rounded-sm space-y-3">
+              <div className="flex items-center justify-between border-b border-border pb-2">
+                <h3 className="font-bold font-serif text-sm uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <Bookmark className="w-4 h-4 text-primary" /> Plain-Language Legal Summary ({c.preferred_language?.toUpperCase()})
+                </h3>
+                <span className="text-[10px] font-mono text-muted-foreground">For Accused & Family Portal</span>
+              </div>
+              <p className="text-sm text-foreground/90 leading-relaxed font-sans">
+                {explanation.summary ||
+                  "The accused person has completed the required period in custody under Section 479 of the Bharatiya Nagarik Suraksha Sanhita, 2023. A panel legal-aid advocate is reviewing the petition for formal submission to court."}
+              </p>
             </div>
-          </section>
+          </div>
+        </div>
+      )}
 
-          {/* Legal Sources (RAG) */}
-          {legalSources.length > 0 && (
-            <section className="space-y-4">
-              <h2 className="text-xl font-medium tracking-tight uppercase text-primary flex items-center gap-2">
-                <Scale className="w-5 h-5 text-accent" /> Legal Evidence
-                <span className="text-xs font-normal text-muted-foreground ml-2 normal-case">Grounded Legal Retrieval — keyword/indexed</span>
-              </h2>
-              {legalSources.map((source: any, idx: number) => (
-                <div key={idx} className="p-6 rounded border border-border bg-card shadow-sm space-y-4">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <div className="text-lg font-medium text-primary mb-1">{source.section || source.title}</div>
-                      <div className="text-xs text-muted-foreground uppercase tracking-wider">{source.source || "BNSS 2023"}</div>
-                    </div>
-                    <div className="bg-muted text-foreground border border-border px-3 py-1 rounded-sm text-xs font-semibold">
-                      {source.relevance_score ? `${(source.relevance_score * 100).toFixed(0)}% RELEVANCE` : "HIGH RELEVANCE"}
-                    </div>
-                  </div>
-                  <div className="p-4 bg-muted rounded-sm border border-border text-sm text-muted-foreground font-serif leading-relaxed italic">
-                    "{source.passage || source.content}"
-                  </div>
-                  {source.reasoning && (
-                    <div>
-                      <div className="text-xs font-medium text-accent uppercase tracking-wider mb-2">Why this source matters</div>
-                      <p className="text-sm text-primary">{source.reasoning}</p>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </section>
-          )}
+      {/* TAB 2: BAIL PETITION DRAFT & ADVOCATE REVIEW GATEWAY */}
+      {activeTab === "draft" && (
+        <div className="space-y-6">
+          <div className="p-6 border border-border bg-card rounded-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div>
+                <h3 className="font-bold font-serif text-lg text-foreground">
+                  Formal Bail Application Draft
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Under Section 479 of the Bharatiya Nagarik Suraksha Sanhita, 2023
+                </p>
+              </div>
 
-          {/* Draft */}
-          {draftReady && editableDraft && (
-            <section className="space-y-4">
-              <h2 className="text-xl font-medium tracking-tight uppercase text-primary flex items-center gap-2">
-                <FileText className="w-5 h-5 text-accent" /> Auto-Generated Bail Application Draft
-              </h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={generateBailDraftPDF}
+                  className="px-3 py-1.5 border border-border rounded-sm hover:bg-secondary text-xs font-semibold flex items-center gap-1.5"
+                >
+                  <Download className="w-4 h-4" /> Download PDF
+                </button>
+              </div>
+            </div>
+
+            {/* In-Line Draft Editor */}
+            <div className="space-y-2">
+              <label className="text-xs font-mono font-bold uppercase text-muted-foreground">
+                Editable Petition Text (Reviewed by Defence Counsel):
+              </label>
               <textarea
                 value={editableDraft}
                 onChange={(e) => setEditableDraft(e.target.value)}
-                readOnly={approvalDone || currentStatus === "FILED"}
-                className={`w-full h-[400px] p-6 rounded border font-serif text-sm leading-relaxed whitespace-pre-wrap resize-y focus:outline-none ${
-                  approvalDone || currentStatus === "FILED"
-                    ? "bg-muted text-muted-foreground border-border cursor-not-allowed opacity-80"
-                    : "border-accent/20 bg-accent/5 text-primary focus:ring-1 focus:ring-accent"
-                }`}
+                rows={16}
+                className="w-full p-4 font-mono text-xs bg-background border border-border rounded-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed resize-y"
               />
-            </section>
-          )}
+            </div>
 
-          {/* Plain-language explanation */}
-          {explanation.explanation && (
-            <section className="space-y-4">
-              <h2 className="text-xl font-medium tracking-tight uppercase text-primary flex items-center gap-2">
-                <Activity className="w-5 h-5 text-accent" /> Family Explanation
-                <span className="text-xs font-normal text-muted-foreground normal-case ml-2">Language: {c.preferred_language}</span>
-              </h2>
-              <div className="space-y-4">
-                <div className="p-6 rounded border border-border bg-card shadow-sm text-foreground leading-relaxed">
-                  {explanation.explanation as string}
-                </div>
-                
-                {explanation.english_translation && explanation.english_translation !== explanation.explanation && (
-                  <div className="p-5 rounded border border-border bg-muted text-muted-foreground leading-relaxed relative">
-                    <div className="absolute -top-2.5 left-4 px-2 py-0.5 bg-background border border-border rounded text-[10px] uppercase tracking-widest text-accent font-medium">
-                      English Translation
-                    </div>
-                    <div className="pt-2 text-sm">
-                      {explanation.english_translation as string}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
-
-          {/* Agent Activity Log */}
-          {agentLog.length > 0 && (
-            <section className="space-y-4">
-              <h2 className="text-xl font-medium tracking-tight uppercase text-primary flex items-center gap-2">
-                <Activity className="w-5 h-5 text-accent" /> Agent Execution Trace
-                <span className="text-xs font-normal text-muted-foreground normal-case ml-2">Logged pipeline execution</span>
-              </h2>
-
-              {/* LLM Provider Badge — visible fault tolerance demo */}
-              {llmProvider && (
-                <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-sm border text-xs font-semibold ${
-                  llmProvider.includes("Groq") ? "bg-muted border-emerald-500/30 text-foreground" :
-                  llmProvider.includes("Ollama") ? "bg-muted border-border text-muted-foreground" :
-                  "bg-secondary/50 border-border text-muted-foreground"
-                }`}>
-                  <span className={`w-1.5 h-1.5 rounded-sm ${
-                    llmProvider.includes("Groq") ? "bg-emerald-400" :
-                    llmProvider.includes("Ollama") ? "bg-amber-400" : "bg-white/30"
-                  }`} />
-                  LLM PROVIDER: {llmProvider}
-                </div>
-              )}
-
-              <div className="p-6 rounded border border-border bg-card shadow-sm space-y-3">
-                {agentLog.map((entry: any, idx: number) => (
-                  <div key={idx} className="flex items-center gap-4 text-sm">
-                    <span className={`w-16 text-xs font-bold uppercase text-right shrink-0 ${
-                      entry.status === "DONE" ? "text-foreground" :
-                      entry.status === "SKIPPED" ? "text-muted-foreground" :
-                      entry.status === "RUNNING" ? "text-accent" : "text-muted-foreground"
-                    }`}>{entry.status}</span>
-                    <span className="font-mono text-muted-foreground w-36 shrink-0">{entry.agent}</span>
-                    <span className="text-muted-foreground">{entry.detail}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+            {/* Human Review Boundary Alert */}
+            <div className="p-3.5 rounded bg-muted/40 border border-border text-xs text-foreground/80 space-y-1 font-mono">
+              <p className="font-bold text-foreground">
+                MANDATORY HUMAN ADVOCATE REVIEW GATEWAY
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                AI prepares the draft petition grounded in retrieved statutory text. The licensed panel advocate reviews, edits, and signs off before the petition is marked ready for procedural filing. The system never executes autonomous court filings.
+              </p>
+            </div>
+          </div>
         </div>
+      )}
 
-        {/* Right Column */}
-        <div className="space-y-8">
+      {/* TAB 3: CHRONOLOGICAL CASE TIMELINE & PROVENANCE */}
+      {activeTab === "timeline" && (
+        <div className="p-6 border border-border bg-card rounded-sm space-y-6">
+          <div>
+            <h3 className="font-bold font-serif text-lg text-foreground">
+              Append-Oriented Digital Legal Journey
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Traceable chronological audit trail preserving case progression and field-level provenance.
+            </p>
+          </div>
 
-          {/* Document Readiness */}
-          <section className="p-6 rounded border border-border bg-card shadow-sm space-y-6">
-            <h2 className="text-lg font-medium tracking-tight uppercase text-primary">Document Readiness</h2>
-
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              style={{ display: 'none' }} 
-              accept=".pdf,image/png,image/jpeg,image/jpg" 
-              onChange={handleFileChange} 
-            />
-
-            <div className="space-y-3">
-              {(c.required_docs || []).map((doc: string) => {
-                const isPresent = (c.present_docs || []).includes(doc);
-                return (
-                  <div key={doc} className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      {isPresent ? (
-                        <CheckCircle2 className="w-4 h-4 text-foreground" />
-                      ) : (
-                        <X className="w-4 h-4 text-destructive" />
-                      )}
-                      <span className={`text-sm ${isPresent ? "text-primary" : "text-muted-foreground"}`}>
-                        {doc.replace(/_/g, " ")}
+          <div className="relative pl-6 border-l-2 border-border space-y-6">
+            {timeline.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No historical timeline events recorded yet.</p>
+            ) : (
+              timeline.map((event, idx) => (
+                <div key={event.id || idx} className="relative group">
+                  <div className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-primary border-2 border-card" />
+                  <div className="p-4 border border-border rounded-sm bg-secondary/30 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-xs text-foreground font-serif">{event.title}</span>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {new Date(event.timestamp).toLocaleString()}
                       </span>
                     </div>
-                    {!isPresent && (
-                      <button
-                        onClick={() => handleUploadDoc(doc)}
-                        disabled={uploadingDoc === doc}
-                        className="text-xs text-accent hover:text-accent/80 font-medium flex items-center gap-1"
-                      >
-                        {uploadingDoc === doc ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                        Upload
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {missingDocs.length > 0 && (
-              <div className="mt-4 p-4 bg-accent/5 border border-accent/10 rounded-sm">
-                <div className="text-xs font-medium text-accent uppercase tracking-wider mb-2">Action Required</div>
-                <p className="text-xs text-muted-foreground mb-3">Upload missing documents to trigger the Completeness Agent and unlock the drafting pipeline.</p>
-                <button 
-                  onClick={generatePDF}
-                  className="w-full py-2 bg-secondary/50 hover:bg-secondary text-primary text-xs font-medium rounded transition-colors flex items-center justify-center gap-2"
-                >
-                  <Download className="w-3 h-3" /> Generate Request PDF
-                </button>
-              </div>
-            )}
-          </section>
-
-          {/* Case Timeline (from status tracking + state) */}
-          <section className="p-6 rounded border border-border bg-card shadow-sm space-y-6">
-            <h2 className="text-lg font-medium tracking-tight uppercase text-primary">Case Timeline</h2>
-            <div className="space-y-4 relative">
-              <div className="absolute left-2 top-2 bottom-2 w-px bg-secondary" />
-              {[
-                { title: "Arrested", date: c.arrest_date, done: true },
-                { title: "BNSS 479 Threshold Evaluated", date: "Automated", done: true },
-                { title: "Documents Verified", date: "Completeness Agent", done: missingDocs.length === 0 },
-                { title: "Bail Draft Generated", date: "Drafting Agent", done: draftReady },
-                { title: "Lawyer Review", date: "Human Gate", done: currentStatus === "APPROVED" || currentStatus === "FILED" },
-                { title: "Filed in Court", date: "Status Tracking", done: currentStatus === "FILED" },
-              ].map((event, idx) => (
-                <div key={idx} className="relative z-10 pl-8">
-                  <div className={`absolute left-1 top-1 w-2.5 h-2.5 rounded-sm ${event.done ? "bg-accent" : "bg-muted"}`} />
-                  <div className="text-xs text-muted-foreground mb-0.5">{event.date}</div>
-                  <div className={`text-sm font-medium ${event.done ? "text-primary" : "text-muted-foreground"}`}>{event.title}</div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Human Review Gateway */}
-          <section className="p-6 rounded border border-accent/30 bg-accent/5 space-y-6 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-accent/10 blur-3xl rounded-sm" />
-            <h2 className="text-lg font-semibold tracking-tight uppercase text-primary relative z-10">Human Review Required</h2>
-
-            <div className="space-y-3 relative z-10">
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-muted-foreground">AI analysis complete</span>
-                <CheckCircle2 className="w-4 h-4 text-foreground" />
-              </div>
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-muted-foreground">Documents verified</span>
-                {missingDocs.length === 0
-                  ? <CheckCircle2 className="w-4 h-4 text-foreground" />
-                  : <X className="w-4 h-4 text-destructive" />}
-              </div>
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-muted-foreground">Draft prepared</span>
-                {draftReady
-                  ? <CheckCircle2 className="w-4 h-4 text-foreground" />
-                  : <X className="w-4 h-4 text-muted-foreground" />}
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-border space-y-4 relative z-10">
-              {approvalDone || currentStatus === "FILED" ? (
-                <div className="text-center">
-                  <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Status</div>
-                  <div className="text-xl font-bold text-foreground">FILED</div>
-                  <p className="text-xs text-muted-foreground mt-2">Bail application has been submitted to court.</p>
-                </div>
-              ) : isManualReview ? (
-                <div className="text-center p-4 bg-muted border border-border rounded-sm text-muted-foreground text-sm">
-                  This case requires manual review — automated approval is not permitted.
-                </div>
-              ) : (
-                <>
-                  <div className="p-3 bg-muted border border-border rounded text-xs text-muted-foreground leading-relaxed text-center">
-                    "I confirm that I have reviewed the supporting documents and legal basis."
-                  </div>
-                  <div className="space-y-2">
-                    <button
-                      onClick={handleApprove}
-                      disabled={approving || missingDocs.length > 0 || !draftReady || approvalDone || currentStatus === "FILED" || currentStatus === "APPROVED"}
-                      className={`w-full py-3 font-semibold rounded transition-colors flex justify-center items-center gap-2 ${
-                        approvalDone || currentStatus === "FILED" || currentStatus === "APPROVED"
-                          ? "bg-secondary text-primary cursor-not-allowed opacity-80"
-                          : "bg-card text-black hover:bg-card disabled:opacity-40 disabled:cursor-not-allowed"
-                      }`}
-                    >
-                      {approving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                      {approvalDone || currentStatus === "FILED" || currentStatus === "APPROVED" 
-                        ? "Filed Successfully" 
-                        : approving 
-                        ? "Filing..." 
-                        : "Approve & File"}
-                    </button>
-                    {missingDocs.length > 0 && (
-                      <p className="text-xs text-destructive text-center">Upload all missing documents before approving.</p>
-                    )}
-                    <div className="grid grid-cols-2 gap-2">
-                      <button 
-                        onClick={() => setRejectStatus("CHANGES_REQUESTED")}
-                        disabled={rejectStatus !== null || approvalDone || currentStatus === "FILED" || currentStatus === "APPROVED"}
-                        className={`py-2 font-medium rounded transition-colors text-xs flex justify-center items-center gap-2 ${
-                          rejectStatus === "CHANGES_REQUESTED" 
-                            ? "bg-secondary text-primary cursor-not-allowed" 
-                            : "bg-secondary/50 hover:bg-secondary text-primary disabled:opacity-40 disabled:cursor-not-allowed"
-                        }`}
-                      >
-                        <PenTool className="w-3 h-3" /> {rejectStatus === "CHANGES_REQUESTED" ? "Changes Requested" : "Request Changes"}
-                      </button>
-                      <button 
-                        onClick={() => setRejectStatus("REJECTED")}
-                        disabled={rejectStatus !== null || approvalDone || currentStatus === "FILED" || currentStatus === "APPROVED"}
-                        className={`py-2 font-medium rounded transition-colors text-xs flex justify-center items-center gap-2 ${
-                          rejectStatus === "REJECTED" 
-                            ? "bg-destructive text-destructive-foreground cursor-not-allowed" 
-                            : "bg-destructive/10 hover:bg-destructive/20 text-destructive disabled:opacity-40 disabled:cursor-not-allowed"
-                        }`}
-                      >
-                        <X className="w-3 h-3" /> {rejectStatus === "REJECTED" ? "Rejected" : "Reject"}
-                      </button>
+                    <p className="text-xs text-foreground/80 leading-relaxed">{event.description}</p>
+                    <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground border-t border-border/40 pt-1.5">
+                      <span>Actor: <strong className="text-foreground">{event.actor}</strong> ({event.actor_role})</span>
+                      <span>Source: <strong className="text-foreground">{event.source}</strong></span>
+                      <span className={event.is_human_verified ? "text-emerald-500 font-bold" : "text-muted-foreground"}>
+                        {event.is_human_verified ? "Human Verified" : "Machine Inferred"}
+                      </span>
                     </div>
                   </div>
-                </>
-              )}
-              <div className="text-center text-[10px] text-muted-foreground uppercase tracking-widest mt-4">
-                AI NEVER FILES AUTONOMOUSLY
-              </div>
-            </div>
-          </section>
-
+                </div>
+              ))
+            )}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* TAB 4: DOCUMENT VAULT & SHA-256 INTEGRITY */}
+      {activeTab === "evidence" && (
+        <div className="p-6 border border-border bg-card rounded-sm space-y-6">
+          <div className="flex items-center justify-between border-b border-border pb-3">
+            <div>
+              <h3 className="font-bold font-serif text-lg text-foreground">
+                Document Vault & Cryptographic Integrity Checking
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                SHA-256 document hashing verifies digital file tamper-detection. (Proves file integrity; does not prove legal truth of contents).
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {c.present_docs?.map((docType: string) => {
+              const eviId = `EVI-${c.case_id}-${docType}`;
+              return (
+                <div key={docType} className="p-4 border border-border rounded-sm bg-secondary/30 flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <Shield className="w-5 h-5 text-primary shrink-0" />
+                    <div>
+                      <h4 className="font-bold text-sm font-serif text-foreground">
+                        {docType.replace(/_/g, " ").toUpperCase()}
+                      </h4>
+                      <p className="text-xs font-mono text-muted-foreground">
+                        Evidence ID: {eviId} • Format: PDF / Digitised Record
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleVerifyEvidence(eviId)}
+                      disabled={verifyingEvidenceId === eviId}
+                      className="px-3 py-1.5 bg-secondary border border-border text-foreground hover:bg-muted text-xs font-semibold font-mono rounded flex items-center gap-1.5"
+                    >
+                      {verifyingEvidenceId === eviId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                      Verify SHA-256 Hash
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {evidenceVerificationResult && (
+              <div className="p-4 rounded border bg-emerald-500/10 border-emerald-500/30 text-xs font-mono space-y-1">
+                <p className="font-bold text-emerald-600 dark:text-emerald-400">
+                  CRYPTOGRAPHIC INTEGRITY VERIFIED
+                </p>
+                <p className="text-foreground/80">Stored Hash: {evidenceVerificationResult.stored_hash}</p>
+                <p className="text-foreground/80">Computed Hash: {evidenceVerificationResult.computed_hash}</p>
+                <p className="text-muted-foreground text-[10px]">{evidenceVerificationResult.note}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 5: GROUNDED STATUTORY LEGAL AUTHORITIES (RAG) */}
+      {activeTab === "statutes" && (
+        <div className="p-6 border border-border bg-card rounded-sm space-y-6">
+          <div className="flex items-center justify-between border-b border-border pb-3">
+            <div>
+              <h3 className="font-bold font-serif text-lg text-foreground">
+                Grounded Statutory Legal Authorities
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Statutory passages retrieved from verified criminal enactments (BNSS 2023, BNS 2023, IPC 1860).
+              </p>
+            </div>
+            <span className="text-[10px] font-mono px-2 py-1 rounded bg-secondary border border-border text-muted-foreground">
+              Precedent Case-Law: Future Expansion Module
+            </span>
+          </div>
+
+          <div className="space-y-4">
+            {retrieval.citations?.map((cit: any, idx: number) => (
+              <div key={idx} className="p-4 border border-border rounded-sm bg-secondary/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold font-serif text-sm text-foreground">
+                    {cit.statute} — {cit.section}
+                  </span>
+                  <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary font-bold">
+                    {cit.legal_code} (Effective: {cit.effective_date})
+                  </span>
+                </div>
+                <p className="text-xs font-mono p-3 rounded bg-background border border-border text-foreground/90 whitespace-pre-wrap leading-relaxed">
+                  {cit.text}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  <strong>Relevance Rationale:</strong> {cit.relevance_rationale}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

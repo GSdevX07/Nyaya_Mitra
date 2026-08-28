@@ -1,43 +1,144 @@
-import urllib.request, json
+"""
+test_endpoints.py - Automated Unit & Integration Tests for Nyaya Mitra API.
+Verifies all 6 canonical hero cases, Section 479 BNSS Rule Engine, and FastAPI endpoints.
+"""
 
-# Test GET /
-r = urllib.request.urlopen("http://localhost:8001/")
-health = json.loads(r.read())
-print("GET /:", health)
+import pytest
+from fastapi.testclient import TestClient
+from app.main import app
+from app.database import init_db, get_all_cases, get_case
+from app.agents.eligibility_agent import evaluate_eligibility
+from app.agents.orchestrator import process_case
+from app.models.schemas import CaseRecord, PrisonerCategory, LegalCode, CaseState
 
-# Test GET /cases
-r = urllib.request.urlopen("http://localhost:8001/cases")
-cases = json.loads(r.read())
-print(f"\nGET /cases -- {len(cases)} cases, sorted by urgency:")
-for e in cases:
-    cid = e["case"]["case_id"]
-    print(f"  {cid} | urgency_score={e['urgency_score']} | days_overdue={e['days_overdue']}")
+client = TestClient(app)
 
-# Test GET /cases/UTP-0007
-r = urllib.request.urlopen("http://localhost:8001/cases/UTP-0007")
-detail = json.loads(r.read())
-print("\nGET /cases/UTP-0007:")
-print(f"  eligible      = {detail['eligibility']['eligible']}")
-print(f"  is_complete   = {detail['completeness']['is_complete']}")
-print(f"  urgency_score = {detail['urgency_score']}")
-print(f"  draft_ready   = {detail['draft_ready']}")
-print(f"  alert_level   = {detail['notification']['alert_level']}")
-print(f"  status        = {detail['status_tracking']['current_status']}")
-print(f"  log entries   = {len(detail['agent_activity_log'])}")
 
-# Test POST /cases/UTP-0007/approve
-req = urllib.request.Request("http://localhost:8001/cases/UTP-0007/approve", method="POST")
-req.add_header("Content-Length", "0")
-r = urllib.request.urlopen(req)
-approve = json.loads(r.read())
-print("\nPOST /cases/UTP-0007/approve:")
-print(f"  status    = {approve['status']}")
-print(f"  next_step = {approve['next_step']}")
+def setup_module():
+    """Ensure database is seeded with the 6 canonical hero cases."""
+    init_db()
 
-# Test 404
-try:
-    urllib.request.urlopen("http://localhost:8001/cases/UTP-9999")
-except urllib.error.HTTPError as e:
-    print(f"\nGET /cases/UTP-9999: HTTP {e.code} (expected 404) [PASS]")
 
-print("\n[PASS] All endpoints responding correctly.")
+def test_health_endpoint():
+    response = client.get("/")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "online"
+    assert data["total_cases_in_db"] >= 6
+
+
+def test_cases_list_and_sorting():
+    response = client.get("/cases")
+    assert response.status_code == 200
+    cases = response.json()
+    assert len(cases) >= 6
+    # Verify sorted by urgency_score descending
+    scores = [c["urgency_score"] for c in cases]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_hero_case_1_standard_undertrial():
+    """UTP-0001: BNS 115(2), first-time, all docs present, custody=200/365d -> Eligible."""
+    case = get_case("UTP-0001")
+    assert case is not None
+    assert case.legal_code == LegalCode.BNS_2023
+    assert case.prisoner_category == PrisonerCategory.UNDERTRIAL
+    
+    result = evaluate_eligibility(case)
+    assert result["eligible"] is True
+    assert result["required_custody_days"] == 122  # ceil(365 * 1/3)
+    assert result["countable_custody_days"] == 200
+    assert result["days_overdue"] == 78
+
+
+def test_hero_case_2_urgent_medical_undertrial():
+    """UTP-0007: BNS 303(2), 63 yrs + health flag, custody=410/730d -> High Urgency."""
+    case = get_case("UTP-0007")
+    assert case is not None
+    assert case.urgency_flags.age == 63
+    assert case.urgency_flags.health_flag is True
+    
+    orch = process_case(case)
+    assert orch["eligibility"]["eligible"] is True
+    assert orch["completeness"]["is_complete"] is True
+    assert orch["draft_ready"] is True
+    assert orch["urgency_score"] > 200
+
+
+def test_hero_case_3_missing_documents_blocker():
+    """UTP-0015: IPC 392, missing charge_sheet -> Drafting blocked."""
+    case = get_case("UTP-0015")
+    assert case is not None
+    assert case.legal_code == LegalCode.IPC_1860
+    assert "charge_sheet" not in case.present_docs
+    
+    orch = process_case(case)
+    assert orch["eligibility"]["eligible"] is True
+    assert orch["completeness"]["is_complete"] is False
+    assert orch["draft_ready"] is False  # Blocked by missing document
+
+
+def test_hero_case_4_life_imprisonment_multi_case_exclusion():
+    """UTP-0012: IPC 302 / multiple active cases -> Excluded / Human Review Required."""
+    case = get_case("UTP-0012")
+    assert case is not None
+    assert case.punishable_by_death_or_life is True
+    
+    result = evaluate_eligibility(case)
+    assert result["eligible"] is False
+    assert result["human_review_required"] is True
+    assert "STATUTORY_EXCLUSION" in result["legal_basis"]
+
+
+def test_hero_case_5_convicted_prisoner_appeal():
+    """CONV-0101: BNS 105, convicted, judgment available -> Appeal Pending."""
+    case = get_case("CONV-0101")
+    assert case is not None
+    assert case.prisoner_category == PrisonerCategory.CONVICTED
+    assert case.appeal_details is not None
+    assert "High Court" in case.appeal_details.appellate_forum
+
+
+def test_hero_case_6_post_release_preserved():
+    """REL-0042: IPC 420, bail granted and released -> Post-Release Preserved."""
+    case = get_case("REL-0042")
+    assert case is not None
+    assert case.status == CaseState.POST_RELEASE_PRESERVED
+    assert case.post_release_details is not None
+
+
+def test_stakeholders_overview_endpoint():
+    response = client.get("/stakeholders/overview")
+    assert response.status_code == 200
+    data = response.json()
+    assert "jail_view" in data
+    assert "dlsa_view" in data
+    assert "slsa_view" in data
+    assert "advocate_view" in data
+
+
+def test_human_approval_and_filing_lifecycle():
+    """Test explicit transition: REVIEW -> APPROVED_READY_FOR_FILING -> FILED."""
+    appr_res = client.post("/cases/UTP-0001/approve?lawyer_id=Adv.%20Sharma")
+    assert appr_res.status_code == 200
+    assert appr_res.json()["status"] == "APPROVED_READY_FOR_FILING"
+
+    file_res = client.post("/cases/UTP-0001/file?filing_reference=EC-DEL-2025-001")
+    assert file_res.status_code == 200
+    assert file_res.json()["status"] == "FILED"
+
+    timeline_res = client.get("/cases/UTP-0001/timeline")
+    assert timeline_res.status_code == 200
+    events = timeline_res.json()["timeline"]
+    assert any(e["event_type"] == "FILING" for e in events)
+
+
+def test_evidence_integrity_verification():
+    response = client.get("/evidence")
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) > 0
+    evi_id = items[0]["id"]
+    verify_res = client.post(f"/evidence/verify?evidence_id={evi_id}")
+    assert verify_res.status_code == 200
+    assert "status" in verify_res.json()

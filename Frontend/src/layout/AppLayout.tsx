@@ -163,6 +163,23 @@ export function AppLayout() {
 
       {/* Global Top Navigation Bar (Full screen width) */}
       <header className="sticky top-0 z-40 w-full border-b-2 border-border bg-card shadow-sm">
+        {/* Top Environment & Institutional Positioning Banner */}
+        <div className="bg-primary/10 border-b border-border/60 px-4 md:px-8 py-1 flex items-center justify-between text-[11px] font-mono">
+          <div className="flex items-center gap-2 text-foreground/80">
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="font-bold text-foreground">DEMO / SYNTHETIC ENVIRONMENT</span>
+            <span className="text-muted-foreground">• Institutional Operations Platform</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-muted-foreground hidden sm:inline">
+              Section 479 BNSS Rule Engine v1 (2023)
+            </span>
+            <span className="px-2 py-0.5 rounded bg-primary/20 text-primary font-bold text-[10px]">
+              PROPOSED INSTITUTIONAL DEPLOYMENT
+            </span>
+          </div>
+        </div>
+
         <div className="flex h-16 items-center px-4 md:px-8 w-full justify-between gap-2 md:gap-4">
           {/* Logo & Brand */}
           <Link
@@ -172,9 +189,14 @@ export function AppLayout() {
             <div className="relative flex items-center justify-center w-8 h-8 rounded-sm bg-primary text-primary-foreground font-serif font-black">
               <Activity className="w-5 h-5 text-primary-foreground relative z-10" />
             </div>
-            <span className="font-bold text-xl tracking-tight text-foreground uppercase group-hover:text-muted-foreground transition-colors font-serif">
-              Nyaya Mitra
-            </span>
+            <div className="flex flex-col">
+              <span className="font-bold text-lg tracking-tight text-foreground uppercase group-hover:text-muted-foreground transition-colors font-serif leading-none">
+                Nyaya Mitra
+              </span>
+              <span className="text-[9px] font-mono text-muted-foreground tracking-wider uppercase">
+                Legal Operations
+              </span>
+            </div>
           </Link>
 
           {/* Navigation Links Container with Scroll Controls */}

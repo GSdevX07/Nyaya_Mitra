@@ -1,38 +1,141 @@
 /**
  * API Service for Nyaya Mitra Frontend
- * Connects directly to FastAPI backend running on http://localhost:8000
+ * Accused-Centric Legal-Services Operations & Coordination Platform
+ * Connects to FastAPI backend on http://localhost:8000
  */
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
-export interface BackendCaseSummary {
-  case: {
-    case_id: string;
-    name: string;
-    offense_sections: string[];
-    arrest_date: string;
-    custody_days: number;
-    max_sentence_days_for_offense: number;
-    prior_bail_orders: string[];
-    required_docs: string[];
-    present_docs: string[];
-    urgency_flags: {
-      age: number;
-      health_flag: boolean;
-      repeat_offender: boolean;
-    };
-    jail_location: string;
-    preferred_language: string;
-    relative_name?: string;
-    relative_relation?: string;
-    relative_phone?: string;
-    permanent_address?: string;
-    assignment_status?: string;
-    assigned_lawyer_id?: string;
-    status?: string;
+export type PrisonerCategory = "UNDERTRIAL" | "CONVICTED";
+export type LegalCode = "BNS_2023" | "IPC_1860" | "SPECIAL_ACTS";
+export type DataSourceStatus = "DEMO_SYNTHETIC" | "MANUAL_INSTITUTIONAL_ENTRY" | "DOCUMENT_INGESTION" | "FUTURE_GOVERNMENT_API";
+export type StakeholderPerspective = "ALL" | "JAIL" | "DLSA" | "SLSA" | "ADVOCATE" | "ACCUSED";
+
+export interface TimelineEvent {
+  id: string;
+  timestamp: string;
+  event_type: string;
+  title: string;
+  description: string;
+  actor: string;
+  actor_role: string;
+  source: string;
+  is_human_verified: boolean;
+}
+
+export interface LegalNeedItem {
+  need_type: string;
+  title: string;
+  description: string;
+  urgency: string;
+  blocking_bail_workflow: boolean;
+  status: string;
+}
+
+export interface AppealMetadata {
+  conviction_date: string;
+  trial_court_name: string;
+  sentence_awarded_days: number;
+  appellate_forum: string;
+  judgment_document_available: boolean;
+  limitation_status: string;
+  appeal_preparation_status: string;
+}
+
+export interface PostReleaseDetails {
+  release_date: string;
+  release_order_reference: string;
+  surety_type: string;
+  preservation_status: string;
+  follow_up_notes?: string;
+}
+
+export interface CaseRecordData {
+  case_id: string;
+  name: string;
+  prisoner_category: PrisonerCategory;
+  legal_code: LegalCode;
+  offense_sections: string[];
+  cnr_number?: string;
+  fir_number?: string;
+  police_station?: string;
+  court_name?: string;
+  district?: string;
+  state?: string;
+  dlsa_reference_number?: string;
+  arrest_date: string;
+  custody_days: number;
+  excluded_delay_days: number;
+  max_sentence_days_for_offense: number;
+  punishable_by_death_or_life: boolean;
+  multiple_active_cases: boolean;
+  prior_bail_orders: string[];
+  required_docs: string[];
+  present_docs: string[];
+  urgency_flags: {
+    age: number;
+    health_flag: boolean;
+    health_details?: string;
+    repeat_offender: boolean;
   };
+  jail_location: string;
+  preferred_language: string;
+  relative_name?: string;
+  relative_relation?: string;
+  relative_phone?: string;
+  permanent_address?: string;
+  assignment_status?: string;
+  assigned_lawyer_id?: string;
+  status?: string;
+  data_source_status: DataSourceStatus;
+  legal_needs?: LegalNeedItem[];
+  timeline?: TimelineEvent[];
+  data_provenance?: Record<string, any>;
+  appeal_details?: AppealMetadata;
+  post_release_details?: PostReleaseDetails;
+}
+
+export type CaseRecord = CaseRecordData;
+
+export interface BackendCaseSummary {
+  case: CaseRecordData;
   days_overdue: number;
   urgency_score: number;
+}
+
+export interface StakeholdersOverview {
+  jail_view: {
+    title: string;
+    total_inmates_monitored: number;
+    undertrials_count: number;
+    convicted_count: number;
+    missing_records_count: number;
+    legal_aid_requested_count: number;
+    operational_note: string;
+  };
+  dlsa_view: {
+    title: string;
+    statutory_eligibility_signals: number;
+    high_urgency_cases: number;
+    unassigned_legal_aid_demand: number;
+    document_bottlenecks: number;
+    assigned_active_counsel: number;
+  };
+  slsa_view: {
+    title: string;
+    districts_reporting: number;
+    total_undertrials_tracked: number;
+    aggregate_eligible_milestones: number;
+    institutional_resolution_rate: string;
+    privacy_notice: string;
+  };
+  advocate_view: {
+    title: string;
+    active_briefs: number;
+    ready_for_filing_petitions: number;
+    hearings_this_month: number;
+    evidence_vault_items: number;
+  };
 }
 
 export async function fetchCases(): Promise<BackendCaseSummary[]> {
@@ -41,25 +144,25 @@ export async function fetchCases(): Promise<BackendCaseSummary[]> {
     if (!res.ok) throw new Error("Failed to fetch cases");
     return await res.json();
   } catch (err) {
-    console.warn("Backend API unavailable, falling back to mock data:", err);
+    console.warn("Backend API unavailable, using fallback mock data:", err);
     return [];
   }
 }
 
-export async function fetchAvailableCases(): Promise<BackendCaseSummary[]> {
+export async function fetchStakeholdersOverview(): Promise<StakeholdersOverview | null> {
   try {
-    const res = await fetch(`${API_BASE_URL}/cases/available`);
-    if (!res.ok) throw new Error("Failed to fetch available cases");
+    const res = await fetch(`${API_BASE_URL}/stakeholders/overview`);
+    if (!res.ok) throw new Error("Failed to fetch stakeholder overview");
     return await res.json();
   } catch (err) {
-    console.warn("Backend API available cases unavailable:", err);
-    return [];
+    console.warn("Backend stakeholder overview fallback:", err);
+    return null;
   }
 }
 
-export async function takeUpCase(caseId: string) {
+export async function takeUpCase(caseId: string, lawyerId: string = "Legal Officer 104") {
   try {
-    const res = await fetch(`${API_BASE_URL}/cases/${caseId}/take`, {
+    const res = await fetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/take?lawyer_id=${encodeURIComponent(lawyerId)}`, {
       method: "POST",
     });
     if (!res.ok) throw new Error("Take up case failed");
@@ -70,9 +173,9 @@ export async function takeUpCase(caseId: string) {
   }
 }
 
-export async function declineCase(caseId: string) {
+export async function declineCase(caseId: string, lawyerId: string = "Legal Officer 104") {
   try {
-    const res = await fetch(`${API_BASE_URL}/cases/${caseId}/decline`, {
+    const res = await fetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/decline?lawyer_id=${encodeURIComponent(lawyerId)}`, {
       method: "POST",
     });
     if (!res.ok) throw new Error("Decline case failed");
@@ -80,6 +183,55 @@ export async function declineCase(caseId: string) {
   } catch (err) {
     console.error("Error declining case:", err);
     throw err;
+  }
+}
+
+export async function approveCaseInBackend(caseId: string, lawyerId: string = "Legal Officer 104") {
+  try {
+    const res = await fetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/approve?lawyer_id=${encodeURIComponent(lawyerId)}`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error("Approval failed");
+    return await res.json();
+  } catch (err) {
+    console.error("Error approving case:", err);
+    throw err;
+  }
+}
+
+export async function fileCaseInCourt(caseId: string, filingRef?: string) {
+  try {
+    const query = filingRef ? `?filing_reference=${encodeURIComponent(filingRef)}` : "";
+    const res = await fetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/file${query}`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error("Filing failed");
+    return await res.json();
+  } catch (err) {
+    console.error("Error filing case in court:", err);
+    throw err;
+  }
+}
+
+export async function fetchCaseById(caseId: string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}`);
+    if (!res.ok) throw new Error(`Failed to fetch case ${caseId}`);
+    return await res.json();
+  } catch (err) {
+    console.warn(`Backend API failed for case ${caseId}:`, err);
+    return null;
+  }
+}
+
+export async function fetchCaseTimeline(caseId: string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/timeline`);
+    if (!res.ok) throw new Error(`Failed to fetch timeline for ${caseId}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("Backend API timeline fallback:", err);
+    return null;
   }
 }
 
@@ -97,34 +249,10 @@ export async function fetchLawyerProfile() {
       email: "rajesh.sharma@nyayamitra.org",
       phone: "+91 98112 34567",
       specialization: "Undertrial Defense & Section 479 BNSS",
-      cases_taken: 4,
+      cases_taken: 3,
       status: "Active Pro Bono Counsel",
-      organization: "Delhi Legal Services Authority (DLSA)",
+      organization: "District Legal Services Authority (DLSA)",
     };
-  }
-}
-
-export async function fetchCaseById(caseId: string) {
-  try {
-    const res = await fetch(`${API_BASE_URL}/cases/${caseId}`);
-    if (!res.ok) throw new Error(`Failed to fetch case ${caseId}`);
-    return await res.json();
-  } catch (err) {
-    console.warn(`Backend API failed for case ${caseId}:`, err);
-    return null;
-  }
-}
-
-export async function approveCaseInBackend(caseId: string) {
-  try {
-    const res = await fetch(`${API_BASE_URL}/cases/${caseId}/approve`, {
-      method: "POST",
-    });
-    if (!res.ok) throw new Error("Approval failed");
-    return await res.json();
-  } catch (err) {
-    console.error("Error approving case:", err);
-    throw err;
   }
 }
 
@@ -139,10 +267,6 @@ export async function fetchDocuments() {
   }
 }
 
-/**
- * Upload a real file (PDF / image) and / or custom text for a case document.
- * Sends multipart/form-data to POST /documents/upload.
- */
 export async function uploadDocumentFile(
   caseId: string,
   documentType: string,
@@ -175,12 +299,10 @@ export async function uploadDocumentFile(
   return res.json();
 }
 
-/** Backward-compat alias — no file, no text. */
 export async function uploadDocument(caseId: string, documentType: string) {
   return uploadDocumentFile(caseId, documentType, undefined, undefined);
 }
 
-/** Fetch per-case upload history from Supabase. */
 export async function getUploadedDocuments(caseId: string): Promise<
   Array<{
     id: string;
@@ -287,35 +409,6 @@ export async function fetchNotifications() {
   }
 }
 
-export async function fetchSampleDocuments() {
-  try {
-    const res = await fetch(`${API_BASE_URL}/cases/sample-documents`);
-    if (!res.ok) throw new Error("Failed to fetch sample documents");
-    return await res.json();
-  } catch (err) {
-    console.warn("Backend API sample-documents unavailable:", err);
-    return [];
-  }
-}
-
-export async function assessDocument(documentName?: string, providedText?: string) {
-  try {
-    const res = await fetch(`${API_BASE_URL}/cases/assess-document`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        document_name: documentName || "scanned_handwritten_remand.pdf",
-        provided_text: providedText || undefined,
-      }),
-    });
-    if (!res.ok) throw new Error("Document assessment API error");
-    return await res.json();
-  } catch (err) {
-    console.error("Error in assessDocument:", err);
-    throw err;
-  }
-}
-
 export async function assessUploadedDocument(file: File) {
   const formData = new FormData();
   formData.append("file", file);
@@ -329,3 +422,16 @@ export async function assessUploadedDocument(file: File) {
   }
   return res.json();
 }
+
+export async function assessDocument(fileOrName?: any, textContent?: string) {
+  if (fileOrName instanceof File) {
+    return assessUploadedDocument(fileOrName);
+  }
+  const file = new File([textContent || "Sample judicial record"], fileOrName || "document.pdf", { type: "text/plain" });
+  return assessUploadedDocument(file);
+}
+
+export async function fetchSampleDocuments() {
+  return fetchDocuments();
+}
+

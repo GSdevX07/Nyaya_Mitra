@@ -1,0 +1,241 @@
+/**
+ * auth.tsx — Production Auth Service & Context for Nyaya Mitra Frontend
+ *
+ * Security Model:
+ *  - Short-lived JWT Access Token is kept strictly in React Memory (State).
+ *  - Refresh Token is held in sessionStorage (cleared upon tab close).
+ *  - No sensitive credentials or master keys in localStorage.
+ *  - Automatic Bearer token header injection on all backend calls.
+ */
+
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const REFRESH_TOKEN_KEY = "nyaya_refresh_token";
+
+export type Role =
+  | "PLATFORM_ADMIN"
+  | "GOV_ADMIN"
+  | "JAIL_OFFICER"
+  | "POLICE_OFFICER"
+  | "DLSA_OFFICER"
+  | "SUPERVISING_LEGAL_OFFICER"
+  | "DEFENSE_ADVOCATE"
+  | "CONTROLLED_EXTERNAL_ADVOCATE"
+  | "ACCUSED_USER"
+  | "FAMILY_GUARDIAN"
+  | "READ_ONLY_AUDITOR"
+  | "INTEGRATION_SERVICE";
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  role: Role;
+  full_name: string;
+  org_id: string;
+  district?: string;
+  facility_ids?: string[];
+  linked_case_id?: string;
+}
+
+export interface AuthContextType {
+  user: UserProfile | null;
+  token: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  loginWithDemoRole: (role: Role) => Promise<void>;
+  logout: () => Promise<void>;
+  hasRole: (...roles: Role[]) => boolean;
+}
+
+const AuthContext = createContext<AuthContextType | null>(null);
+
+let _inMemoryAccessToken: string | null = null;
+
+export function getAuthToken(): string | null {
+  return _inMemoryAccessToken;
+}
+
+export function getAuthHeaders(): HeadersInit {
+  if (_inMemoryAccessToken) {
+    return {
+      Authorization: `Bearer ${_inMemoryAccessToken}`,
+      "Content-Type": "application/json",
+    };
+  }
+  return {
+    "Content-Type": "application/json",
+  };
+}
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  const updateSession = (accessToken: string, userProfile: UserProfile, refreshToken?: string) => {
+    _inMemoryAccessToken = accessToken;
+    setToken(accessToken);
+    setUser(userProfile);
+    if (refreshToken) {
+      sessionStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    }
+  };
+
+  const clearSession = () => {
+    _inMemoryAccessToken = null;
+    setToken(null);
+    setUser(null);
+    sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+  };
+
+  // Attempt silent token refresh on app mount if a refresh token exists in sessionStorage
+  const attemptSilentRefresh = useCallback(async () => {
+    const storedRefresh = sessionStorage.getItem(REFRESH_TOKEN_KEY);
+    if (!storedRefresh) {
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: storedRefresh }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        updateSession(
+          data.access_token,
+          {
+            id: data.user_id,
+            email: "",
+            role: data.role as Role,
+            full_name: data.full_name,
+            org_id: data.org_id,
+          },
+          data.refresh_token
+        );
+      } else {
+        clearSession();
+      }
+    } catch {
+      clearSession();
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    attemptSilentRefresh();
+  }, [attemptSilentRefresh]);
+
+  const login = async (email: string, password: string) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.detail || `Login failed with status ${res.status}`);
+      }
+
+      const data = await res.json();
+      updateSession(
+        data.access_token,
+        {
+          id: data.user_id,
+          email: email.toLowerCase(),
+          role: data.role as Role,
+          full_name: data.full_name,
+          org_id: data.org_id,
+        },
+        data.refresh_token
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loginWithDemoRole = async (role: Role) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/demo-token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.detail || `Demo login failed with status ${res.status}`);
+      }
+
+      const data = await res.json();
+      updateSession(
+        data.access_token,
+        {
+          id: data.user_id,
+          email: `${role.toLowerCase()}@demo.nyayamitra.in`,
+          role: data.role as Role,
+          full_name: data.full_name,
+          org_id: data.org_id,
+        },
+        data.refresh_token
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const logout = async () => {
+    if (_inMemoryAccessToken) {
+      try {
+        await fetch(`${API_BASE_URL}/auth/logout`, {
+          method: "POST",
+          headers: getAuthHeaders(),
+        });
+      } catch (err) {
+        console.warn("Logout notification error:", err);
+      }
+    }
+    clearSession();
+  };
+
+  const hasRole = (...roles: Role[]) => {
+    if (!user) return false;
+    if (user.role === "PLATFORM_ADMIN") return true;
+    return roles.includes(user.role);
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        isAuthenticated: !!user && !!token,
+        isLoading,
+        login,
+        loginWithDemoRole,
+        logout,
+        hasRole,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
+};

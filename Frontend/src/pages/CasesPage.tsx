@@ -6,6 +6,7 @@ import {
   Loader2,
   RefreshCw,
   HeartPulse,
+  UserCheck,
 } from "lucide-react";
 import { fetchCases, type CaseRecord } from "@/lib/api";
 
@@ -281,16 +282,25 @@ export function CasesPage() {
                 </div>
 
                 {/* Card Action Link */}
-                <div className="border-t border-border pt-3 flex items-center justify-between">
+                <div className="border-t border-border pt-3 flex items-center justify-between gap-2 flex-wrap">
                   <span className="text-[11px] font-mono text-muted-foreground">
                     Category: <strong>{c.prisoner_category || "UNDERTRIAL"}</strong>
                   </span>
-                  <Link
-                    to={`/cases/${c.case_id}`}
-                    className="px-3 py-1.5 bg-primary text-primary-foreground rounded-sm text-xs font-serif font-semibold hover:opacity-90 flex items-center gap-1 transition-opacity"
-                  >
-                    View Dossier <ChevronRight className="w-3.5 h-3.5" />
-                  </Link>
+                  <div className="flex items-center gap-1.5">
+                    <Link
+                      to={`/accused/acc_${c.case_id.toLowerCase().replace("-", "_")}`}
+                      className="px-2.5 py-1.5 bg-secondary hover:bg-muted text-foreground border border-border rounded-sm text-xs font-serif font-semibold flex items-center gap-1 transition-colors"
+                      title="View Accused Dossier"
+                    >
+                      <UserCheck className="w-3.5 h-3.5" /> Profile
+                    </Link>
+                    <Link
+                      to={`/case/${c.case_id}`}
+                      className="px-3 py-1.5 bg-primary text-primary-foreground rounded-sm text-xs font-serif font-semibold hover:opacity-90 flex items-center gap-1 transition-opacity"
+                    >
+                      View Dossier <ChevronRight className="w-3.5 h-3.5" />
+                    </Link>
+                  </div>
                 </div>
               </div>
             );

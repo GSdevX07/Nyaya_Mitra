@@ -1,4 +1,6 @@
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { AuthProvider } from "./lib/auth";
+import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AppLayout } from "./layout/AppLayout";
 import { Landing } from "./pages/Landing";
 import { Login } from "./pages/Login";
@@ -14,29 +16,382 @@ import { EvidencePage } from "./pages/EvidencePage";
 import { ActionsPage } from "./pages/ActionsPage";
 import { HearingsPage } from "./pages/HearingsPage";
 import { ReportsPage } from "./pages/ReportsPage";
+import { IngestionDashboard } from "./pages/IngestionDashboard";
+
+import { CitizenPortal } from "./pages/CitizenPortal";
+import { AdminConsole } from "./pages/AdminConsole";
+import { AuditorConsole } from "./pages/AuditorConsole";
+import { JailWorkspace } from "./pages/JailWorkspace";
+import { AdvocateWorkspace } from "./pages/AdvocateWorkspace";
+import { GovAdminOverview } from "./pages/GovAdminOverview";
+import { AccusedProfilePage } from "./pages/AccusedProfilePage";
+import { IdentityResolutionPage } from "./pages/IdentityResolutionPage";
+import { PoliceWorkspace } from "./pages/PoliceWorkspace";
+import { DocumentAssessmentPage } from "./pages/DocumentAssessmentPage";
 
 function App() {
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/how-it-works" element={<HowItWorks />} />
-        <Route path="/features" element={<FeaturesPage />} />
-        <Route element={<AppLayout />}>
-          <Route path="/dashboard" element={<CommandCenter />} />
-          <Route path="/case/:id" element={<CaseIntelligence />} />
-          <Route path="/radar" element={<EligibilityRadar />} />
-          {/* Sub-routes with rich dedicated pages */}
-          <Route path="/cases" element={<CasesPage />} />
-          <Route path="/documents" element={<DocumentsPage />} />
-          <Route path="/evidence" element={<EvidencePage />} />
-          <Route path="/actions" element={<ActionsPage />} />
-          <Route path="/hearings" element={<HearingsPage />} />
-          <Route path="/reports" element={<ReportsPage />} />
-        </Route>
-      </Routes>
-    </Router>
+    <AuthProvider>
+      <Router>
+        <Routes>
+          {/* Public Unauthenticated Routes */}
+          <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/how-it-works" element={<HowItWorks />} />
+          <Route path="/features" element={<FeaturesPage />} />
+
+          {/* Protected Institutional Routes Group */}
+          <Route element={<ProtectedRoute />}>
+            <Route element={<AppLayout />}>
+              {/* Citizen Portal Routes (Plain-Language & Isolated) */}
+              <Route
+                path="/my-case"
+                element={
+                  <ProtectedRoute allowedRoles={["ACCUSED_USER", "PLATFORM_ADMIN"]}>
+                    <CitizenPortal mode="accused" />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/family/status"
+                element={
+                  <ProtectedRoute allowedRoles={["FAMILY_GUARDIAN", "PLATFORM_ADMIN"]}>
+                    <CitizenPortal mode="family" />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Dedicated Specialized Workspaces */}
+              <Route
+                path="/admin"
+                element={
+                  <ProtectedRoute allowedRoles={["PLATFORM_ADMIN"]}>
+                    <AdminConsole />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/audit"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "READ_ONLY_AUDITOR",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "SUPERVISING_LEGAL_OFFICER",
+                    ]}
+                  >
+                    <AuditorConsole />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/gov"
+                element={
+                  <ProtectedRoute allowedRoles={["GOV_ADMIN", "PLATFORM_ADMIN"]}>
+                    <GovAdminOverview />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/jail"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "JAIL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "GOV_ADMIN",
+                    ]}
+                  >
+                    <JailWorkspace />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/advocate"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DEFENSE_ADVOCATE",
+                      "CONTROLLED_EXTERNAL_ADVOCATE",
+                      "PLATFORM_ADMIN",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "DLSA_OFFICER",
+                    ]}
+                  >
+                    <AdvocateWorkspace />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/police"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "POLICE_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                    ]}
+                  >
+                    <PoliceWorkspace />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Institutional Core Modules */}
+              <Route
+                path="/dashboard"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "JAIL_OFFICER",
+                      "POLICE_OFFICER",
+                      "DEFENSE_ADVOCATE",
+                      "READ_ONLY_AUDITOR",
+                    ]}
+                  >
+                    <CommandCenter />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/case/:id"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "JAIL_OFFICER",
+                      "POLICE_OFFICER",
+                      "DEFENSE_ADVOCATE",
+                      "CONTROLLED_EXTERNAL_ADVOCATE",
+                      "READ_ONLY_AUDITOR",
+                    ]}
+                  >
+                    <CaseIntelligence />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/cases/:id"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "JAIL_OFFICER",
+                      "POLICE_OFFICER",
+                      "DEFENSE_ADVOCATE",
+                      "CONTROLLED_EXTERNAL_ADVOCATE",
+                      "READ_ONLY_AUDITOR",
+                    ]}
+                  >
+                    <CaseIntelligence />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/accused/:id"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "JAIL_OFFICER",
+                      "POLICE_OFFICER",
+                      "DEFENSE_ADVOCATE",
+                      "CONTROLLED_EXTERNAL_ADVOCATE",
+                      "READ_ONLY_AUDITOR",
+                    ]}
+                  >
+                    <AccusedProfilePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/identity-review"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "GOV_ADMIN",
+                      "PLATFORM_ADMIN",
+                      "DLSA_OFFICER",
+                    ]}
+                  >
+                    <IdentityResolutionPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/radar"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "DEFENSE_ADVOCATE",
+                    ]}
+                  >
+                    <EligibilityRadar />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/cases"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "JAIL_OFFICER",
+                      "POLICE_OFFICER",
+                      "READ_ONLY_AUDITOR",
+                    ]}
+                  >
+                    <CasesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/documents"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "JAIL_OFFICER",
+                      "POLICE_OFFICER",
+                      "DEFENSE_ADVOCATE",
+                    ]}
+                  >
+                    <DocumentsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/document-assessment"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "JAIL_OFFICER",
+                      "POLICE_OFFICER",
+                      "DEFENSE_ADVOCATE",
+                    ]}
+                  >
+                    <DocumentAssessmentPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/evidence"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "READ_ONLY_AUDITOR",
+                    ]}
+                  >
+                    <EvidencePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/actions"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "DEFENSE_ADVOCATE",
+                    ]}
+                  >
+                    <ActionsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hearings"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "DEFENSE_ADVOCATE",
+                      "JAIL_OFFICER",
+                    ]}
+                  >
+                    <HearingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/reports"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "READ_ONLY_AUDITOR",
+                    ]}
+                  >
+                    <ReportsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/ingestion"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "READ_ONLY_AUDITOR",
+                    ]}
+                  >
+                    <IngestionDashboard />
+                  </ProtectedRoute>
+                }
+              />
+            </Route>
+          </Route>
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
 }
 

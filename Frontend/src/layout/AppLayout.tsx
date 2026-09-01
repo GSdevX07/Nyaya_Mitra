@@ -1,22 +1,111 @@
-import { useState, useEffect, useRef } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
-import { Search, Bell, Activity, ChevronLeft, ChevronRight } from "lucide-react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Search, Bell, Activity, ChevronLeft, ChevronRight, LogOut } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CommandPalette } from "@/components/CommandPalette";
 import { NotificationsModal, type NotificationItem } from "@/components/NotificationsModal";
 import { LawyerProfileModal } from "@/components/LawyerProfileModal";
 import { fetchNotifications } from "@/lib/api";
+import { useAuth, type Role } from "@/lib/auth";
 
-const navItems = [
-  { path: "/dashboard", label: "Command Center" },
-  { path: "/cases", label: "Cases" },
-  { path: "/radar", label: "Eligibility Radar" },
-  { path: "/documents", label: "Documents" },
-  { path: "/evidence", label: "Evidence" },
-  { path: "/actions", label: "Actions" },
-  { path: "/hearings", label: "Hearings" },
-  { path: "/reports", label: "Reports" },
-];
+interface NavItem {
+  path: string;
+  label: string;
+}
+
+function getNavItemsForRole(role?: Role): NavItem[] {
+  switch (role) {
+    case "ACCUSED_USER":
+      return [{ path: "/my-case", label: "My Legal Status" }];
+
+    case "FAMILY_GUARDIAN":
+      return [{ path: "/family/status", label: "Family Assistance Portal" }];
+
+    case "READ_ONLY_AUDITOR":
+      return [
+        { path: "/audit", label: "Audit Ledger" },
+        { path: "/reports", label: "Reports" },
+        { path: "/evidence", label: "Evidence Integrity" },
+      ];
+
+    case "DEFENSE_ADVOCATE":
+    case "CONTROLLED_EXTERNAL_ADVOCATE":
+      return [
+        { path: "/advocate", label: "My Assigned Cases" },
+        { path: "/radar", label: "Eligibility Radar" },
+        { path: "/documents", label: "Documents" },
+        { path: "/actions", label: "Actions" },
+        { path: "/hearings", label: "Hearings" },
+      ];
+
+    case "JAIL_OFFICER":
+      return [
+        { path: "/jail", label: "Custody Desk" },
+        { path: "/cases", label: "Inmate Roll" },
+        { path: "/documents", label: "Intake Docs" },
+        { path: "/hearings", label: "Hearings" },
+      ];
+
+    case "POLICE_OFFICER":
+      return [
+        { path: "/police", label: "Police Reference Desk" },
+        { path: "/cases", label: "FIR Registry" },
+        { path: "/documents", label: "Case Documents" },
+      ];
+
+    case "PLATFORM_ADMIN":
+      return [
+        { path: "/admin", label: "Admin Console" },
+        { path: "/dashboard", label: "Command Center" },
+        { path: "/cases", label: "Cases" },
+        { path: "/identity-review", label: "Identity Review" },
+        { path: "/ingestion", label: "Data Ingestion" },
+        { path: "/audit", label: "Audit Logs" },
+        { path: "/reports", label: "Reports" },
+      ];
+
+    case "GOV_ADMIN":
+      return [
+        { path: "/gov", label: "State Overview" },
+        { path: "/dashboard", label: "Command Center" },
+        { path: "/cases", label: "Cases" },
+        { path: "/evidence", label: "Evidence" },
+        { path: "/identity-review", label: "Identity Review" },
+        { path: "/reports", label: "Reports" },
+        { path: "/audit", label: "Audit Logs" },
+      ];
+
+    case "SUPERVISING_LEGAL_OFFICER":
+      return [
+        { path: "/dashboard", label: "Command Center" },
+        { path: "/cases", label: "Cases" },
+        { path: "/identity-review", label: "Identity Review" },
+        { path: "/radar", label: "Eligibility Radar" },
+        { path: "/documents", label: "Documents" },
+        { path: "/evidence", label: "Evidence" },
+        { path: "/actions", label: "Actions" },
+        { path: "/hearings", label: "Hearings" },
+        { path: "/audit", label: "Audit Logs" },
+        { path: "/reports", label: "Reports" },
+        { path: "/ingestion", label: "Data Ingestion" },
+      ];
+
+    case "DLSA_OFFICER":
+    default:
+      return [
+        { path: "/dashboard", label: "Command Center" },
+        { path: "/cases", label: "Cases" },
+        { path: "/identity-review", label: "Identity Review" },
+        { path: "/radar", label: "Eligibility Radar" },
+        { path: "/documents", label: "Documents" },
+        { path: "/evidence", label: "Evidence" },
+        { path: "/actions", label: "Actions" },
+        { path: "/hearings", label: "Hearings" },
+        { path: "/reports", label: "Reports" },
+        { path: "/ingestion", label: "Data Ingestion" },
+      ];
+  }
+}
 
 const DEFAULT_NOTIFICATIONS: NotificationItem[] = [
   {
@@ -57,10 +146,14 @@ function saveReadIdsToStorage(ids: string[]) {
 
 export function AppLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
   const [isHovered, setIsHovered] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+
+  const navItems = useMemo(() => getNavItemsForRole(user?.role), [user?.role]);
 
   // Notification state
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
@@ -286,14 +379,35 @@ export function AppLayout() {
             <button
               onClick={() => setIsProfileOpen(true)}
               className="flex items-center gap-2 text-xs md:text-sm text-foreground p-1.5 rounded-sm border border-border hover:bg-secondary transition-all cursor-pointer"
-              title="View Lawyer Profile & Credentials"
+              title="View User Profile & Security Credentials"
             >
               <div className="w-7 h-7 rounded-sm bg-primary text-primary-foreground flex items-center justify-center font-bold text-xs font-mono">
-                RS
+                {(user?.full_name || user?.role || "NM")
+                  .split(" ")
+                  .map((w: string) => w[0])
+                  .slice(0, 2)
+                  .join("")
+                  .toUpperCase()}
               </div>
-              <span className="hidden md:inline font-bold font-serif text-foreground">
-                Legal Officer 104
-              </span>
+              <div className="hidden md:flex flex-col text-left">
+                <span className="font-bold font-serif text-foreground text-xs leading-none">
+                  {user?.full_name || "Institutional User"}
+                </span>
+                <span className="text-[10px] font-mono text-primary font-bold leading-tight mt-0.5">
+                  [{user?.role || "OFFICER"}]
+                </span>
+              </div>
+            </button>
+
+            <button
+              onClick={async () => {
+                await logout();
+                navigate("/login", { replace: true });
+              }}
+              className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 border border-border rounded-sm transition-colors"
+              title="Sign Out Session"
+            >
+              <LogOut className="w-4 h-4" />
             </button>
           </div>
         </div>

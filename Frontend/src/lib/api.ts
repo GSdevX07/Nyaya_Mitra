@@ -2,9 +2,21 @@
  * API Service for Nyaya Mitra Frontend
  * Accused-Centric Legal-Services Operations & Coordination Platform
  * Connects to FastAPI backend on http://localhost:8000
+ * Automatically attaches scoped JWT Bearer tokens to all requests.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+import { getAuthToken } from "./auth";
+
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+
+export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers || {});
+  const token = getAuthToken();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  return fetch(input, { ...init, headers });
+}
 
 export type PrisonerCategory = "UNDERTRIAL" | "CONVICTED";
 export type LegalCode = "BNS_2023" | "IPC_1860" | "SPECIAL_ACTS";
@@ -56,6 +68,7 @@ export interface CaseRecordData {
   prisoner_category: PrisonerCategory;
   legal_code: LegalCode;
   offense_sections: string[];
+  offense_summary?: string;
   cnr_number?: string;
   fir_number?: string;
   police_station?: string;
@@ -150,20 +163,22 @@ export interface StakeholdersOverview {
   };
 }
 
+// ── API Operations ───────────────────────────────────────────────────────────
+
 export async function fetchCases(): Promise<BackendCaseSummary[]> {
   try {
-    const res = await fetch(`${API_BASE_URL}/cases`);
-    if (!res.ok) throw new Error("Failed to fetch cases");
+    const res = await authFetch(`${API_BASE_URL}/cases`);
+    if (!res.ok) throw new Error(`Failed to fetch cases: status ${res.status}`);
     return await res.json();
   } catch (err) {
-    console.warn("Backend API unavailable, using fallback mock data:", err);
+    console.warn("Backend API unavailable or unauthenticated:", err);
     return [];
   }
 }
 
 export async function fetchStakeholdersOverview(): Promise<StakeholdersOverview | null> {
   try {
-    const res = await fetch(`${API_BASE_URL}/stakeholders/overview`);
+    const res = await authFetch(`${API_BASE_URL}/stakeholders/overview`);
     if (!res.ok) throw new Error("Failed to fetch stakeholder overview");
     return await res.json();
   } catch (err) {
@@ -172,9 +187,9 @@ export async function fetchStakeholdersOverview(): Promise<StakeholdersOverview 
   }
 }
 
-export async function takeUpCase(caseId: string, lawyerId: string = "Legal Officer 104") {
+export async function takeUpCase(caseId: string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/take?lawyer_id=${encodeURIComponent(lawyerId)}`, {
+    const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/take`, {
       method: "POST",
     });
     if (!res.ok) throw new Error("Take up case failed");
@@ -185,9 +200,9 @@ export async function takeUpCase(caseId: string, lawyerId: string = "Legal Offic
   }
 }
 
-export async function declineCase(caseId: string, lawyerId: string = "Legal Officer 104") {
+export async function declineCase(caseId: string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/decline?lawyer_id=${encodeURIComponent(lawyerId)}`, {
+    const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/decline`, {
       method: "POST",
     });
     if (!res.ok) throw new Error("Decline case failed");
@@ -198,9 +213,9 @@ export async function declineCase(caseId: string, lawyerId: string = "Legal Offi
   }
 }
 
-export async function approveCaseInBackend(caseId: string, lawyerId: string = "Legal Officer 104") {
+export async function approveCaseInBackend(caseId: string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/approve?lawyer_id=${encodeURIComponent(lawyerId)}`, {
+    const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/approve`, {
       method: "POST",
     });
     if (!res.ok) throw new Error("Approval failed");
@@ -214,7 +229,7 @@ export async function approveCaseInBackend(caseId: string, lawyerId: string = "L
 export async function fileCaseInCourt(caseId: string, filingRef?: string) {
   try {
     const query = filingRef ? `?filing_reference=${encodeURIComponent(filingRef)}` : "";
-    const res = await fetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/file${query}`, {
+    const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/file${query}`, {
       method: "POST",
     });
     if (!res.ok) throw new Error("Filing failed");
@@ -227,7 +242,7 @@ export async function fileCaseInCourt(caseId: string, filingRef?: string) {
 
 export async function fetchCaseById(caseId: string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}`);
+    const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}`);
     if (!res.ok) throw new Error(`Failed to fetch case ${caseId}`);
     return await res.json();
   } catch (err) {
@@ -238,7 +253,7 @@ export async function fetchCaseById(caseId: string) {
 
 export async function fetchCaseTimeline(caseId: string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/timeline`);
+    const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/timeline`);
     if (!res.ok) throw new Error(`Failed to fetch timeline for ${caseId}`);
     return await res.json();
   } catch (err) {
@@ -249,16 +264,16 @@ export async function fetchCaseTimeline(caseId: string) {
 
 export async function fetchLawyerProfile() {
   try {
-    const res = await fetch(`${API_BASE_URL}/lawyer/profile`);
+    const res = await authFetch(`${API_BASE_URL}/lawyer/profile`);
     if (!res.ok) throw new Error("Failed to fetch lawyer profile");
     return await res.json();
   } catch (err) {
     console.warn("Backend API lawyer profile fallback:", err);
     return {
-      id: "Legal Officer 104",
-      full_name: "Adv. Rajesh Sharma",
+      id: "Legal Officer",
+      full_name: "Adv. Panel Counsel",
       bar_association_id: "DL/2018/49281",
-      email: "rajesh.sharma@nyayamitra.org",
+      email: "counsel@nyayamitra.gov.in",
       phone: "+91 98112 34567",
       specialization: "Undertrial Defense & Section 479 BNSS",
       cases_taken: 3,
@@ -270,7 +285,7 @@ export async function fetchLawyerProfile() {
 
 export async function fetchDocuments() {
   try {
-    const res = await fetch(`${API_BASE_URL}/documents`);
+    const res = await authFetch(`${API_BASE_URL}/documents`);
     if (!res.ok) throw new Error("Failed to fetch documents");
     return await res.json();
   } catch (err) {
@@ -300,7 +315,7 @@ export async function uploadDocumentFile(
   if (file) formData.append("file", file);
   if (customText) formData.append("custom_text", customText);
 
-  const res = await fetch(
+  const res = await authFetch(
     `${API_BASE_URL}/documents/upload?case_id=${encodeURIComponent(caseId)}&document_type=${encodeURIComponent(documentType)}`,
     { method: "POST", body: formData }
   );
@@ -332,7 +347,7 @@ export async function getUploadedDocuments(caseId: string): Promise<
   }>
 > {
   try {
-    const res = await fetch(`${API_BASE_URL}/documents/uploaded/${encodeURIComponent(caseId)}`);
+    const res = await authFetch(`${API_BASE_URL}/documents/uploaded/${encodeURIComponent(caseId)}`);
     if (!res.ok) return [];
     return res.json();
   } catch {
@@ -342,7 +357,7 @@ export async function getUploadedDocuments(caseId: string): Promise<
 
 export async function fetchEvidence() {
   try {
-    const res = await fetch(`${API_BASE_URL}/evidence`);
+    const res = await authFetch(`${API_BASE_URL}/evidence`);
     if (!res.ok) throw new Error("Failed to fetch evidence");
     return await res.json();
   } catch (err) {
@@ -352,21 +367,26 @@ export async function fetchEvidence() {
 }
 
 export async function verifyEvidence(evidenceId: string) {
-  try {
-    const res = await fetch(
-      `${API_BASE_URL}/evidence/verify?evidence_id=${encodeURIComponent(evidenceId)}`,
-      { method: "POST" }
-    );
-    return await res.json();
-  } catch (err) {
-    console.error("Evidence verify error:", err);
-    throw err;
+  const res = await authFetch(
+    `${API_BASE_URL}/evidence/verify?evidence_id=${encodeURIComponent(evidenceId)}`,
+    { method: "POST" }
+  );
+  const body = await res.json();
+  if (!res.ok) {
+    // Return a typed error shape so the caller can display it without crashing
+    return {
+      error: body?.detail ?? `HTTP ${res.status} — Verification request rejected.`,
+      integrity_verified: false,
+      stored_hash: null,
+      computed_hash: null,
+    };
   }
+  return body;
 }
 
 export async function fetchActions() {
   try {
-    const res = await fetch(`${API_BASE_URL}/actions`);
+    const res = await authFetch(`${API_BASE_URL}/actions`);
     if (!res.ok) throw new Error("Failed to fetch actions");
     return await res.json();
   } catch (err) {
@@ -377,7 +397,7 @@ export async function fetchActions() {
 
 export async function triggerAction(actionId: string) {
   try {
-    const res = await fetch(
+    const res = await authFetch(
       `${API_BASE_URL}/actions/trigger?action_id=${encodeURIComponent(actionId)}`,
       { method: "POST" }
     );
@@ -390,7 +410,7 @@ export async function triggerAction(actionId: string) {
 
 export async function fetchHearings() {
   try {
-    const res = await fetch(`${API_BASE_URL}/hearings`);
+    const res = await authFetch(`${API_BASE_URL}/hearings`);
     if (!res.ok) throw new Error("Failed to fetch hearings");
     return await res.json();
   } catch (err) {
@@ -401,7 +421,7 @@ export async function fetchHearings() {
 
 export async function fetchReports() {
   try {
-    const res = await fetch(`${API_BASE_URL}/reports`);
+    const res = await authFetch(`${API_BASE_URL}/reports`);
     if (!res.ok) throw new Error("Failed to fetch reports");
     return await res.json();
   } catch (err) {
@@ -412,7 +432,7 @@ export async function fetchReports() {
 
 export async function fetchNotifications() {
   try {
-    const res = await fetch(`${API_BASE_URL}/notifications`);
+    const res = await authFetch(`${API_BASE_URL}/notifications`);
     if (!res.ok) throw new Error("Failed to fetch notifications");
     return await res.json();
   } catch (err) {
@@ -424,7 +444,7 @@ export async function fetchNotifications() {
 export async function assessUploadedDocument(file: File) {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch(`${API_BASE_URL}/documents/assess`, {
+  const res = await authFetch(`${API_BASE_URL}/documents/assess`, {
     method: "POST",
     body: formData,
   });
@@ -447,3 +467,60 @@ export async function fetchSampleDocuments() {
   return fetchDocuments();
 }
 
+export async function fetchCitizenCase() {
+  const res = await authFetch(`${API_BASE_URL}/citizen/my-case`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch citizen case: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchAccusedProfile(accusedId: string) {
+  const res = await authFetch(`${API_BASE_URL}/accused/${encodeURIComponent(accusedId)}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch accused profile: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchAccusedTimeline(accusedId: string) {
+  const res = await authFetch(`${API_BASE_URL}/accused/${encodeURIComponent(accusedId)}/timeline`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch accused timeline: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchDuplicateCandidates() {
+  const res = await authFetch(`${API_BASE_URL}/accused/duplicates/candidates`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch duplicate candidates: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function resolveDuplicateCandidate(payload: {
+  candidate_id: string;
+  action: string;
+  resolution_notes?: string;
+  target_canonical_id?: string;
+}) {
+  const res = await authFetch(`${API_BASE_URL}/accused/duplicates/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.detail || `Failed to resolve duplicate: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchDemoUsers() {
+  const res = await authFetch(`${API_BASE_URL}/auth/demo-users`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch demo users: HTTP ${res.status}`);
+  }
+  return await res.json();
+}

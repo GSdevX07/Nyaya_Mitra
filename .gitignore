@@ -6,11 +6,16 @@ node_modules/
 
 # Python / Backend
 backend/__pycache__/
+**/__pycache__/
 *.pyc
 .env
+backend/.env
 .venv/
 env/
 venv/
+.pytest_cache/
+*.db
+scratch/
 
 # System / OS
 .DS_Store

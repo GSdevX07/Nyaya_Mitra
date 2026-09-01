@@ -27,9 +27,11 @@ import {
   type TimelineEvent,
   type LegalNeedItem,
 } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { jsPDF } from "jspdf";
 
 export function CaseIntelligence() {
+  const { hasRole } = useAuth();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -120,12 +122,20 @@ export function CaseIntelligence() {
   };
 
   const handleVerifyEvidence = async (eviId: string) => {
+    // Clear any stale result from a previous verify call immediately
+    setEvidenceVerificationResult(null);
     setVerifyingEvidenceId(eviId);
     try {
       const res = await verifyEvidence(eviId);
       setEvidenceVerificationResult(res);
     } catch (err: any) {
-      alert("Evidence verification error: " + err.message);
+      // Network failure (not HTTP error) — show inline
+      setEvidenceVerificationResult({
+        error: err?.message ?? "Network error — could not reach verification service.",
+        integrity_verified: false,
+        stored_hash: null,
+        computed_hash: null,
+      });
     } finally {
       setVerifyingEvidenceId(null);
     }
@@ -220,7 +230,7 @@ export function CaseIntelligence() {
 
         {/* Workflow Action Gate */}
         <div className="flex items-center gap-2">
-          {!approvalDone && (
+          {!approvalDone && hasRole("SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN", "DLSA_OFFICER") && (
             <button
               onClick={handleApprove}
               disabled={approving || !eligibility.eligible || !completeness.is_complete}
@@ -235,7 +245,7 @@ export function CaseIntelligence() {
             </button>
           )}
 
-          {isReadyForFiling && (
+          {isReadyForFiling && hasRole("DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN", "DLSA_OFFICER") && (
             <button
               onClick={handleFileInCourt}
               disabled={filing}
@@ -698,14 +708,45 @@ export function CaseIntelligence() {
             })}
 
             {evidenceVerificationResult && (
-              <div className="p-4 rounded border bg-emerald-500/10 border-emerald-500/30 text-xs font-mono space-y-1">
-                <p className="font-bold text-emerald-600 dark:text-emerald-400">
-                  CRYPTOGRAPHIC INTEGRITY VERIFIED
-                </p>
-                <p className="text-foreground/80">Stored Hash: {evidenceVerificationResult.stored_hash}</p>
-                <p className="text-foreground/80">Computed Hash: {evidenceVerificationResult.computed_hash}</p>
-                <p className="text-muted-foreground text-[10px]">{evidenceVerificationResult.note}</p>
-              </div>
+              evidenceVerificationResult.error ? (
+                /* Access Denied / Other API Error */
+                <div className="p-4 rounded border bg-red-500/10 border-red-500/30 text-xs font-mono space-y-1">
+                  <p className="font-bold text-red-600">VERIFICATION FAILED — ACCESS DENIED</p>
+                  <p className="text-muted-foreground text-[10px]">{evidenceVerificationResult.error}</p>
+                </div>
+              ) : evidenceVerificationResult.integrity_verified ? (
+                /* Authentic — Hashes Match */
+                <div className="p-4 rounded border bg-emerald-500/10 border-emerald-500/30 text-xs font-mono space-y-1.5">
+                  <p className="font-bold text-emerald-600 dark:text-emerald-400">
+                    ✔ CRYPTOGRAPHIC INTEGRITY VERIFIED — AUTHENTIC
+                  </p>
+                  <p className="text-foreground/80 break-all">
+                    <span className="text-muted-foreground">Stored Hash:&nbsp;</span>
+                    {evidenceVerificationResult.stored_hash}
+                  </p>
+                  <p className="text-foreground/80 break-all">
+                    <span className="text-muted-foreground">Computed Hash:&nbsp;</span>
+                    {evidenceVerificationResult.computed_hash}
+                  </p>
+                  <p className="text-muted-foreground text-[10px]">{evidenceVerificationResult.note}</p>
+                </div>
+              ) : (
+                /* Tampered — Hashes Do Not Match */
+                <div className="p-4 rounded border bg-red-500/10 border-red-500/30 text-xs font-mono space-y-1.5">
+                  <p className="font-bold text-red-600">
+                    ⚠ INTEGRITY VIOLATION — POSSIBLE TAMPERING DETECTED
+                  </p>
+                  <p className="text-foreground/80 break-all">
+                    <span className="text-muted-foreground">Stored Hash (Original):&nbsp;</span>
+                    {evidenceVerificationResult.stored_hash}
+                  </p>
+                  <p className="text-foreground/80 break-all">
+                    <span className="text-muted-foreground">Computed Hash (Current):&nbsp;</span>
+                    {evidenceVerificationResult.computed_hash}
+                  </p>
+                  <p className="text-red-500 text-[10px] font-semibold">{evidenceVerificationResult.note}</p>
+                </div>
+              )
             )}
           </div>
         </div>

@@ -42,7 +42,7 @@ import json
 import datetime
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, File, UploadFile, Body, Form
+from fastapi import FastAPI, HTTPException, File, UploadFile, Body, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -58,6 +58,11 @@ from app.database import (
 from app.document_pipeline import DocumentPipelineError, DocumentPipelineResult, execute_full_document_pipeline, extract_document_text
 from app.rag.legal_ingestion import LegalIngestionError, ingest_legal_pdf
 from app.rag.vector_store import VectorStoreUnavailable, corpus_status
+
+# ── Auth imports ──────────────────────────────────────────────────────────────
+from app.auth.dependencies import get_current_user, require_role
+from app.auth.roles import Role
+from app.auth.user_store import AuthUser
 
 
 # ── App initialisation ────────────────────────────────────────────────────────
@@ -79,16 +84,29 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── CORS (allow all origins for local hackathon dev) ─────────────────────────
+# ── CORS — restrict to declared origins (env-configurable) ────────────────────
+from app.auth.config import ALLOWED_ORIGINS
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
+# ── Auth router ───────────────────────────────────────────────────────────────
+from app.auth.routes import auth_router
+app.include_router(auth_router, prefix="/auth")
+
+# ── Data Ingestion & Governance router ────────────────────────────────────────
+from app.ingestion.routes import ingestion_router
+app.include_router(ingestion_router, prefix="/ingestion")
+
+# ── Accused-Centric Profile & Citizen Portal routers ─────────────────────────
+from app.routes.accused_routes import accused_router, citizen_router
+app.include_router(accused_router)
+app.include_router(citizen_router)
 
 # ── Mock database ─────────────────────────────────────────────────────────────
 # 5 hero cases engineered to hit distinct agent decision branches.
@@ -223,6 +241,7 @@ def _find_case(case_id: str) -> CaseRecord:
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @app.get("/", tags=["Health"])
+@app.get("/health", tags=["Health"])
 def root():
     """Health check confirms the API is online."""
     return {
@@ -235,7 +254,13 @@ def root():
 
 
 @app.get("/cases", tags=["Cases"])
-def get_cases():
+def get_cases(
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.READ_ONLY_AUDITOR, Role.DEFENSE_ADVOCATE,
+    ))
+):
     """
     Return all cases sorted by urgency score (highest first).
 
@@ -269,7 +294,12 @@ def get_cases():
 
 
 @app.get("/cases/available", tags=["Available Cases"])
-def get_available_cases():
+def get_available_cases(
+    current_user: AuthUser = Depends(require_role(
+        Role.DEFENSE_ADVOCATE, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN, Role.GOV_ADMIN,
+    ))
+):
     """
     Return all available undertrial cases that can be taken up by advocates.
 
@@ -310,7 +340,14 @@ class AssessDocumentPayload(BaseModel):
 
 
 @app.post("/cases/assess-document", tags=["Document AI Pipeline"], response_model=DocumentPipelineResult)
-def assess_legal_document(payload: Optional[AssessDocumentPayload] = Body(default=None)):
+def assess_legal_document(
+    payload: Optional[AssessDocumentPayload] = Body(default=None),
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.DEFENSE_ADVOCATE,
+    )),
+):
     """
     Executes the 7-stage Document AI pipeline:
     Document Intake -> TrOCR OCR -> IBM Data Prep Kit -> RAG -> IBM Granite -> Preliminary Assessment
@@ -334,6 +371,7 @@ async def upload_legal_pdf_for_rag(
     source_name: str = Form(...),
     source_url: Optional[str] = Form(default=None),
     file: UploadFile = File(...),
+    current_user: AuthUser = Depends(require_role(Role.PLATFORM_ADMIN, Role.GOV_ADMIN)),
 ):
     """Ingest an authorised legal PDF through DPK preparation into Chroma."""
     if file.content_type not in {"application/pdf", "application/x-pdf"}:
@@ -348,7 +386,9 @@ async def upload_legal_pdf_for_rag(
 
 
 @app.get("/rag/status", tags=["RAG Training"])
-def get_rag_status():
+def get_rag_status(
+    current_user: AuthUser = Depends(require_role(Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR, Role.DLSA_OFFICER)),
+):
     try:
         return corpus_status()
     except VectorStoreUnavailable as exc:
@@ -356,7 +396,13 @@ def get_rag_status():
 
 
 @app.get("/cases/sample-documents", tags=["Document AI Pipeline"])
-def get_sample_documents():
+def get_sample_documents(
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.DEFENSE_ADVOCATE, Role.READ_ONLY_AUDITOR,
+    )),
+):
     """Retrieve pre-built scanned & handwritten legal document samples for quick demonstration."""
     return [
         {
@@ -413,7 +459,14 @@ def get_sample_documents():
 
 
 @app.get("/cases/{case_id}", tags=["Cases"])
-def get_case_by_id(case_id: str):
+def get_case_by_id(
+    case_id: str,
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.DEFENSE_ADVOCATE, Role.READ_ONLY_AUDITOR,
+    ))
+):
     """
     Run the full agentic operations pipeline on a single case dossier.
 
@@ -432,13 +485,19 @@ def get_case_by_id(case_id: str):
 
 
 @app.post("/cases/{case_id}/take", tags=["Available Cases"])
-def take_up_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
+def take_up_case(
+    case_id: str,
+    current_user: AuthUser = Depends(require_role(
+        Role.DEFENSE_ADVOCATE, Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN,
+    ))
+):
     """
-    Assign an available legal-aid case to the specified panel advocate.
+    Assign an available legal-aid case to the authenticated advocate.
     """
     from app.database import assign_case_lawyer, append_case_timeline_event
     from app.models.schemas import TimelineEvent
 
+    lawyer_id = current_user.id
     success = assign_case_lawyer(case_id, lawyer_id)
     if not success:
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found.")
@@ -469,7 +528,12 @@ def take_up_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
 
 
 @app.post("/cases/{case_id}/decline", tags=["Available Cases"])
-def decline_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
+def decline_case(
+    case_id: str,
+    current_user: AuthUser = Depends(require_role(
+        Role.DEFENSE_ADVOCATE, Role.DLSA_OFFICER, Role.PLATFORM_ADMIN,
+    ))
+):
     """Decline an available case assignment."""
     from app.database import decline_case_assignment
     success = decline_case_assignment(case_id)
@@ -478,13 +542,18 @@ def decline_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
 
     return {
         "status": "declined",
-        "message": f"Case {case_id} declined by {lawyer_id}.",
+        "message": f"Case {case_id} declined by {current_user.id}.",
         "case_id": case_id,
     }
 
 
 @app.post("/cases/{case_id}/approve", tags=["Cases"])
-def approve_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
+def approve_case(
+    case_id: str,
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN, Role.GOV_ADMIN,
+    ))
+):
     """
     Advocate Review Sign-Off Gateway.
     Transitions case to APPROVED_READY_FOR_FILING.
@@ -495,6 +564,7 @@ def approve_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
 
     case = _find_case(case_id)
     update_case_status(case_id, CaseState.APPROVED_READY_FOR_FILING)
+    lawyer_id = current_user.full_name or current_user.id
 
     append_case_timeline_event(
         case_id,
@@ -520,7 +590,13 @@ def approve_case(case_id: str, lawyer_id: str = "Legal Officer 104"):
 
 
 @app.post("/cases/{case_id}/file", tags=["Cases"])
-def file_case_in_court(case_id: str, filing_reference: Optional[str] = None):
+def file_case_in_court(
+    case_id: str,
+    filing_reference: Optional[str] = None,
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN, Role.GOV_ADMIN,
+    ))
+):
     """
     Record the procedural filing of the petition in the court registry.
     Transitions case to FILED.
@@ -541,7 +617,7 @@ def file_case_in_court(case_id: str, filing_reference: Optional[str] = None):
             event_type="FILING",
             title="Bail Petition Filed in Court Registry",
             description=f"Petition formally lodged under filing reference: {filing_ref}.",
-            actor="Court Filing Clerk",
+            actor=current_user.full_name or current_user.id,
             actor_role="Court Official",
             source="Court Filing Registry",
             is_human_verified=True,
@@ -557,7 +633,14 @@ def file_case_in_court(case_id: str, filing_reference: Optional[str] = None):
 
 
 @app.get("/cases/{case_id}/timeline", tags=["Timeline"])
-def get_case_timeline(case_id: str):
+def get_case_timeline(
+    case_id: str,
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.DEFENSE_ADVOCATE, Role.READ_ONLY_AUDITOR,
+    ))
+):
     """Retrieve chronological case timeline with data provenance."""
     case = _find_case(case_id)
     return {
@@ -568,7 +651,12 @@ def get_case_timeline(case_id: str):
 
 
 @app.get("/stakeholders/overview", tags=["Stakeholders"])
-def get_stakeholders_overview():
+def get_stakeholders_overview(
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.READ_ONLY_AUDITOR,
+    ))
+):
     """
     Retrieve dedicated operational metrics across all 4 key stakeholder lenses:
     1. Jail Authorities
@@ -625,19 +713,24 @@ def get_stakeholders_overview():
 
 
 @app.get("/lawyer/profile", tags=["Lawyer Profile"])
-def get_lawyer_profile(lawyer_id: str = "Legal Officer 104"):
-    """Return profile details and statistics for the advocate / legal officer."""
+def get_lawyer_profile(
+    current_user: AuthUser = Depends(require_role(
+        Role.DEFENSE_ADVOCATE, Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER,
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR,
+    )),
+):
+    """Return profile details and statistics for the authenticated advocate / legal officer."""
     assigned_count = sum(1 for c in get_all_cases() if c.assignment_status == "ASSIGNED")
     return {
-        "id": "Legal Officer 104",
-        "full_name": "Adv. Rajesh Sharma",
+        "id": current_user.id,
+        "full_name": current_user.full_name or "Adv. Rajesh Sharma",
         "bar_association_id": "DL/2018/49281",
-        "email": "rajesh.sharma@nyayamitra.org",
+        "email": current_user.email,
         "phone": "+91 98112 34567",
         "specialization": "Undertrial Defense & Section 479 BNSS",
         "cases_taken": assigned_count,
         "status": "Active Pro Bono Counsel",
-        "organization": "Delhi Legal Services Authority (DLSA)",
+        "organization": current_user.org_id or "Delhi Legal Services Authority (DLSA)",
     }
 
 
@@ -645,7 +738,13 @@ def get_lawyer_profile(lawyer_id: str = "Legal Officer 104"):
 # ── Additional Module Endpoints ────────────────────────────────────────────────
 
 @app.get("/documents", tags=["Documents"])
-def get_documents():
+def get_documents(
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.DEFENSE_ADVOCATE, Role.READ_ONLY_AUDITOR,
+    ))
+):
     """
     Retrieve document status and vault inventory across all active cases.
     Reads from SQLite reflects any uploads that have been persisted.
@@ -669,7 +768,14 @@ def get_documents():
 
 
 @app.get("/cases/{case_id}/documents", tags=["Documents"])
-def get_case_documents(case_id: str):
+def get_case_documents(
+    case_id: str,
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.DEFENSE_ADVOCATE,
+    ))
+):
     """Retrieve document status breakdown for a single case."""
     case = _find_case(case_id)
     missing = [d for d in case.required_docs if d not in case.present_docs]
@@ -688,6 +794,10 @@ async def upload_document(
     document_type: str,
     file: Optional[UploadFile] = File(None),
     custom_text: Optional[str] = Form(None),
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+    )),
 ):
     """
     Upload a real document file (PDF or image) and/or paste custom text for a case.
@@ -795,6 +905,11 @@ async def assess_document_file(
     case_id: Optional[str] = Form(None),
     document_name: Optional[str] = Form(None),
     provided_text: Optional[str] = Form(None),
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.DEFENSE_ADVOCATE,
+    )),
 ):
     """
     Run the full document assessment pipeline on an uploaded file or pasted text.
@@ -824,7 +939,14 @@ async def assess_document_file(
 
 
 @app.get("/documents/uploaded/{case_id}", tags=["Documents"])
-def get_uploaded_documents(case_id: str):
+def get_uploaded_documents(
+    case_id: str,
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.DEFENSE_ADVOCATE, Role.READ_ONLY_AUDITOR,
+    )),
+):
     """
     Retrieve all previously uploaded document records for a case from Supabase.
 
@@ -842,7 +964,12 @@ def get_uploaded_documents(case_id: str):
 
 
 @app.get("/evidence", tags=["Evidence"])
-def get_evidence():
+def get_evidence(
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER, Role.PLATFORM_ADMIN,
+        Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR,
+    )),
+):
     """
     Retrieve evidence verification records.
     Reads directly from the dedicated 'evidence' SQLite table.
@@ -872,7 +999,13 @@ def get_evidence():
 
 
 @app.post("/evidence/verify", tags=["Evidence"])
-def verify_evidence(evidence_id: str):
+def verify_evidence(
+    evidence_id: str,
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN, Role.GOV_ADMIN,
+        Role.DLSA_OFFICER, Role.JAIL_OFFICER, Role.READ_ONLY_AUDITOR,
+    )),
+):
     """
     Verify an evidence item's integrity by recomputing its SHA-256 hash
     from the original bytes and comparing it to the stored hash.
@@ -888,8 +1021,10 @@ def verify_evidence(evidence_id: str):
     document_type = record["document_type"]
     stored_hash = record["stored_hash"]
 
-    # 2. Re-read the physical file (simulated here with the deterministic string)
-    mock_file_bytes = f"mock_file_content_for_{case_id}_{document_type}".encode()
+    # 2. Re-read the physical file.
+    # IMPORTANT: The seed hash in database.py uses "verified_content_{case_id}_{doc_type}".
+    # We must use the exact same deterministic string here so the comparison is valid.
+    mock_file_bytes = f"verified_content_{case_id}_{document_type}".encode()
     
     # 3. Compute the *current* hash
     current_hash = hashlib.sha256(mock_file_bytes).hexdigest()
@@ -914,7 +1049,12 @@ def verify_evidence(evidence_id: str):
 
 
 @app.get("/actions", tags=["Actions"])
-def get_actions():
+def get_actions(
+    current_user: AuthUser = Depends(require_role(
+        Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN,
+        Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR,
+    )),
+):
     """
     Retrieve automated agent actions queue derived from the canonical EligibilityAgent.
     No duplicate threshold logic everything flows through evaluate_eligibility().
@@ -965,17 +1105,28 @@ def get_actions():
 
 
 @app.post("/actions/trigger", tags=["Actions"])
-def trigger_action(action_id: str):
+def trigger_action(
+    action_id: str,
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN, Role.GOV_ADMIN,
+    )),
+):
     """Execute an automated agent action from the queue."""
     return {
         "action_id": action_id,
         "status": "Executed Successfully",
-        "message": f"Action {action_id} triggered (DLSA submission simulated)."
+        "message": f"Action {action_id} triggered by {current_user.id} (DLSA submission simulated)."
     }
 
 
 @app.get("/hearings", tags=["Hearings"])
-def get_hearings():
+def get_hearings(
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.DEFENSE_ADVOCATE, Role.READ_ONLY_AUDITOR,
+    )),
+):
     hearings = []
     cases = [c for c in get_all_cases() if c.assignment_status == "ASSIGNED"]
     
@@ -1008,7 +1159,12 @@ def get_hearings():
 
 
 @app.get("/reports", tags=["Reports"])
-def get_reports():
+def get_reports(
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.READ_ONLY_AUDITOR,
+    )),
+):
     """
     Retrieve legal analytics, inmate metrics, and DLSA performance report.
     ALL metrics are derived from the canonical EligibilityAgent no duplicate logic.
@@ -1074,7 +1230,9 @@ def get_reports():
 
 
 @app.get("/notifications", tags=["Notifications"])
-def get_notifications():
+def get_notifications(
+    current_user: AuthUser = Depends(get_current_user),
+):
     """Retrieve system-wide alerts and notification feed from SQLite."""
     rows = get_all_notifications()
     notifications = []

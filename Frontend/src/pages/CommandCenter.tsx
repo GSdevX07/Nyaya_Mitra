@@ -10,13 +10,23 @@ import {
   ChevronRight,
   Loader2,
   RefreshCw,
+  UserCheck,
 } from "lucide-react";
 import { fetchStakeholdersOverview, fetchCases, type CaseRecord } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 type StakeholderRole = "jail" | "dlsa" | "slsa" | "advocate";
 
+function getInitialStakeholderRole(role?: string): StakeholderRole {
+  if (role === "JAIL_OFFICER") return "jail";
+  if (role === "DEFENSE_ADVOCATE" || role === "CONTROLLED_EXTERNAL_ADVOCATE") return "advocate";
+  if (role === "GOV_ADMIN" || role === "READ_ONLY_AUDITOR") return "slsa";
+  return "dlsa";
+}
+
 export function CommandCenter() {
-  const [role, setRole] = useState<StakeholderRole>("dlsa");
+  const { user } = useAuth();
+  const [role, setRole] = useState<StakeholderRole>(() => getInitialStakeholderRole(user?.role));
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<any>(null);
   const [cases, setCases] = useState<CaseRecord[]>([]);
@@ -256,6 +266,13 @@ export function CommandCenter() {
                           </span>
                         )}
                         <Link
+                          to={`/accused/acc_${c.case_id.toLowerCase().replace("-", "_")}`}
+                          className="px-2.5 py-1.5 bg-secondary hover:bg-muted text-foreground border border-border rounded-sm text-xs font-serif font-semibold flex items-center gap-1 transition-colors"
+                          title="View Accused Dossier"
+                        >
+                          <UserCheck className="w-3.5 h-3.5" /> Profile
+                        </Link>
+                        <Link
                           to={`/cases/${c.case_id}`}
                           className="px-3 py-1.5 bg-primary text-primary-foreground hover:opacity-90 rounded-sm text-xs font-semibold flex items-center gap-1 font-serif"
                         >
@@ -362,12 +379,21 @@ export function CommandCenter() {
                             {c.court_name} • DLSA File: {c.dlsa_reference_number}
                           </p>
                         </div>
-                        <Link
-                          to={`/cases/${c.case_id}`}
-                          className="px-3 py-1.5 bg-primary text-primary-foreground rounded-sm text-xs font-serif font-semibold flex items-center gap-1"
-                        >
-                          Open Dossier <ChevronRight className="w-3.5 h-3.5" />
-                        </Link>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <Link
+                            to={`/accused/acc_${c.case_id.toLowerCase().replace("-", "_")}`}
+                            className="px-2.5 py-1.5 bg-secondary hover:bg-muted text-foreground border border-border rounded-sm text-xs font-serif font-semibold flex items-center gap-1 transition-colors"
+                            title="View Accused Dossier"
+                          >
+                            <UserCheck className="w-3.5 h-3.5" /> Profile
+                          </Link>
+                          <Link
+                            to={`/cases/${c.case_id}`}
+                            className="px-3 py-1.5 bg-primary text-primary-foreground rounded-sm text-xs font-serif font-semibold flex items-center gap-1"
+                          >
+                            Open Dossier <ChevronRight className="w-3.5 h-3.5" />
+                          </Link>
+                        </div>
                       </div>
                     ))}
                   </div>

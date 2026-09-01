@@ -11,7 +11,17 @@ from app.agents.eligibility_agent import evaluate_eligibility
 from app.agents.orchestrator import process_case
 from app.models.schemas import CaseRecord, PrisonerCategory, LegalCode, CaseState
 
+from app.auth.tokens import create_access_token
+from app.auth.roles import Role
+
 client = TestClient(app)
+
+_admin_token = create_access_token(
+    subject="test_admin_hero",
+    role=Role.PLATFORM_ADMIN.value,
+    org_id="org_dlsa_central",
+)
+AUTH_HEADERS = {"Authorization": f"Bearer {_admin_token}"}
 
 
 def setup_module():
@@ -28,7 +38,7 @@ def test_health_endpoint():
 
 
 def test_cases_list_and_sorting():
-    response = client.get("/cases")
+    response = client.get("/cases", headers=AUTH_HEADERS)
     assert response.status_code == 200
     cases = response.json()
     assert len(cases) >= 6
@@ -108,7 +118,7 @@ def test_hero_case_6_post_release_preserved():
 
 
 def test_stakeholders_overview_endpoint():
-    response = client.get("/stakeholders/overview")
+    response = client.get("/stakeholders/overview", headers=AUTH_HEADERS)
     assert response.status_code == 200
     data = response.json()
     assert "jail_view" in data
@@ -119,26 +129,26 @@ def test_stakeholders_overview_endpoint():
 
 def test_human_approval_and_filing_lifecycle():
     """Test explicit transition: REVIEW -> APPROVED_READY_FOR_FILING -> FILED."""
-    appr_res = client.post("/cases/UTP-0001/approve?lawyer_id=Adv.%20Sharma")
+    appr_res = client.post("/cases/UTP-0001/approve?lawyer_id=Adv.%20Sharma", headers=AUTH_HEADERS)
     assert appr_res.status_code == 200
     assert appr_res.json()["status"] == "APPROVED_READY_FOR_FILING"
 
-    file_res = client.post("/cases/UTP-0001/file?filing_reference=EC-DEL-2025-001")
+    file_res = client.post("/cases/UTP-0001/file?filing_reference=EC-DEL-2025-001", headers=AUTH_HEADERS)
     assert file_res.status_code == 200
     assert file_res.json()["status"] == "FILED"
 
-    timeline_res = client.get("/cases/UTP-0001/timeline")
+    timeline_res = client.get("/cases/UTP-0001/timeline", headers=AUTH_HEADERS)
     assert timeline_res.status_code == 200
     events = timeline_res.json()["timeline"]
     assert any(e["event_type"] == "FILING" for e in events)
 
 
 def test_evidence_integrity_verification():
-    response = client.get("/evidence")
+    response = client.get("/evidence", headers=AUTH_HEADERS)
     assert response.status_code == 200
     items = response.json()
     assert len(items) > 0
     evi_id = items[0]["id"]
-    verify_res = client.post(f"/evidence/verify?evidence_id={evi_id}")
+    verify_res = client.post(f"/evidence/verify?evidence_id={evi_id}", headers=AUTH_HEADERS)
     assert verify_res.status_code == 200
     assert "status" in verify_res.json()

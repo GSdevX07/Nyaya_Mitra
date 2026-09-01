@@ -566,31 +566,261 @@ _MEMORY_NOTIFICATIONS: List[Dict[str, Any]] = []
 _MEMORY_UPLOADED_DOCS: List[Dict[str, Any]] = []
 
 
+def get_db_connection() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    return conn
+
+
 def _init_sqlite_tables(conn: sqlite3.Connection):
     """Ensure all local SQLite tables exist and have up-to-date column definitions."""
     cursor = conn.cursor()
+
+    # 1. Organizations & Facilities (Tenancy Layer)
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS cases (
-            case_id TEXT PRIMARY KEY,
-            data JSON NOT NULL,
-            status TEXT DEFAULT 'DETECTED',
-            assignment_status TEXT DEFAULT 'AVAILABLE',
-            assigned_lawyer_id TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        CREATE TABLE IF NOT EXISTS organizations (
+            id TEXT PRIMARY KEY,
+            code TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            org_type TEXT NOT NULL,
+            state TEXT,
+            district TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP
         )
     """)
-    # Safely migrate existing tables if columns were missing
-    for col, col_type in [
-        ("status", "TEXT DEFAULT 'DETECTED'"),
-        ("assignment_status", "TEXT DEFAULT 'AVAILABLE'"),
-        ("assigned_lawyer_id", "TEXT"),
-        ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
-    ]:
-        try:
-            cursor.execute(f"ALTER TABLE cases ADD COLUMN {col} {col_type}")
-        except Exception:
-            pass  # column already exists
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS facilities (
+            id TEXT PRIMARY KEY,
+            organization_id TEXT,
+            name TEXT NOT NULL,
+            facility_type TEXT NOT NULL,
+            state TEXT,
+            district TEXT,
+            capacity INTEGER DEFAULT 500,
+            current_occupancy INTEGER DEFAULT 0,
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP,
+            FOREIGN KEY (organization_id) REFERENCES organizations(id)
+        )
+    """)
 
+    # 2. Organization Users & Roles (RBAC Layer)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS organization_users (
+            id TEXT PRIMARY KEY,
+            organization_id TEXT,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT,
+            full_name TEXT NOT NULL,
+            role TEXT NOT NULL,
+            phone TEXT,
+            district TEXT,
+            facility_ids TEXT DEFAULT '[]',
+            linked_case_id TEXT,
+            relationship_to_accused TEXT,
+            bar_registration_no TEXT,
+            failed_login_count INTEGER DEFAULT 0,
+            locked_until TIMESTAMP,
+            last_login_at TIMESTAMP,
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP,
+            FOREIGN KEY (organization_id) REFERENCES organizations(id)
+        )
+    """)
+
+    # Dynamic column upgrades for pre-existing SQLite databases
+    try:
+        cols = [c[1] for c in cursor.execute("PRAGMA table_info(organization_users);").fetchall()]
+        if "linked_case_id" not in cols:
+            cursor.execute("ALTER TABLE organization_users ADD COLUMN linked_case_id TEXT;")
+        if "password_hash" not in cols:
+            cursor.execute("ALTER TABLE organization_users ADD COLUMN password_hash TEXT;")
+        if "district" not in cols:
+            cursor.execute("ALTER TABLE organization_users ADD COLUMN district TEXT;")
+        if "facility_ids" not in cols:
+            cursor.execute("ALTER TABLE organization_users ADD COLUMN facility_ids TEXT DEFAULT '[]';")
+        if "relationship_to_accused" not in cols:
+            cursor.execute("ALTER TABLE organization_users ADD COLUMN relationship_to_accused TEXT;")
+        if "failed_login_count" not in cols:
+            cursor.execute("ALTER TABLE organization_users ADD COLUMN failed_login_count INTEGER DEFAULT 0;")
+        if "locked_until" not in cols:
+            cursor.execute("ALTER TABLE organization_users ADD COLUMN locked_until TIMESTAMP;")
+        if "last_login_at" not in cols:
+            cursor.execute("ALTER TABLE organization_users ADD COLUMN last_login_at TIMESTAMP;")
+        if "updated_at" not in cols:
+            cursor.execute("ALTER TABLE organization_users ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+    except Exception as e:
+        print(f"[WARN] SQLite organization_users column upgrade error: {e}")
+
+    # 3. Accused Persons & Custody Records (Individual Subject Master)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS accused_persons (
+            id TEXT PRIMARY KEY,
+            full_name TEXT NOT NULL,
+            gender TEXT DEFAULT 'Male',
+            age INTEGER DEFAULT 30,
+            preferred_language TEXT DEFAULT 'en',
+            health_vulnerability INTEGER DEFAULT 0,
+            health_details TEXT,
+            is_senior_citizen INTEGER DEFAULT 0,
+            repeat_offender INTEGER DEFAULT 0,
+            relative_name TEXT,
+            relative_relation TEXT,
+            relative_phone TEXT,
+            permanent_address TEXT,
+            data_source_status TEXT DEFAULT 'DEMO_SYNTHETIC',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS identity_references (
+            id TEXT PRIMARY KEY,
+            accused_id TEXT NOT NULL,
+            id_type TEXT NOT NULL,
+            id_value TEXT NOT NULL,
+            issuing_authority TEXT,
+            is_verified INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (accused_id) REFERENCES accused_persons(id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS custody_records (
+            id TEXT PRIMARY KEY,
+            accused_id TEXT NOT NULL,
+            facility_id TEXT,
+            admission_date TEXT NOT NULL,
+            prisoner_category TEXT DEFAULT 'UNDERTRIAL',
+            calendar_custody_days INTEGER DEFAULT 0,
+            excluded_delay_days INTEGER DEFAULT 0,
+            countable_custody_days INTEGER DEFAULT 0,
+            is_current_custody INTEGER DEFAULT 1,
+            release_date TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (accused_id) REFERENCES accused_persons(id)
+        )
+    """)
+
+    # 4. Police FIRs & Court Cases (Procedural Docket)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS firs (
+            id TEXT PRIMARY KEY,
+            fir_number TEXT NOT NULL,
+            police_station TEXT NOT NULL,
+            district TEXT,
+            state TEXT,
+            filing_date TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS court_cases (
+            id TEXT PRIMARY KEY,
+            case_number TEXT NOT NULL,
+            accused_id TEXT NOT NULL,
+            fir_id TEXT,
+            organization_id TEXT,
+            cnr_number TEXT,
+            court_name TEXT NOT NULL,
+            district TEXT,
+            state TEXT,
+            legal_code TEXT DEFAULT 'BNS_2023',
+            current_status TEXT DEFAULT 'INTAKE_PENDING',
+            dlsa_reference_number TEXT,
+            assigned_lawyer_id TEXT,
+            assignment_status TEXT DEFAULT 'AVAILABLE',
+            data_source_status TEXT DEFAULT 'DEMO_SYNTHETIC',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP,
+            FOREIGN KEY (accused_id) REFERENCES accused_persons(id),
+            FOREIGN KEY (fir_id) REFERENCES firs(id)
+        )
+    """)
+
+    # 5. Charges & Legal Sections
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS charges (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL,
+            legal_code TEXT NOT NULL,
+            section_number TEXT NOT NULL,
+            offence_title TEXT,
+            max_imprisonment_days INTEGER DEFAULT 365,
+            is_capital_offence INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (case_id) REFERENCES court_cases(id)
+        )
+    """)
+
+    # 6. Custody Calculations & Bail Applications
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS custody_calculations (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL,
+            rule_version TEXT DEFAULT 'BNSS_479_RULESET_V1_2023',
+            calculation_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            total_calendar_days INTEGER,
+            excluded_delay_days INTEGER,
+            countable_custody_days INTEGER,
+            max_sentence_days INTEGER,
+            statutory_threshold_fraction TEXT,
+            threshold_days INTEGER,
+            days_overdue INTEGER,
+            is_eligible INTEGER,
+            requires_human_legal_review INTEGER DEFAULT 1,
+            review_reasons TEXT,
+            statutory_conditions TEXT,
+            disclaimer TEXT,
+            FOREIGN KEY (case_id) REFERENCES court_cases(id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bail_applications (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL,
+            statutory_section TEXT DEFAULT 'Section 479 BNSS, 2023',
+            petition_draft_text TEXT,
+            advocate_signed_off INTEGER DEFAULT 0,
+            signed_off_by_user_id TEXT,
+            signed_off_at TIMESTAMP,
+            court_filing_reference TEXT,
+            filing_date TEXT,
+            is_filed INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'DRAFT',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (case_id) REFERENCES court_cases(id)
+        )
+    """)
+
+    # 7. Documents, Evidence & Ingestion
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL,
+            document_type TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            storage_path TEXT,
+            file_size_bytes INTEGER DEFAULT 0,
+            mime_type TEXT DEFAULT 'application/pdf',
+            sha256_hash TEXT,
+            is_mandatory INTEGER DEFAULT 1,
+            is_present INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP,
+            FOREIGN KEY (case_id) REFERENCES court_cases(id)
+        )
+    """)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS evidence (
             evidence_id TEXT PRIMARY KEY,
@@ -599,17 +829,6 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
             file_name TEXT NOT NULL,
             stored_hash TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS notifications (
-            id TEXT PRIMARY KEY,
-            case_id TEXT,
-            title TEXT NOT NULL,
-            message TEXT NOT NULL,
-            type TEXT NOT NULL,
-            is_read INTEGER DEFAULT 0,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     cursor.execute("""
@@ -628,6 +847,67 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
             uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # 8. Notifications & Immutable Audit Log
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS notifications (
+            id TEXT PRIMARY KEY,
+            case_id TEXT,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            type TEXT NOT NULL,
+            is_read INTEGER DEFAULT 0,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS audit_events (
+            id TEXT PRIMARY KEY,
+            timestamp TIMESTAMP NOT NULL,
+            actor_id TEXT NOT NULL,
+            actor_role TEXT NOT NULL,
+            organization_id TEXT,
+            action TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            ip_address TEXT,
+            details_json TEXT,
+            is_immutable INTEGER DEFAULT 1
+        )
+    """)
+
+    # 9. Legacy Cases View / Backward Compatibility Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cases (
+            case_id TEXT PRIMARY KEY,
+            data JSON NOT NULL,
+            status TEXT DEFAULT 'DETECTED',
+            assignment_status TEXT DEFAULT 'AVAILABLE',
+            assigned_lawyer_id TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 10. Revoked Tokens Table (Session Invalidation)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS revoked_tokens (
+            jti TEXT PRIMARY KEY,
+            user_id TEXT,
+            expires_at TIMESTAMP NOT NULL,
+            revoked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Performance Indices for Foreign Keys and Lookups
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_court_cases_accused ON court_cases(accused_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_court_cases_status ON court_cases(current_status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_custody_accused ON custody_records(accused_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_charges_case ON charges(case_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_case ON documents(case_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_evidence_case ON evidence(case_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_events(entity_type, entity_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires ON revoked_tokens(expires_at)")
+
     conn.commit()
 
 
@@ -642,10 +922,165 @@ def init_db():
 
     # 2. Populate SQLite
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         _init_sqlite_tables(conn)
         cursor = conn.cursor()
+        # Seed normalized organizations and facilities
+        cursor.execute(
+            "INSERT OR IGNORE INTO organizations (id, code, name, org_type, state, district) VALUES (?, ?, ?, ?, ?, ?)",
+            ("org_dlsa_central", "DLSA-CD", "District Legal Services Authority, Central Delhi", "DLSA", "Delhi", "Central Delhi"),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO organizations (id, code, name, org_type, state, district) VALUES (?, ?, ?, ?, ?, ?)",
+            ("org_tihar_jail", "PRISON-TJ04", "Tihar Central Prison Complex No. 4", "PRISON_JAIL", "Delhi", "West Delhi"),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO facilities (id, organization_id, name, facility_type, state, district, capacity, current_occupancy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("fac_tihar_jail_04", "org_tihar_jail", "Tihar Central Jail No. 4", "Central Jail", "Delhi", "West Delhi", 1200, 840),
+        )
+
+        # Seed Default Organization Users
+        demo_users_seed = [
+            ("demo_admin",        "org_dlsa_central", "admin@demo.nyayamitra.in",        "Platform Administrator (Demo)", "PLATFORM_ADMIN",            "Central Delhi", None),
+            ("demo_gov",          "org_dlsa_central", "gov@demo.nyayamitra.in",          "Government SLSA Admin (Demo)",  "GOV_ADMIN",                  "Central Delhi", None),
+            ("demo_jail",         "org_tihar_jail",   "jail@demo.nyayamitra.in",         "Jail Superintendent (Demo)",    "JAIL_OFFICER",               "Central Delhi", None),
+            ("demo_police",       "org_dlsa_central", "police@demo.nyayamitra.in",       "Police Officer (Demo)",         "POLICE_OFFICER",             "Central Delhi", None),
+            ("demo_dlsa",         "org_dlsa_central", "dlsa@demo.nyayamitra.in",         "DLSA Legal Officer (Demo)",     "DLSA_OFFICER",               "Central Delhi", None),
+            ("demo_supervising",  "org_dlsa_central", "supervising@demo.nyayamitra.in",  "Supervising Officer (Demo)",    "SUPERVISING_LEGAL_OFFICER",  "Central Delhi", None),
+            ("demo_advocate",     "org_dlsa_central", "advocate@demo.nyayamitra.in",     "Defense Advocate (Demo)",       "DEFENSE_ADVOCATE",           "Central Delhi", None),
+            ("demo_ext_advocate", "org_dlsa_central", "extadvocate@demo.nyayamitra.in",  "External Advocate (Demo)",      "CONTROLLED_EXTERNAL_ADVOCATE","Central Delhi",None),
+            ("demo_accused",      "org_dlsa_central", "accused@demo.nyayamitra.in",      "Accused Person (Demo)",         "ACCUSED_USER",               "Central Delhi", "UTP-0001"),
+            ("demo_family",       "org_dlsa_central", "family@demo.nyayamitra.in",       "Family Guardian (Demo)",        "FAMILY_GUARDIAN",            "Central Delhi", "UTP-0001"),
+            ("demo_auditor",      "org_dlsa_central", "auditor@demo.nyayamitra.in",      "Read-Only Auditor (Demo)",      "READ_ONLY_AUDITOR",          "Central Delhi", None),
+        ]
+        for u in demo_users_seed:
+            cursor.execute(
+                "INSERT OR REPLACE INTO organization_users (id, organization_id, email, full_name, role, district, linked_case_id, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+                u
+            )
+
         for c in hero_cases:
+            accused_id = f"acc_{c.case_id.lower().replace('-', '_')}"
+            fir_id = f"fir_{c.case_id.lower().replace('-', '_')}"
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+            # 1. Accused Person Record
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO accused_persons (
+                    id, full_name, gender, age, preferred_language, health_vulnerability, health_details,
+                    is_senior_citizen, repeat_offender, relative_name, relative_relation, relative_phone,
+                    permanent_address, data_source_status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    accused_id,
+                    c.name,
+                    "Male",
+                    c.urgency_flags.age,
+                    c.preferred_language,
+                    1 if c.urgency_flags.health_flag else 0,
+                    c.urgency_flags.health_details,
+                    1 if (c.urgency_flags.age >= 60 or getattr(c.urgency_flags, 'is_senior_citizen', False)) else 0,
+                    1 if getattr(c.urgency_flags, 'repeat_offender', False) else 0,
+                    c.relative_name,
+                    c.relative_relation,
+                    c.relative_phone,
+                    c.permanent_address,
+                    c.data_source_status.value,
+                    now_iso,
+                ),
+            )
+
+            # 2. Custody Record
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO custody_records (
+                    id, accused_id, facility_id, admission_date, prisoner_category, calendar_custody_days,
+                    excluded_delay_days, countable_custody_days, is_current_custody, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"cus_{c.case_id.lower().replace('-', '_')}",
+                    accused_id,
+                    "fac_tihar_jail_04",
+                    c.arrest_date,
+                    c.prisoner_category.value,
+                    c.custody_days,
+                    c.excluded_delay_days,
+                    max(0, c.custody_days - c.excluded_delay_days),
+                    1,
+                    now_iso,
+                ),
+            )
+
+            # 3. FIR Record
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO firs (
+                    id, fir_number, police_station, district, state, filing_date
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    fir_id,
+                    c.fir_number or f"FIR-2025-{c.case_id}",
+                    c.police_station or "Gandhi Nagar Police Station",
+                    c.district or "Central Delhi",
+                    c.state or "Delhi",
+                    c.arrest_date,
+                ),
+            )
+
+            # 4. Court Case Record
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO court_cases (
+                    id, case_number, accused_id, fir_id, organization_id, cnr_number, court_name,
+                    district, state, legal_code, current_status, dlsa_reference_number,
+                    assigned_lawyer_id, assignment_status, data_source_status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    c.case_id,
+                    c.case_id,
+                    accused_id,
+                    fir_id,
+                    "org_dlsa_central",
+                    c.cnr_number,
+                    c.court_name,
+                    c.district,
+                    c.state,
+                    c.legal_code.value,
+                    c.status.value,
+                    c.dlsa_reference_number,
+                    c.assigned_lawyer_id,
+                    c.assignment_status,
+                    c.data_source_status.value,
+                    now_iso,
+                ),
+            )
+
+            # 5. Charges
+            for sec in c.offense_sections:
+                chg_id = f"chg_{c.case_id.lower().replace('-', '_')}_{sec.replace(' ', '_').replace('(', '').replace(')', '')}"
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO charges (
+                        id, case_id, legal_code, section_number, offence_title, max_imprisonment_days, is_capital_offence
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        chg_id,
+                        c.case_id,
+                        c.legal_code.value,
+                        sec,
+                        f"Statutory Offence under {sec}",
+                        c.max_sentence_days_for_offense,
+                        1 if c.punishable_by_death_or_life else 0,
+                    ),
+                )
+
+            # 6. Legacy / Compatibility Table
             cursor.execute("SELECT case_id FROM cases WHERE case_id = ?", (c.case_id,))
             row = cursor.fetchone()
             if not row:
@@ -654,7 +1089,6 @@ def init_db():
                     (c.case_id, c.model_dump_json(), c.status.value, c.assignment_status, c.assigned_lawyer_id),
                 )
             else:
-                # Refresh data with enriched canonical schema
                 cursor.execute(
                     "UPDATE cases SET data = ?, status = ? WHERE case_id = ?",
                     (c.model_dump_json(), c.status.value, c.case_id),
@@ -671,6 +1105,25 @@ def init_db():
                     "INSERT OR REPLACE INTO evidence (evidence_id, case_id, document_type, file_name, stored_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                     (evi_id, c.case_id, doc, f"{doc}.pdf", doc_hash, now_iso),
                 )
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO documents (
+                        id, case_id, document_type, file_name, storage_path, file_size_bytes, mime_type, sha256_hash, is_mandatory, is_present
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"doc_{c.case_id.lower().replace('-', '_')}_{doc}",
+                        c.case_id,
+                        doc,
+                        f"{doc}.pdf",
+                        f"/evidence/{c.case_id}/{doc}.pdf",
+                        102400,
+                        "application/pdf",
+                        doc_hash,
+                        1 if doc in c.required_docs else 0,
+                        1,
+                    ),
+                )
         conn.commit()
         conn.close()
     except Exception as e:
@@ -678,9 +1131,26 @@ def init_db():
 
 
 def get_all_cases() -> List[CaseRecord]:
-    """Retrieve all case records from SQLite / In-Memory."""
+    """Retrieve all case records — Supabase (production) with SQLite fallback."""
+    from app.supabase_adapter import supa_get_all_legacy_cases, is_supabase_active
+    if is_supabase_active():
+        try:
+            raw_cases = supa_get_all_legacy_cases()
+            if raw_cases:
+                results = []
+                for d in raw_cases:
+                    try:
+                        results.append(CaseRecord.model_validate(d))
+                    except Exception:
+                        pass
+                if results:
+                    return results
+        except Exception as e:
+            print(f"[WARN] Supabase get_all_cases error: {e}. Falling back to SQLite.")
+
+    # SQLite fallback
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         _init_sqlite_tables(conn)
         cursor = conn.cursor()
         cursor.execute("SELECT data FROM cases")
@@ -692,6 +1162,7 @@ def get_all_cases() -> List[CaseRecord]:
         print(f"[WARN] SQLite get_all_cases error: {e}")
 
     return list(_MEMORY_CASES.values())
+
 
 
 def get_case(case_id: str) -> Optional[CaseRecord]:
@@ -712,15 +1183,24 @@ def get_case(case_id: str) -> Optional[CaseRecord]:
 
 
 def update_case_status(case_id: str, new_status: CaseState) -> bool:
-    """Update case lifecycle state."""
+    """Update case lifecycle state — dual-writes to Supabase (when active) and SQLite."""
     case = get_case(case_id)
     if not case:
         return False
     case.status = new_status
     _MEMORY_CASES[case_id] = case
 
+    # Supabase (production) write
+    from app.supabase_adapter import supa_update_case_status, is_supabase_active
+    if is_supabase_active():
+        try:
+            supa_update_case_status(case_id, new_status.value)
+        except Exception as e:
+            print(f"[WARN] Supabase update_case_status error: {e}")
+
+    # SQLite write (always — local persistence)
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
             "UPDATE cases SET status = ?, data = ? WHERE case_id = ?",
@@ -732,6 +1212,7 @@ def update_case_status(case_id: str, new_status: CaseState) -> bool:
         print(f"[WARN] SQLite update_case_status error: {e}")
 
     return True
+
 
 
 def update_case_documents(case_id: str, present_docs: list) -> bool:
@@ -1024,5 +1505,17 @@ def get_all_notifications() -> List[dict]:
         print(f"[WARN] SQLite get_all_notifications error: {e}")
 
     return _MEMORY_NOTIFICATIONS
+
+
+# ── Domain Service & Repository Instances ──────────────────────────────────────
+
+from app.repositories.case_repository import CaseRepository
+from app.repositories.audit_repository import AuditRepository
+from app.services.case_service import CaseService
+
+case_repo = CaseRepository(DB_PATH)
+audit_repo = AuditRepository(DB_PATH)
+case_service = CaseService(case_repo, audit_repo)
+
 
 

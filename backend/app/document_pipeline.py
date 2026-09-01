@@ -45,7 +45,7 @@ from pydantic import BaseModel
 
 from app.llm_client import generate, get_last_provider
 from app.rag.legal_ingestion import LegalIngestionError, extract_pdf_text, run_data_prep_kit
-from app.rag.vector_store import retrieve_legal_chunks
+from app.rag.vector_store import retrieve_legal_chunks, VectorStoreUnavailable
 
 
 class DocumentPipelineError(ValueError):
@@ -303,7 +303,10 @@ def _extract_metadata(text: str, prep_status: str) -> dict[str, Any]:
 def _retrieve_citations(clean_text: str, metadata: dict[str, Any]) -> list[dict[str, str]]:
     query_terms = ["BNSS Section 479", *metadata.get("legal_sections", [])]
     query = " ".join(query_terms) if metadata.get("legal_sections") else clean_text[:800]
-    chunks = retrieve_legal_chunks(query)
+    try:
+        chunks = retrieve_legal_chunks(query)
+    except (VectorStoreUnavailable, Exception):
+        chunks = []
     return [
         {
             "code": str(chunk["source"].get("document_id", "legal-source")),

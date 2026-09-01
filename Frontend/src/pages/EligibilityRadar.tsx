@@ -23,21 +23,32 @@ export function EligibilityRadar() {
     load();
   }, []);
 
-  // Map backend cases
-  const caseList = cases.map((c) => ({
-    id: c.case.case_id,
-    prisonerName: c.case.name,
-    offence: c.case.offense_sections.join(", "),
-    custodyDays: c.case.custody_days,
-    maxSentenceDays: c.case.max_sentence_days_for_offense,
-    daysOverdue: c.days_overdue,
-    isEligible: c.case.custody_days >= Math.floor(c.case.max_sentence_days_for_offense / 2),
-    urgency: c.urgency_score > 200 ? "URGENT" : "MEDIUM",
-    missingDocs: c.case.required_docs.filter((d) => !c.case.present_docs.includes(d)),
-    healthFlag: c.case.urgency_flags.health_flag,
-    age: c.case.urgency_flags.age,
-    court: c.case.jail_location,
-  }));
+  // Map backend cases using canonical Section 479 eligibility evaluation
+  const caseList = cases.map((c) => {
+    const eligibility = c.eligibility;
+    const isEligible = eligibility ? eligibility.is_eligible : c.days_overdue > 0;
+    const thresholdDays = eligibility?.threshold_days ?? Math.ceil(c.case.max_sentence_days_for_offense / 2);
+    const countableCustody = eligibility?.countable_custody_days ?? (c.case.custody_days - (c.case.excluded_delay_days || 0));
+    const thresholdFraction = eligibility?.statutory_threshold_fraction ?? (c.case.urgency_flags?.repeat_offender ? "1/2" : "1/3");
+
+    return {
+      id: c.case.case_id,
+      prisonerName: c.case.name,
+      offence: c.case.offense_sections.join(", "),
+      custodyDays: c.case.custody_days,
+      countableCustodyDays: countableCustody,
+      maxSentenceDays: c.case.max_sentence_days_for_offense,
+      thresholdDays,
+      thresholdFraction,
+      daysOverdue: c.days_overdue,
+      isEligible,
+      urgency: c.urgency_score > 200 ? "URGENT" : "MEDIUM",
+      missingDocs: c.case.required_docs.filter((d: string) => !c.case.present_docs.includes(d)),
+      healthFlag: c.case.urgency_flags.health_flag,
+      age: c.case.urgency_flags.age,
+      court: c.case.jail_location,
+    };
+  });
 
   // Filter based on search and status filter
   const filteredCases = caseList.filter((item) => {
@@ -61,18 +72,18 @@ export function EligibilityRadar() {
     : selectedTimeframe === "30 days" ? 30
     : 90;
 
-  // Calculate REAL stats
+  // Calculate stats using canonical thresholdDays
   const countApproaching = filteredCases.filter(c => {
-    const daysUntil = (c.maxSentenceDays / 2) - c.custodyDays;
-    return daysUntil > 0 && daysUntil <= thresholdWindow;
+    const daysUntil = c.thresholdDays - c.countableCustodyDays;
+    return !c.isEligible && daysUntil > 0 && daysUntil <= thresholdWindow;
   }).length;
   const countDocsRequired = filteredCases.filter(c => c.missingDocs.length > 0).length;
   const countOverdue = filteredCases.filter(c => c.daysOverdue > 0).length;
 
-  // Group cases for timeline
+  // Group cases for timeline based on canonical evaluation
   const activeWindowCases = filteredCases.filter(c => {
-    const daysUntil = (c.maxSentenceDays / 2) - c.custodyDays;
-    return c.daysOverdue > 0 || c.missingDocs.length > 0 || (daysUntil > 0 && daysUntil <= thresholdWindow);
+    const daysUntil = c.thresholdDays - c.countableCustodyDays;
+    return c.daysOverdue > 0 || c.isEligible || c.missingDocs.length > 0 || (daysUntil > 0 && daysUntil <= thresholdWindow);
   });
   
   const futureCases = filteredCases.filter(c => !activeWindowCases.includes(c));
@@ -237,7 +248,7 @@ export function EligibilityRadar() {
                     <div className="flex items-center gap-3">
                       {/* Interactive Review Button - Navigates directly to Case Dossier */}
                       <Link
-                        to={`/case/${c.id}`}
+                        to={`/cases/${c.id}`}
                         className="px-4 py-2 bg-accent text-accent-foreground font-semibold rounded text-xs hover:opacity-90 transition-opacity flex items-center gap-1.5 shadow-md shadow-accent/20 shrink-0"
                       >
                         Review Case <ArrowUpRight className="w-3.5 h-3.5" />
@@ -279,7 +290,7 @@ export function EligibilityRadar() {
                       </div>
                     </div>
                     <Link
-                      to={`/case/${c.id}`}
+                      to={`/cases/${c.id}`}
                       className="px-4 py-2 bg-secondary/50 hover:bg-white/20 text-primary rounded text-xs font-medium border border-border transition-colors flex items-center gap-1 shrink-0"
                     >
                       Inspect <ArrowUpRight className="w-3 h-3" />

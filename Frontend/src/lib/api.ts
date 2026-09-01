@@ -101,6 +101,18 @@ export interface BackendCaseSummary {
   case: CaseRecordData;
   days_overdue: number;
   urgency_score: number;
+  eligibility?: {
+    is_eligible: boolean;
+    statutory_threshold_fraction: string;
+    threshold_days: number;
+    countable_custody_days: number;
+    days_overdue: number;
+    legal_rule_version: string;
+    reasons: string[];
+    statutory_conditions: string[];
+    requires_human_legal_review: boolean;
+    review_warning?: string;
+  };
 }
 
 export interface StakeholdersOverview {

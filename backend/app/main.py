@@ -251,6 +251,7 @@ def get_cases():
         case_evaluations.append({
             "case": case,
             "days_overdue": eligibility_result["days_overdue"],
+            "eligibility": eligibility_result,
         })
 
     sorted_queue = prioritize_cases(case_evaluations)
@@ -261,6 +262,7 @@ def get_cases():
             "case": entry["case"].model_dump(),
             "days_overdue": entry["days_overdue"],
             "urgency_score": entry["urgency_score"],
+            "eligibility": entry.get("eligibility") or evaluate_eligibility(entry["case"]),
         }
         for entry in sorted_queue
     ]
@@ -324,18 +326,6 @@ def assess_legal_document(payload: Optional[AssessDocumentPayload] = Body(defaul
     except DocumentPipelineError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-
-@app.post("/documents/assess", tags=["Document AI Pipeline"], response_model=DocumentPipelineResult)
-async def assess_uploaded_document(file: UploadFile = File(...)):
-    """Assess an uploaded PDF or image using the configured extraction/OCR service."""
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=422, detail="The uploaded document is empty.")
-    document_name = file.filename or "uploaded-document"
-    try:
-        return execute_full_document_pipeline(file_bytes=content, document_name=document_name)
-    except DocumentPipelineError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/rag/legal-pdfs", tags=["RAG Training"])

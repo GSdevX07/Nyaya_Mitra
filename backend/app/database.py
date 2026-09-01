@@ -15,7 +15,12 @@ from pydantic import ValidationError
 
 from app.models.schemas import CaseRecord, CaseState, UrgencyFlags
 
+from pathlib import Path
+
 # Load environment variables
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    load_dotenv(dotenv_path=_env_path)
 load_dotenv()
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://placeholder-project.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "placeholder-key")

@@ -16,12 +16,17 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 warnings.filterwarnings("ignore")
 
+from pathlib import Path
 from typing import Callable
 
 import requests
 from dotenv import load_dotenv
 from groq import Groq
 
+# Load backend/.env or cwd .env
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    load_dotenv(dotenv_path=_env_path)
 load_dotenv()
 
 _last_provider = "not-called"
@@ -71,20 +76,39 @@ def _call_watsonx(prompt: str, system: str) -> str:
 
 
 def _call_groq(prompt: str, system: str) -> str:
+    import re
+
     api_key = os.getenv("GROQ_API_KEY")
-    model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
     if not api_key:
         raise RuntimeError("Groq requires GROQ_API_KEY")
-    completion = Groq(api_key=api_key).chat.completions.create(
-        model=model,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-        temperature=float(os.getenv("LLM_TEMPERATURE", "0.1")),
-        timeout=float(os.getenv("GROQ_TIMEOUT_SECONDS", "15")),
-    )
-    content = completion.choices[0].message.content
-    if not content:
-        raise RuntimeError("Groq response did not contain generated text")
-    return content
+
+    configured_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    candidate_models = [configured_model]
+    for fallback in ["openai/gpt-oss-120b", "groq/compound-mini", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+        if fallback not in candidate_models:
+            candidate_models.append(fallback)
+
+    client = Groq(api_key=api_key)
+    last_err: Exception | None = None
+    messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
+
+    for model in candidate_models:
+        try:
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=float(os.getenv("LLM_TEMPERATURE", "0.1")),
+                timeout=float(os.getenv("GROQ_TIMEOUT_SECONDS", "15")),
+            )
+            content = completion.choices[0].message.content
+            if content and content.strip():
+                cleaned = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+                return cleaned if cleaned else content.strip()
+        except Exception as exc:
+            last_err = exc
+            continue
+
+    raise RuntimeError(f"Groq generation failed across models {candidate_models}: {last_err}")
 
 
 def _segment_text_lines(image: "Image.Image") -> "list[Image.Image]":  # type: ignore[name-defined]
@@ -150,6 +174,12 @@ def ocr_image_via_easyocr(image_bytes: bytes) -> str:
     text and block-letter handwriting gracefully without the severe hallucination
     biases (like generating receipts or cursive) seen in TrOCR models.
     """
+    import sys
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
     import easyocr
     import numpy as np
     import cv2
@@ -158,18 +188,19 @@ def ocr_image_via_easyocr(image_bytes: bytes) -> str:
     
     # Cache the reader in memory to avoid reloading it on every request
     if not hasattr(ocr_image_via_easyocr, "_reader"):
-        # The first run will load weights from cache (~20MB total)
-        ocr_image_via_easyocr._reader = easyocr.Reader(['en'], gpu=False)  # type: ignore[attr-defined]
+        ocr_image_via_easyocr._reader = easyocr.Reader(['en'], gpu=False, verbose=False)  # type: ignore[attr-defined]
 
     reader = ocr_image_via_easyocr._reader  # type: ignore[attr-defined]
     
     # Read bytes into an OpenCV matrix
     nparr = np.frombuffer(image_bytes, np.uint8)
     img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img_cv is None:
+        raise ValueError("Could not decode image file")
     
     # Run text extraction with paragraph grouping for cleaner output
     results = reader.readtext(img_cv, detail=0, paragraph=True)
-    return "\n\n".join(results)
+    return "\n\n".join(str(r) for r in results)
 
 
 def _call_ollama(prompt: str, system: str) -> str:

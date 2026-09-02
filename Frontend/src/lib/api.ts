@@ -209,6 +209,84 @@ export async function referJailCaseToDlsa(caseId: string, notes?: string) {
   return await res.json();
 }
 
+export interface PoliceCaseSummary {
+  case_id: string;
+  name: string;
+  fir_number: string;
+  police_station?: string;
+  police_station_id?: string;
+  district?: string;
+  state?: string;
+  offense_sections: string[];
+  arrest_date: string;
+  custody_days: number;
+  jail_location: string;
+  court_name: string;
+  legal_code: string;
+  remand_order_present: boolean;
+  charge_sheet_present: boolean;
+  charge_sheet_status: string;
+  remand_status: string;
+  status: string;
+}
+
+export interface PoliceActionItem {
+  id: string;
+  case_id: string;
+  police_station_id: string;
+  action_type: string;
+  title: string;
+  description?: string;
+  requested_by?: string;
+  status: "PENDING" | "ACKNOWLEDGED" | "COMPLETED";
+  document_id?: string;
+  notes?: string;
+  created_at: string;
+  completed_at?: string;
+}
+
+export async function fetchPoliceCases(): Promise<PoliceCaseSummary[]> {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/police/cases`);
+    if (!res.ok) throw new Error(`Failed to fetch police cases: status ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("Backend police cases unavailable or unauthenticated:", err);
+    return [];
+  }
+}
+
+export async function fetchPoliceActions(): Promise<PoliceActionItem[]> {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/police/actions`);
+    if (!res.ok) throw new Error(`Failed to fetch police actions: status ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("Backend police actions unavailable or unauthenticated:", err);
+    return [];
+  }
+}
+
+export async function acknowledgePoliceAction(actionId: string, notes?: string) {
+  const res = await authFetch(`${API_BASE_URL}/police/actions/${actionId}/acknowledge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes }),
+  });
+  if (!res.ok) throw new Error(`Failed to acknowledge action: status ${res.status}`);
+  return await res.json();
+}
+
+export async function completePoliceAction(actionId: string, documentId: string, notes?: string) {
+  const res = await authFetch(`${API_BASE_URL}/police/actions/${actionId}/complete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ document_id: documentId, notes }),
+  });
+  if (!res.ok) throw new Error(`Failed to complete action: status ${res.status}`);
+  return await res.json();
+}
+
 export async function fetchCases(): Promise<BackendCaseSummary[]> {
   try {
     const res = await authFetch(`${API_BASE_URL}/cases`);
@@ -519,6 +597,15 @@ export async function fetchCitizenCase() {
   return await res.json();
 }
 
+export async function fetchCitizenTimeline(): Promise<any[]> {
+  const res = await authFetch(`${API_BASE_URL}/citizen/timeline`);
+  if (!res.ok) {
+    if (res.status === 404) return [];
+    throw new Error(`Failed to fetch citizen timeline: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
 export async function fetchAccusedProfile(accusedId: string) {
   const res = await authFetch(`${API_BASE_URL}/accused/${encodeURIComponent(accusedId)}`);
   if (!res.ok) {
@@ -569,14 +656,67 @@ export async function fetchDemoUsers() {
   return await res.json();
 }
 
-export async function fetchAuditEvents(limit: number = 50) {
+export async function fetchAuditEvents(options?: {
+  limit?: number;
+  offset?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  action?: string;
+  actorRole?: string;
+  severity?: string;
+} | number) {
   try {
-    const res = await authFetch(`${API_BASE_URL}/audit-events?limit=${limit}`);
+    const params = new URLSearchParams();
+    if (typeof options === "number") {
+      params.append("limit", String(options));
+    } else if (options) {
+      if (options.limit) params.append("limit", String(options.limit));
+      if (options.offset) params.append("offset", String(options.offset));
+      if (options.dateFrom) params.append("date_from", options.dateFrom);
+      if (options.dateTo) params.append("date_to", options.dateTo);
+      if (options.action && options.action !== "ALL") params.append("action", options.action);
+      if (options.actorRole && options.actorRole !== "ALL") params.append("actor_role", options.actorRole);
+      if (options.severity && options.severity !== "ALL") params.append("severity", options.severity);
+    }
+
+    const url = `${API_BASE_URL}/audit-events${params.toString() ? `?${params.toString()}` : ""}`;
+    const res = await authFetch(url);
     if (!res.ok) throw new Error(`Failed to fetch audit events: HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
     console.warn("Backend audit events unavailable:", err);
-    return [];
+    return { events: [], total_count: 0, returned_count: 0 };
+  }
+}
+
+export async function exportAuditLedger(payload: {
+  export_reason: string;
+  format?: string;
+  date_from?: string;
+  date_to?: string;
+  action_filter?: string;
+  actor_role_filter?: string;
+}) {
+  const res = await authFetch(`${API_BASE_URL}/audit/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Export failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchAuditExceptions() {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/audit/exceptions`);
+    if (!res.ok) throw new Error(`Failed to fetch exceptions: HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("Backend /audit/exceptions unavailable:", err);
+    return { total_exceptions: 0, exceptions: [] };
   }
 }
 
@@ -674,6 +814,156 @@ export async function resolveLegalEscalation(escalationId: string, notes: string
     body: JSON.stringify({ notes, status }),
   });
   if (!res.ok) throw new Error(`Failed to resolve legal escalation: HTTP ${res.status}`);
+  return await res.json();
+}
+
+// ── State Legal Services Authority (SLSA) & Government Oversight APIs ─────────
+
+export interface GovOverviewMetrics {
+  state: string;
+  scope_type: string;
+  total_monitored_undertrials: number;
+  section_479_eligibility_signals: number;
+  average_custody_days: number;
+  dlsa_mapping_coverage_pct: number;
+  sla_compliance_rate_pct: number;
+  legal_aid_assignment_rate_pct: number;
+  document_completeness_rate_pct: number;
+  estimated_manual_review_hours_avoided: number;
+  estimated_hours_note: string;
+  mandatory_human_signoff_notice: string;
+}
+
+export interface GovDistrictItem {
+  district: string;
+  dlsa_name: string;
+  total_cases: number;
+  eligible_signals: number;
+  assigned_counsel: number;
+  pending_documents: number;
+  overdue_cases: number;
+  avg_custody_days: number;
+  compliance_rate_pct: number;
+}
+
+export interface GovSlaData {
+  overall_compliance_pct: number;
+  sla_breakdown: {
+    compliant_cases: number;
+    at_risk_cases: number;
+    breached_cases: number;
+  };
+  target_metrics: Array<{
+    milestone: string;
+    target: string;
+    current_avg: string;
+    status: string;
+  }>;
+}
+
+export interface GovExceptionItem {
+  id: string;
+  case_id: string;
+  district: string;
+  severity: string;
+  category: string;
+  title: string;
+  description: string;
+  days_overdue?: number;
+  missing_documents?: string[];
+}
+
+export async function fetchGovOverview(): Promise<GovOverviewMetrics> {
+  const res = await authFetch(`${API_BASE_URL}/gov/overview`);
+  if (!res.ok) throw new Error(`Failed to fetch gov overview: HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function fetchGovDistricts(): Promise<GovDistrictItem[]> {
+  const res = await authFetch(`${API_BASE_URL}/gov/districts`);
+  if (!res.ok) throw new Error(`Failed to fetch gov districts: HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function fetchGovSlaMetrics(): Promise<GovSlaData> {
+  const res = await authFetch(`${API_BASE_URL}/gov/sla`);
+  if (!res.ok) throw new Error(`Failed to fetch gov SLA metrics: HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function fetchGovExceptions(): Promise<GovExceptionItem[]> {
+  const res = await authFetch(`${API_BASE_URL}/gov/exceptions`);
+  if (!res.ok) throw new Error(`Failed to fetch gov exceptions: HTTP ${res.status}`);
+  return await res.json();
+}
+
+export interface PlatformHealthData {
+  status: string;
+  environment: {
+    app_env: string;
+    demo_mode: boolean;
+    python_version: string;
+    framework: string;
+  };
+  subsystems: {
+    api: { status: string; protocol: string; rate_limiting: string };
+    database: { status: string; mode: string; active_records: number; storage_path: string };
+    auth: { status: string; algorithm: string; session_revocation: string; brute_force_protection: string };
+    audit_ledger: { status: string; records_logged: number; chain_continuity: string; database_immutability_triggers: string };
+    rag_corpus: { status: string; documents_indexed: number; vector_store: string };
+  };
+  connectors: Array<{
+    id: string;
+    name: string;
+    status: string;
+    type: string;
+    latency_ms: number;
+    health: string;
+  }>;
+  timestamp: string;
+}
+
+export interface PlatformProfileData {
+  id: string;
+  full_name: string;
+  email: string;
+  role: string;
+  administrative_domain: string;
+  access_scope: string;
+  environment: string;
+  demo_mode: boolean;
+  token_security: {
+    algorithm: string;
+    session_revocation: string;
+    brute_force_lockout: string;
+  };
+  capabilities: string[];
+  organization: string;
+  timestamp: string;
+}
+
+export async function fetchPlatformHealth(): Promise<PlatformHealthData> {
+  const res = await authFetch(`${API_BASE_URL}/platform/health`);
+  if (!res.ok) throw new Error(`Failed to fetch platform health: HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function fetchPlatformProfile(): Promise<PlatformProfileData> {
+  const res = await authFetch(`${API_BASE_URL}/platform/profile`);
+  if (!res.ok) throw new Error(`Failed to fetch platform profile: HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function triggerPlatformAction(actionType: string, target?: string, parameters?: Record<string, any>) {
+  const res = await authFetch(`${API_BASE_URL}/platform/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action_type: actionType, target, parameters }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Action failed: HTTP ${res.status}`);
+  }
   return await res.json();
 }
 

@@ -88,10 +88,10 @@ def test_evidence_verification_privilege():
     resp_jail = client.post("/evidence/verify?evidence_id=EVI-UTP-0001-remand_order", headers=jail_headers)
     assert resp_jail.status_code in (200, 404)
 
-    # Auditor is ALLOWED
+    # Auditor is strictly read-only and BLOCKED (403) from triggering verification
     auditor_headers = _get_auth_headers(Role.READ_ONLY_AUDITOR)
     resp_auditor = client.post("/evidence/verify?evidence_id=EVI-UTP-0001-remand_order", headers=auditor_headers)
-    assert resp_auditor.status_code in (200, 404)
+    assert resp_auditor.status_code == 403
 
     # Supervising officer is ALLOWED
     supervisor_headers = _get_auth_headers(Role.SUPERVISING_LEGAL_OFFICER)

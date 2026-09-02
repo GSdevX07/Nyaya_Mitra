@@ -186,6 +186,7 @@ class CaseRecord(BaseModel):
     cnr_number: Optional[str] = Field(default=None, description="16-character eCourts Case Number Record (CNR) identifier.")
     fir_number: Optional[str] = Field(default=None, description="FIR Number, e.g. 'FIR-2024-089'.")
     police_station: Optional[str] = Field(default=None, description="Police station having jurisdiction.")
+    police_station_id: Optional[str] = Field(default=None, description="Station identifier, e.g. 'ps_kotwali_central'.")
     court_name: Optional[str] = Field(default=None, description="Jurisdictional court, e.g. 'Chief Judicial Magistrate, Central'.")
     district: Optional[str] = Field(default=None, description="District, e.g. 'South Delhi'.")
     state: Optional[str] = Field(default="Delhi", description="State / UT, e.g. 'Delhi'.")
@@ -243,4 +244,10 @@ class LawyerProfile(BaseModel):
     organization: str = Field(default="District Legal Services Authority (DLSA)")
     cases_taken: int = Field(default=0)
     status: str = Field(default="Active Pro Bono Counsel")
+
+
+class PlatformActionRequest(BaseModel):
+    action_type: str = Field(..., description="Action to execute, e.g. 'CONNECTOR_RETRY'.")
+    target: Optional[str] = Field(default=None, description="Optional target resource or service.")
+    parameters: Optional[Dict[str, Any]] = Field(default=None, description="Optional parameters for action execution.")
 

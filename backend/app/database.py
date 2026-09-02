@@ -74,7 +74,8 @@ def _build_initial_hero_cases() -> List[CaseRecord]:
             offense_sections=["BNS 115(2)"],  # Voluntarily causing hurt
             cnr_number="DLCT010049212025",
             fir_number="FIR-2025-010",
-            police_station="Gandhi Nagar Police Station",
+            police_station="Kotwali Police Station",
+            police_station_id="ps_kotwali_central",
             court_name="Metropolitan Magistrate Court 02, Central",
             district="Central Delhi",
             state="Delhi",
@@ -161,6 +162,7 @@ def _build_initial_hero_cases() -> List[CaseRecord]:
             cnr_number="DLST020088122024",
             fir_number="FIR-2024-412",
             police_station="Old City Suburb Police Station",
+            police_station_id="ps_old_city",
             court_name="Additional Chief Judicial Magistrate, South",
             district="South Delhi",
             state="Delhi",
@@ -248,6 +250,7 @@ def _build_initial_hero_cases() -> List[CaseRecord]:
             cnr_number="UPCZ010091212023",
             fir_number="FIR-2023-108",
             police_station="Rampur Police Station",
+            police_station_id="ps_rampur",
             court_name="Chief Judicial Magistrate, Lucknow",
             district="Lucknow",
             state="Uttar Pradesh",
@@ -330,6 +333,7 @@ def _build_initial_hero_cases() -> List[CaseRecord]:
             cnr_number="KABC010077412023",
             fir_number="FIR-2023-551",
             police_station="Shivaji Road Police Station",
+            police_station_id="ps_shivaji_rd",
             court_name="Principal Sessions Judge, Bengaluru",
             district="Bengaluru Urban",
             state="Karnataka",
@@ -410,6 +414,7 @@ def _build_initial_hero_cases() -> List[CaseRecord]:
             cnr_number="DLST010033192024",
             fir_number="FIR-2024-119",
             police_station="Saket Police Station",
+            police_station_id="ps_saket",
             court_name="Court of Sessions, Saket",
             district="South Delhi",
             state="Delhi",
@@ -492,6 +497,7 @@ def _build_initial_hero_cases() -> List[CaseRecord]:
             cnr_number="DLCT020055192024",
             fir_number="FIR-2024-220",
             police_station="Civil Lines Police Station",
+            police_station_id="ps_civil_lines",
             court_name="Chief Metropolitan Magistrate, Central",
             district="Central Delhi",
             state="Delhi",
@@ -813,6 +819,7 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
             id TEXT PRIMARY KEY,
             fir_number TEXT NOT NULL,
             police_station TEXT NOT NULL,
+            police_station_id TEXT,
             district TEXT,
             state TEXT,
             filing_date TEXT,
@@ -828,6 +835,7 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
             organization_id TEXT,
             cnr_number TEXT,
             court_name TEXT NOT NULL,
+            police_station_id TEXT,
             district TEXT,
             state TEXT,
             legal_code TEXT DEFAULT 'BNS_2023',
@@ -841,6 +849,34 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
             deleted_at TIMESTAMP,
             FOREIGN KEY (accused_id) REFERENCES accused_persons(id),
             FOREIGN KEY (fir_id) REFERENCES firs(id)
+        )
+    """)
+
+    # Dynamic migrations for police station columns
+    try:
+        cursor.execute("ALTER TABLE firs ADD COLUMN police_station_id TEXT")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE court_cases ADD COLUMN police_station_id TEXT")
+    except Exception:
+        pass
+
+    # Police Actions & Document Requests
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS police_actions (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL,
+            police_station_id TEXT NOT NULL,
+            action_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            requested_by TEXT DEFAULT 'DLSA_OFFICER',
+            status TEXT DEFAULT 'PENDING',
+            document_id TEXT,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP
         )
     """)
 
@@ -993,9 +1029,48 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
             entity_id TEXT NOT NULL,
             ip_address TEXT,
             details_json TEXT,
-            is_immutable INTEGER DEFAULT 1
+            is_immutable INTEGER DEFAULT 1,
+            event_hash TEXT,
+            previous_event_hash TEXT,
+            hash_algorithm TEXT DEFAULT 'SHA-256',
+            sequence_number INTEGER DEFAULT 0,
+            severity TEXT DEFAULT 'INFO',
+            data_status TEXT DEFAULT 'REAL'
         )
     """)
+
+    # Audit events columns migration
+    for col, col_type in [
+        ("event_hash", "TEXT"),
+        ("previous_event_hash", "TEXT"),
+        ("hash_algorithm", "TEXT DEFAULT 'SHA-256'"),
+        ("sequence_number", "INTEGER DEFAULT 0"),
+        ("severity", "TEXT DEFAULT 'INFO'"),
+        ("data_status", "TEXT DEFAULT 'REAL'"),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE audit_events ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
+
+    # Enforce database-level append-only immutability via SQLite triggers
+    try:
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS prevent_audit_events_update
+            BEFORE UPDATE ON audit_events
+            BEGIN
+                SELECT RAISE(FAIL, 'UPDATE operation is strictly forbidden on immutable audit_events ledger');
+            END;
+        """)
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS prevent_audit_events_delete
+            BEFORE DELETE ON audit_events
+            BEGIN
+                SELECT RAISE(FAIL, 'DELETE operation is strictly forbidden on immutable audit_events ledger');
+            END;
+        """)
+    except Exception as e:
+        print(f"[WARN] Failed to create audit immutability triggers: {e}")
 
     # 9. Legacy Cases View / Backward Compatibility Table
     cursor.execute("""
@@ -1299,13 +1374,14 @@ def init_db():
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO firs (
-                    id, fir_number, police_station, district, state, filing_date
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    id, fir_number, police_station, police_station_id, district, state, filing_date
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     fir_id,
                     c.fir_number or f"FIR-{c.case_id}",
                     c.police_station or f"{c.district or 'Central Delhi'} Police Station",
+                    getattr(c, "police_station_id", None) or "ps_kotwali_central",
                     c.district or "Central Delhi",
                     c.state or "Delhi",
                     c.arrest_date,
@@ -1317,13 +1393,14 @@ def init_db():
                 """
                 INSERT OR REPLACE INTO court_cases (
                     id, case_number, accused_id, fir_id, organization_id, cnr_number, court_name,
-                    district, state, legal_code, current_status, dlsa_reference_number,
+                    police_station_id, district, state, legal_code, current_status, dlsa_reference_number,
                     assigned_lawyer_id, assignment_status, data_source_status, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     c.case_id, c.case_id, accused_id, fir_id, "org_dlsa_central",
-                    c.cnr_number, c.court_name, c.district, c.state, c.legal_code.value,
+                    c.cnr_number, c.court_name, getattr(c, "police_station_id", None) or "ps_kotwali_central",
+                    c.district, c.state, c.legal_code.value,
                     c.status.value, c.dlsa_reference_number, c.assigned_lawyer_id,
                     c.assignment_status, c.data_source_status.value, now_iso,
                 ),
@@ -1416,6 +1493,44 @@ def init_db():
                         1 if doc in c.required_docs else 0, 1,
                     ),
                 )
+
+        # Seed initial police institutional actions and document requests
+        cursor.execute("SELECT COUNT(*) FROM police_actions")
+        if cursor.fetchone()[0] == 0:
+            sample_actions = [
+                (
+                    "POL-ACT-001",
+                    "UTP-0001",
+                    "ps_kotwali_central",
+                    "REQUEST_CHARGE_SHEET",
+                    "Charge Sheet Copy Required for Section 479 Bail Review",
+                    "DLSA Legal Aid Officer requested attested copy of final police report/charge sheet for undertrial bail application.",
+                    "DLSA_OFFICER",
+                    "PENDING",
+                    None,
+                    None,
+                    "2026-08-25T10:00:00Z",
+                    None,
+                ),
+                (
+                    "POL-ACT-002",
+                    "UTP-0001",
+                    "ps_kotwali_central",
+                    "PRODUCTION_WARRANT_COMPLIANCE",
+                    "Physical/VC Production Compliance — Scheduled Remand Hearing",
+                    "Metropolitan Magistrate Court 02 issued production notice for scheduled remand extension appearance.",
+                    "COURT_REGISTRY",
+                    "ACKNOWLEDGED",
+                    None,
+                    "Station escort unit assigned for scheduled appearance.",
+                    "2026-08-28T14:30:00Z",
+                    None,
+                )
+            ]
+            cursor.executemany("""
+                INSERT INTO police_actions (id, case_id, police_station_id, action_type, title, description, requested_by, status, document_id, notes, created_at, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, sample_actions)
 
         # Seed governed legal knowledge sources, chunks, and evaluation benchmarks
         _seed_governed_legal_sources(cursor)
@@ -2203,29 +2318,95 @@ def get_hearings_schedule() -> list:
         return []
 
 
-def get_audit_events(limit: int = 50) -> list:
-    """Retrieve audit events from Supabase with SQLite fallback."""
+def get_audit_events(
+    limit: int = 50,
+    offset: int = 0,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    action: Optional[str] = None,
+    actor_role: Optional[str] = None,
+    severity: Optional[str] = None,
+    return_pagination: bool = False,
+) -> Any:
+    """
+    Retrieve audit events with cryptographic hash-chain metadata and server-side filtering.
+    """
     from app.supabase_adapter import is_supabase_active, supa_get_all_audit_events
-    if is_supabase_active():
+    if is_supabase_active() and not (date_from or date_to or action or actor_role or severity):
         try:
             res = supa_get_all_audit_events(limit=limit)
             if res:
+                if return_pagination:
+                    return {
+                        "events": res,
+                        "total_count": len(res),
+                        "returned_count": len(res),
+                        "offset": offset,
+                        "limit": limit,
+                    }
                 return res
         except Exception as e:
             print(f"[WARN] Supabase get_audit_events error: {e}")
+
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, timestamp, actor_id, actor_role, organization_id, action, entity_type, entity_id, ip_address, details_json FROM audit_events ORDER BY timestamp DESC LIMIT ?",
-            (limit,)
+
+        # Build query dynamically
+        where_clauses = []
+        params = []
+
+        if date_from:
+            where_clauses.append("timestamp >= ?")
+            params.append(date_from)
+        if date_to:
+            where_clauses.append("timestamp <= ?")
+            params.append(date_to)
+        if action and action != "ALL":
+            where_clauses.append("action = ?")
+            params.append(action)
+        if actor_role and actor_role != "ALL":
+            where_clauses.append("actor_role = ?")
+            params.append(actor_role)
+        if severity and severity != "ALL":
+            where_clauses.append("severity = ?")
+            params.append(severity)
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        # Total count query
+        count_query = f"SELECT COUNT(*) FROM audit_events {where_sql}"
+        total_count = cursor.execute(count_query, params).fetchone()[0]
+
+        # Events query
+        cols_query = (
+            "id, timestamp, actor_id, actor_role, organization_id, action, entity_type, "
+            "entity_id, ip_address, details_json, is_immutable, event_hash, previous_event_hash, "
+            "hash_algorithm, sequence_number, severity, data_status"
         )
+        query = f"SELECT {cols_query} FROM audit_events {where_sql} ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+        exec_params = list(params) + [limit, offset]
+        cursor.execute(query, exec_params)
+
         cols = [col[0] for col in cursor.description]
         rows = cursor.fetchall()
         conn.close()
-        return [dict(zip(cols, r)) for r in rows]
+
+        events = [dict(zip(cols, r)) for r in rows]
+
+        if return_pagination:
+            return {
+                "events": events,
+                "total_count": total_count,
+                "returned_count": len(events),
+                "offset": offset,
+                "limit": limit,
+            }
+        return events
     except Exception as e:
         print(f"[WARN] get_audit_events error: {e}")
+        if return_pagination:
+            return {"events": [], "total_count": 0, "returned_count": 0, "offset": offset, "limit": limit}
         return []
 
 
@@ -2949,6 +3130,55 @@ def log_legal_retrieval(
         conn.close()
     except Exception as e:
         print(f"[WARN] Failed to log legal retrieval: {e}")
+
+
+
+def get_police_actions(station_id: str = "") -> list:
+    """Retrieve operational document requests and actions for a police station."""
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if station_id:
+        cursor.execute("SELECT * FROM police_actions WHERE police_station_id = ? ORDER BY created_at DESC", (station_id,))
+    else:
+        cursor.execute("SELECT * FROM police_actions ORDER BY created_at DESC")
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def acknowledge_police_action(action_id: str, user_id: str) -> bool:
+    """Mark a police document/hearing action as acknowledged by the station."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE police_actions SET status = 'ACKNOWLEDGED' WHERE id = ?",
+        (action_id,),
+    )
+    cnt = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return cnt > 0
+
+
+def complete_police_action(action_id: str, document_id: str, user_id: str, notes: str = "") -> bool:
+    """Complete a police action by linking the uploaded document record."""
+    import datetime
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE police_actions 
+        SET status = 'COMPLETED', document_id = ?, notes = ?, completed_at = ?
+        WHERE id = ?
+        """,
+        (document_id, notes, now_iso, action_id),
+    )
+    cnt = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return cnt > 0
 
 
 # ── Domain Service & Repository Instances ──────────────────────────────────────

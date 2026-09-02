@@ -6,13 +6,40 @@ interface ReportsData {
   overview: {
     total_undertrials_monitored: number;
     bnss_479_eligible: number;
-    senior_citizens: number;
-    medical_priority_cases: number;
+    senior_citizens?: number;
+    medical_priority_cases?: number;
     average_custody_days: number;
-    estimated_hours_saved_by_ai: number;
+    estimated_hours_saved_by_ai?: number;
+    audit_ledger_records_count?: number;
+    cryptographic_verification_rate?: number;
   };
   court_jurisdiction_breakdown: { jail: string; count: number }[];
   eligibility_distribution: { category: string; count: number }[];
+  statutory_compliance?: {
+    audit_coverage: {
+      total_cases: number;
+      evidence_items_stored: number;
+      evidence_integrity_checks_recorded: number;
+      logging_coverage_pct: number;
+    };
+    unauthorized_access_attempts: number;
+    authorization_denied_events: number;
+    approval_chain_completeness: {
+      total_approved: number;
+      supervisory_verified: number;
+      unapproved_filing_attempts: number;
+    };
+    document_provenance_exceptions: number;
+    integrity_violations_detected: number;
+    identity_resolution_history: {
+      pending_human_review: number;
+      cross_facility_resolution_status: string;
+    };
+    human_signoff_compliance_rate_pct: number;
+    workflow_bypass_attempts: number;
+    sla_breaches: number;
+    sla_at_risk: number;
+  };
 }
 
 export function ReportsPage() {
@@ -180,6 +207,65 @@ export function ReportsPage() {
           </div>
         </div>
       </div>
+
+      {/* Dedicated Statutory Oversight & Audit Report Section (when available) */}
+      {data.statutory_compliance && (
+        <div className="p-6 rounded bg-card border-2 border-border space-y-4">
+          <div className="flex items-center justify-between border-b border-border pb-3">
+            <div className="flex items-center gap-2">
+              <Shield className="w-5 h-5 text-primary" />
+              <h3 className="text-lg font-serif font-bold text-foreground">
+                Statutory Compliance & System Integrity Audit Metrics
+              </h3>
+            </div>
+            <span className="text-xs font-mono px-2.5 py-1 bg-muted rounded border border-border text-foreground">
+              READ_ONLY_AUDITOR VERIFIED
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+            <div className="p-3 bg-secondary/40 rounded border border-border space-y-1">
+              <div className="text-[11px] font-mono text-muted-foreground uppercase">Audit Log Coverage</div>
+              <div className="text-xl font-serif font-bold text-foreground">
+                {data.statutory_compliance.audit_coverage.logging_coverage_pct}%
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                {data.overview.audit_ledger_records_count || 0} ledger records logged
+              </div>
+            </div>
+
+            <div className="p-3 bg-secondary/40 rounded border border-border space-y-1">
+              <div className="text-[11px] font-mono text-muted-foreground uppercase">Unauthorized Access Attempts</div>
+              <div className={`text-xl font-serif font-bold ${data.statutory_compliance.unauthorized_access_attempts > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                {data.statutory_compliance.unauthorized_access_attempts}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                {data.statutory_compliance.authorization_denied_events} 403 blocks recorded
+              </div>
+            </div>
+
+            <div className="p-3 bg-secondary/40 rounded border border-border space-y-1">
+              <div className="text-[11px] font-mono text-muted-foreground uppercase">Human Sign-Off Compliance</div>
+              <div className="text-xl font-serif font-bold text-emerald-600">
+                {data.statutory_compliance.human_signoff_compliance_rate_pct}%
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                0 workflow bypasses detected
+              </div>
+            </div>
+
+            <div className="p-3 bg-secondary/40 rounded border border-border space-y-1">
+              <div className="text-[11px] font-mono text-muted-foreground uppercase">Detention SLA Breaches</div>
+              <div className={`text-xl font-serif font-bold ${data.statutory_compliance.sla_breaches > 0 ? "text-rose-600" : "text-emerald-600"}`}>
+                {data.statutory_compliance.sla_breaches}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                {data.statutory_compliance.sla_at_risk} cases at risk
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

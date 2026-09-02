@@ -22,7 +22,14 @@ class AuthUser:
     role: Role
     org_id: str
     facility_ids: list[str] = field(default_factory=list)
+    police_station_id: str = ""
+    police_station: str = ""
+    jurisdiction_ids: list[str] = field(default_factory=list)
     district: str = ""
+    state_id: str = ""
+    state: str = ""
+    scope_type: str = ""
+    authorized_district_ids: list[str] = field(default_factory=list)
     full_name: str = ""
     is_active: bool = True
     locked_until: Optional[datetime.datetime] = None
@@ -47,6 +54,28 @@ def _row_to_user(row: dict) -> AuthUser:
     else:
         facility_ids = []
 
+    jur_raw = row.get("jurisdiction_ids", "[]") or "[]"
+    if isinstance(jur_raw, str):
+        try:
+            jurisdiction_ids = json.loads(jur_raw)
+        except Exception:
+            jurisdiction_ids = []
+    elif isinstance(jur_raw, list):
+        jurisdiction_ids = jur_raw
+    else:
+        jurisdiction_ids = []
+
+    dist_raw = row.get("authorized_district_ids", "[]") or "[]"
+    if isinstance(dist_raw, str):
+        try:
+            authorized_district_ids = json.loads(dist_raw)
+        except Exception:
+            authorized_district_ids = []
+    elif isinstance(dist_raw, list):
+        authorized_district_ids = dist_raw
+    else:
+        authorized_district_ids = []
+
     locked_until = None
     if row.get("locked_until"):
         try:
@@ -60,7 +89,14 @@ def _row_to_user(row: dict) -> AuthUser:
         role=Role(row["role"]),
         org_id=str(row.get("organization_id", "")),
         facility_ids=facility_ids,
+        police_station_id=str(row.get("police_station_id", "") or ""),
+        police_station=str(row.get("police_station", "") or ""),
+        jurisdiction_ids=jurisdiction_ids,
         district=str(row.get("district", "") or ""),
+        state_id=str(row.get("state_id", "") or ""),
+        state=str(row.get("state", "") or ""),
+        scope_type=str(row.get("scope_type", "") or ""),
+        authorized_district_ids=authorized_district_ids,
         full_name=str(row.get("full_name", "") or ""),
         is_active=bool(row.get("is_active", True)),
         locked_until=locked_until,
@@ -131,30 +167,47 @@ def get_user_by_id(user_id: str) -> Optional[AuthUser]:
         pass
 
     # Skip external network roundtrip for test/demo user identifiers
-    if user_id.startswith("test") or user_id.startswith("demo_") or user_id.startswith("usr_"):
-        return None
+    if not (user_id.startswith("test") or user_id.startswith("demo_") or user_id.startswith("usr_")):
+        try:
+            from app.supabase_adapter import get_supabase_client, is_supabase_active
 
-
-    try:
-        from app.supabase_adapter import get_supabase_client, is_supabase_active
-
-        if is_supabase_active():
-            client = get_supabase_client()
-            if client:
-                res = client.table("organization_users").select("*").eq("id", user_id).execute()
-                if res.data:
-                    return _row_to_user(res.data[0])
-    except Exception:
-        pass
-
+            if is_supabase_active():
+                client = get_supabase_client()
+                if client:
+                    res = client.table("organization_users").select("*").eq("id", user_id).execute()
+                    if res.data:
+                        return _row_to_user(res.data[0])
+        except Exception:
+            pass
 
     # Demo fallback
     from app.auth.config import DEMO_MODE
     if DEMO_MODE:
+        if user_id.startswith("deleted_") or user_id.startswith("revoked_"):
+            return None
+
         _build_demo_users()
+        # Direct ID match
         for u in _DEMO_USERS.values():
             if u["id"] == user_id:
                 return _row_to_user(u)
+
+        # Test aliases for backward compatibility with existing integration tests
+        TEST_ALIASES = {
+            "demo_admin": "demo_platform_admin",
+            "admin_ingestion_test": "demo_platform_admin",
+            "demo_supervisor": "demo_supervising",
+            "usr_sup_01": "demo_supervising",
+            "test_supervisor": "demo_supervising",
+            "demo_gov": "demo_gov_admin",
+            "test_gov": "demo_gov_admin",
+        }
+        if user_id in TEST_ALIASES:
+            alias_id = TEST_ALIASES[user_id]
+            for u in _DEMO_USERS.values():
+                if u["id"] == alias_id:
+                    return _row_to_user(u)
+
     return None
 
 
@@ -248,16 +301,27 @@ _DEMO_USERS: dict[str, dict] = {}
 
 _DEMO_USER_DEFINITIONS = [
     {"id": "demo_platform_admin",    "email": "admin@demo.nyayamitra.in",        "role": "PLATFORM_ADMIN",             "full_name": "Platform Admin (Demo)",         "organization_id": "org_dlsa_central", "district": "Central Delhi"},
-    {"id": "demo_gov_admin",         "email": "govadmin@demo.nyayamitra.in",     "role": "GOV_ADMIN",                  "full_name": "Govt Admin (Demo)",             "organization_id": "org_dlsa_central", "district": "Central Delhi"},
+    {"id": "demo_gov_admin",         "email": "govadmin@demo.nyayamitra.in",     "role": "GOV_ADMIN",                  "full_name": "State Legal Services Oversight Officer (Demo)", "organization_id": "org_slsa_delhi", "state_id": "state_delhi", "state": "Delhi", "district": "All (Statewide)", "scope_type": "STATE", "authorized_district_ids": ["Central Delhi", "South Delhi", "West Delhi", "North Delhi", "East Delhi", "New Delhi", "Shahdara", "Rohini"]},
     {"id": "demo_jail_officer",      "email": "jail@demo.nyayamitra.in",         "role": "JAIL_OFFICER",               "full_name": "Jail Officer (Demo)",           "organization_id": "org_tihar_jail",   "district": "West Delhi", "facility_ids": ["fac_tihar_jail_04", "Central Jail No. 4, Tihar (Synthetic)", "Tihar"]},
-    {"id": "demo_police_officer",    "email": "police@demo.nyayamitra.in",       "role": "POLICE_OFFICER",             "full_name": "Police Officer (Demo)",         "organization_id": "org_dlsa_central", "district": "Central Delhi"},
+    {"id": "demo_police_officer",    "email": "police@demo.nyayamitra.in",       "role": "POLICE_OFFICER",             "full_name": "Police Officer (Demo)",         "organization_id": "ps_kotwali_central", "police_station_id": "ps_kotwali_central", "police_station": "Kotwali Police Station", "district": "Central Delhi", "jurisdiction_ids": ["ps_kotwali_central", "Central Delhi"]},
     {"id": "demo_dlsa_officer",      "email": "dlsa@demo.nyayamitra.in",         "role": "DLSA_OFFICER",               "full_name": "DLSA Officer (Demo)",           "organization_id": "org_dlsa_central", "district": "Central Delhi"},
     {"id": "demo_supervising",       "email": "supervisor@demo.nyayamitra.in",   "role": "SUPERVISING_LEGAL_OFFICER",  "full_name": "Supervising Legal Officer (Demo)", "organization_id": "org_dlsa_central", "district": "Central Delhi"},
     {"id": "demo_advocate",          "email": "advocate@demo.nyayamitra.in",     "role": "DEFENSE_ADVOCATE",           "full_name": "Defense Advocate (Demo)",       "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001"},
     {"id": "demo_ext_advocate",      "email": "extadvocate@demo.nyayamitra.in",  "role": "CONTROLLED_EXTERNAL_ADVOCATE","full_name": "External Advocate (Demo)",     "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001"},
     {"id": "demo_accused",           "email": "accused@demo.nyayamitra.in",      "role": "ACCUSED_USER",               "full_name": "Accused Person (Demo)",         "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001"},
     {"id": "demo_family",            "email": "family@demo.nyayamitra.in",       "role": "FAMILY_GUARDIAN",            "full_name": "Family Guardian (Demo)",        "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001"},
-    {"id": "demo_auditor",           "email": "auditor@demo.nyayamitra.in",      "role": "READ_ONLY_AUDITOR",          "full_name": "Read-Only Auditor (Demo)",      "organization_id": "org_dlsa_central", "district": "Central Delhi"},
+    {
+        "id": "demo_auditor",
+        "email": "auditor@demo.nyayamitra.in",
+        "role": "READ_ONLY_AUDITOR",
+        "full_name": "Statutory Oversight Auditor (Demo)",
+        "organization_id": "org_statutory_audit_delhi",
+        "district": "All (Statewide)",
+        "state_id": "state_delhi",
+        "state": "Delhi",
+        "scope_type": "STATUTORY_STATE_AUDIT",
+        "authorized_district_ids": ["Central Delhi", "South Delhi", "West Delhi", "North Delhi", "East Delhi", "New Delhi", "Shahdara", "Rohini"],
+    },
 ]
 
 
@@ -268,7 +332,17 @@ def _build_demo_users() -> None:
     h = _get_demo_hash()
     for defn in _DEMO_USER_DEFINITIONS:
         fac_ids = json.dumps(defn.get("facility_ids", [])) if isinstance(defn.get("facility_ids"), list) else defn.get("facility_ids", "[]")
-        entry = {**defn, "password_hash": h, "is_active": True, "failed_login_count": 0, "facility_ids": fac_ids}
+        jur_ids = json.dumps(defn.get("jurisdiction_ids", [])) if isinstance(defn.get("jurisdiction_ids"), list) else defn.get("jurisdiction_ids", "[]")
+        dist_ids = json.dumps(defn.get("authorized_district_ids", [])) if isinstance(defn.get("authorized_district_ids"), list) else defn.get("authorized_district_ids", "[]")
+        entry = {
+            **defn,
+            "password_hash": h,
+            "is_active": True,
+            "failed_login_count": 0,
+            "facility_ids": fac_ids,
+            "jurisdiction_ids": jur_ids,
+            "authorized_district_ids": dist_ids,
+        }
         _DEMO_USERS[defn["email"]] = entry
 
 

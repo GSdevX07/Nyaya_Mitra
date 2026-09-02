@@ -107,6 +107,30 @@ class AuditAction(str, Enum):
     TOKEN_REVOCATION = "TOKEN_REVOCATION"
     INTEGRATION_ACTION = "INTEGRATION_ACTION"
     RECORD_ACCESS = "RECORD_ACCESS"
+    AUTHORIZATION_DENIED = "AUTHORIZATION_DENIED"
+    SCOPE_VIOLATION = "SCOPE_VIOLATION"
+    AUDIT_LOG_VIEWED = "AUDIT_LOG_VIEWED"
+    AUDIT_LOG_EXPORTED = "AUDIT_LOG_EXPORTED"
+    AUDIT_RECORD_SEARCHED = "AUDIT_RECORD_SEARCHED"
+    AUDIT_REPORT_GENERATED = "AUDIT_REPORT_GENERATED"
+    BREAK_GLASS_ACCESS = "BREAK_GLASS_ACCESS"
+    TECHNICAL_INTEGRITY_CHECK = "TECHNICAL_INTEGRITY_CHECK"
+
+
+class SeverityLevel(str, Enum):
+    INFO = "INFO"
+    NOTICE = "NOTICE"
+    WARNING = "WARNING"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class DataStatus(str, Enum):
+    REAL = "REAL"
+    SYNTHETIC = "SYNTHETIC"
+    MANUAL = "MANUAL"
+    ESTIMATED = "ESTIMATED"
+    FALLBACK = "FALLBACK"
 
 
 class VerificationStatus(str, Enum):
@@ -452,3 +476,9 @@ class AuditEvent(BaseModel):
     ip_address: Optional[str] = "127.0.0.1"
     details_json: str
     is_immutable: bool = True
+    event_hash: Optional[str] = None
+    previous_event_hash: Optional[str] = None
+    hash_algorithm: str = "SHA-256"
+    sequence_number: int = 0
+    severity: str = "INFO"
+    data_status: str = "REAL"

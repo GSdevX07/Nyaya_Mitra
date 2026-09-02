@@ -58,10 +58,8 @@ function getNavItemsForRole(role?: Role): NavItem[] {
 
     case "POLICE_OFFICER":
       return [
-        { path: "/police", label: "Police Reference Desk" },
-        { path: "/cases", label: "FIR Registry" },
-        { path: "/documents", label: "Case Documents" },
-        { path: "/hearings", label: "Hearings" },
+        { path: "/police", label: "Police Records Desk" },
+        { path: "/hearings", label: "Court Production Schedule" },
       ];
 
     case "PLATFORM_ADMIN":

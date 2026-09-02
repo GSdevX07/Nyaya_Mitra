@@ -34,8 +34,15 @@ export interface UserProfile {
   full_name: string;
   org_id: string;
   district?: string;
+  state_id?: string;
+  state?: string;
+  scope_type?: string;
+  authorized_district_ids?: string[];
   facility_ids?: string[];
   linked_case_id?: string;
+  police_station?: string;
+  police_station_id?: string;
+  jurisdiction_ids?: string[];
 }
 
 export interface AuthContextType {
@@ -52,6 +59,22 @@ export interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 let _inMemoryAccessToken: string | null = null;
+
+function parseJwt(token: string): any {
+  try {
+    const base64Url = token.split(".")[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+    return JSON.parse(jsonPayload);
+  } catch {
+    return {};
+  }
+}
 
 export function getAuthToken(): string | null {
   return _inMemoryAccessToken;
@@ -77,7 +100,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateSession = (accessToken: string, userProfile: UserProfile, refreshToken?: string) => {
     _inMemoryAccessToken = accessToken;
     setToken(accessToken);
-    setUser(userProfile);
+    const jwtClaims = parseJwt(accessToken);
+    const enrichedUser: UserProfile = {
+      ...userProfile,
+      district: jwtClaims.district || userProfile.district,
+      state_id: jwtClaims.state_id || userProfile.state_id,
+      state: jwtClaims.state || userProfile.state,
+      scope_type: jwtClaims.scope_type || userProfile.scope_type,
+      authorized_district_ids: jwtClaims.authorized_district_ids || userProfile.authorized_district_ids,
+      facility_ids: jwtClaims.facility_ids || userProfile.facility_ids,
+      linked_case_id: jwtClaims.linked_case_id || userProfile.linked_case_id,
+      police_station: jwtClaims.police_station || userProfile.police_station,
+      police_station_id: jwtClaims.police_station_id || userProfile.police_station_id,
+      jurisdiction_ids: jwtClaims.jurisdiction_ids || userProfile.jurisdiction_ids,
+    };
+    setUser(enrichedUser);
     if (refreshToken) {
       sessionStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
     }

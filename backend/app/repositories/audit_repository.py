@@ -14,7 +14,19 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from app.models.domain import AuditEvent, AuditAction, generate_prefixed_id
 
+import hashlib
+
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "nyaya_mitra.db"
+
+
+def mask_ip_address(ip: Optional[str]) -> str:
+    """Mask IP address to protect privacy in default auditor summaries (e.g. 192.168.***.***)."""
+    if not ip or ip in ("localhost", "127.0.0.1"):
+        return "127.0.***"
+    parts = ip.split(".")
+    if len(parts) == 4:
+        return f"{parts[0]}.{parts[1]}.***.***"
+    return "IP_PROTECTED"
 
 
 class AuditRepository:
@@ -31,10 +43,50 @@ class AuditRepository:
         details: dict,
         organization_id: Optional[str] = None,
         ip_address: str = "127.0.0.1",
+        severity: Optional[str] = None,
+        data_status: str = "REAL",
     ) -> AuditEvent:
+        # Determine cryptographic sequence and parent link from previous event
+        prev_hash = "GENESIS_NYAYA_MITRA_AUDIT_LEDGER_V1"
+        seq = 1
+        try:
+            conn_prev = sqlite3.connect(self.db_path)
+            cur_prev = conn_prev.cursor()
+            cur_prev.execute(
+                "SELECT event_hash, sequence_number FROM audit_events ORDER BY timestamp DESC, rowid DESC LIMIT 1"
+            )
+            row_prev = cur_prev.fetchone()
+            conn_prev.close()
+            if row_prev and row_prev[0]:
+                prev_hash = row_prev[0]
+                seq = (row_prev[1] or 0) + 1
+            elif row_prev and row_prev[1]:
+                seq = (row_prev[1] or 0) + 1
+        except Exception:
+            pass
+
+        # Determine severity if not explicitly specified
+        if not severity:
+            if action in (AuditAction.AUTHORIZATION_DENIED, AuditAction.SECURITY_ALERT, AuditAction.LOGIN_FAILED):
+                severity = "WARNING"
+            elif action in (AuditAction.PRIVILEGE_CHANGE, AuditAction.SCOPE_VIOLATION):
+                severity = "HIGH"
+            elif action in (AuditAction.STATUS_TRANSITION, AuditAction.ADVOCATE_SIGN_OFF, AuditAction.COURT_FILING_RECORDED):
+                severity = "NOTICE"
+            else:
+                severity = "INFO"
+
+        event_id = generate_prefixed_id("aud")
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        details_str = json.dumps(details, sort_keys=True)
+
+        # Cryptographic Hash Chain: SHA-256(event_id | timestamp | actor | role | action | entity | details | prev_hash | seq)
+        hash_payload = f"{event_id}|{timestamp}|{actor_id}|{actor_role}|{action.value}|{entity_type}|{entity_id}|{details_str}|{prev_hash}|{seq}"
+        event_hash = hashlib.sha256(hash_payload.encode("utf-8")).hexdigest()
+
         event = AuditEvent(
-            id=generate_prefixed_id("aud"),
-            timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            id=event_id,
+            timestamp=timestamp,
             actor_id=actor_id,
             actor_role=actor_role,
             organization_id=organization_id,
@@ -42,8 +94,14 @@ class AuditRepository:
             entity_type=entity_type,
             entity_id=entity_id,
             ip_address=ip_address,
-            details_json=json.dumps(details),
+            details_json=details_str,
             is_immutable=True,
+            event_hash=event_hash,
+            previous_event_hash=prev_hash,
+            hash_algorithm="SHA-256",
+            sequence_number=seq,
+            severity=severity,
+            data_status=data_status,
         )
 
         # 1. Supabase PostgreSQL write if available
@@ -62,6 +120,12 @@ class AuditRepository:
                     "ip_address": event.ip_address,
                     "details_json": event.details_json,
                     "is_immutable": event.is_immutable,
+                    "event_hash": event.event_hash,
+                    "previous_event_hash": event.previous_event_hash,
+                    "hash_algorithm": event.hash_algorithm,
+                    "sequence_number": event.sequence_number,
+                    "severity": event.severity,
+                    "data_status": event.data_status,
                 })
         except Exception as e:
             print(f"[WARN] Supabase audit log write failed: {e}")
@@ -72,8 +136,12 @@ class AuditRepository:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO audit_events (id, timestamp, actor_id, actor_role, organization_id, action, entity_type, entity_id, ip_address, details_json, is_immutable)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO audit_events (
+                    id, timestamp, actor_id, actor_role, organization_id, action,
+                    entity_type, entity_id, ip_address, details_json, is_immutable,
+                    event_hash, previous_event_hash, hash_algorithm, sequence_number, severity, data_status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event.id,
@@ -87,6 +155,12 @@ class AuditRepository:
                     event.ip_address,
                     event.details_json,
                     1 if event.is_immutable else 0,
+                    event.event_hash,
+                    event.previous_event_hash,
+                    event.hash_algorithm,
+                    event.sequence_number,
+                    event.severity,
+                    event.data_status,
                 ),
             )
             conn.commit()
@@ -101,7 +175,12 @@ class AuditRepository:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, timestamp, actor_id, actor_role, organization_id, action, entity_type, entity_id, ip_address, details_json, is_immutable FROM audit_events WHERE entity_type = ? AND entity_id = ? ORDER BY timestamp DESC",
+                """
+                SELECT id, timestamp, actor_id, actor_role, organization_id, action,
+                       entity_type, entity_id, ip_address, details_json, is_immutable,
+                       event_hash, previous_event_hash, hash_algorithm, sequence_number, severity, data_status
+                FROM audit_events WHERE entity_type = ? AND entity_id = ? ORDER BY timestamp DESC
+                """,
                 (entity_type, entity_id),
             )
             rows = cursor.fetchall()
@@ -124,6 +203,12 @@ class AuditRepository:
                         ip_address=r[8],
                         details_json=r[9],
                         is_immutable=bool(r[10]),
+                        event_hash=r[11],
+                        previous_event_hash=r[12],
+                        hash_algorithm=r[13] or "SHA-256",
+                        sequence_number=r[14] or 0,
+                        severity=r[15] or "INFO",
+                        data_status=r[16] or "REAL",
                     )
                 )
         except Exception as e:
@@ -153,6 +238,8 @@ def append_audit_event(event_dict: Dict[str, Any]) -> None:
         details=event_dict.get("details", {}),
         organization_id=event_dict.get("organization_id"),
         ip_address=event_dict.get("ip_address", "127.0.0.1"),
+        severity=event_dict.get("severity", "INFO"),
+        data_status=event_dict.get("data_status", "REAL"),
     )
 
 
@@ -231,4 +318,94 @@ def audit_token_revocation(user_id: str, user_role: str, jti: str, reason: str =
         entity_type="token",
         entity_id=jti,
         details={"reason": reason},
+    )
+
+
+def audit_authorization_denied(
+    user_id: str,
+    user_role: str,
+    required_roles: list[str],
+    attempted_action: str = "ACCESS_ENDPOINT",
+    entity_type: str = "endpoint",
+    entity_id: str = "security_boundary",
+    ip_address: str = "127.0.0.1",
+) -> None:
+    """Record a 403 authorization rejection or boundary violation into the tamper-evident audit ledger."""
+    _audit_repo.record(
+        actor_id=user_id,
+        actor_role=user_role,
+        action=AuditAction.AUTHORIZATION_DENIED,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        details={
+            "attempted_action": attempted_action,
+            "required_roles": required_roles,
+            "message": f"Authorization denied for role {user_role}. Required: {', '.join(required_roles)}.",
+        },
+        ip_address=ip_address,
+        severity="WARNING",
+    )
+
+
+def audit_log_viewed(
+    user_id: str,
+    user_role: str,
+    query_filters: dict,
+    ip_address: str = "127.0.0.1",
+) -> None:
+    """Audit-of-Audit: Track whenever an auditor or admin inspects the audit ledger."""
+    _audit_repo.record(
+        actor_id=user_id,
+        actor_role=user_role,
+        action=AuditAction.AUDIT_LOG_VIEWED,
+        entity_type="audit_ledger",
+        entity_id="audit_stream",
+        details={"filters": query_filters},
+        ip_address=ip_address,
+        severity="INFO",
+    )
+
+
+def audit_log_exported(
+    user_id: str,
+    user_role: str,
+    export_reason: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    artifact_hash: str = "",
+    ip_address: str = "127.0.0.1",
+) -> None:
+    """Audit-of-Audit: Track formal export of audit ledger records."""
+    _audit_repo.record(
+        actor_id=user_id,
+        actor_role=user_role,
+        action=AuditAction.AUDIT_LOG_EXPORTED,
+        entity_type="audit_export",
+        entity_id=f"export_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        details={
+            "export_reason": export_reason,
+            "date_range": f"{date_from or 'earliest'} to {date_to or 'latest'}",
+            "artifact_sha256": artifact_hash,
+        },
+        ip_address=ip_address,
+        severity="NOTICE",
+    )
+
+
+def audit_report_generated(
+    user_id: str,
+    user_role: str,
+    report_type: str,
+    ip_address: str = "127.0.0.1",
+) -> None:
+    """Audit-of-Audit: Track generation of statutory compliance reports."""
+    _audit_repo.record(
+        actor_id=user_id,
+        actor_role=user_role,
+        action=AuditAction.AUDIT_REPORT_GENERATED,
+        entity_type="compliance_report",
+        entity_id=report_type,
+        details={"report_type": report_type},
+        ip_address=ip_address,
+        severity="INFO",
     )

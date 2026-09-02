@@ -54,6 +54,17 @@ def is_supabase_active() -> bool:
     return get_supabase_client() is not None
 
 
+def assert_production_db_available():
+    """Ensure production does not silently operate with missing primary database."""
+    app_env = os.environ.get("APP_ENV", "development").lower()
+    if app_env == "production" and not is_supabase_active():
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=503,
+            detail="Authoritative PostgreSQL database is currently unavailable in production.",
+        )
+
+
 # ── Organization Queries ──────────────────────────────────────────────────────
 
 def supa_get_all_organizations() -> List[Dict]:
@@ -350,4 +361,40 @@ def supa_resolve_merge_candidate(candidate_id: str, action: str, notes: str, rev
     }).eq("id", candidate_id).execute()
     res = client.table("identity_merge_candidates").select("*").eq("id", candidate_id).single().execute()
     return res.data
+
+
+def supa_get_identity_references(accused_id: str) -> Dict[str, str]:
+    client = get_supabase_client()
+    if not client:
+        return {}
+    try:
+        res = client.table("identity_references").select("*").eq("accused_id", accused_id).execute()
+        if res.data:
+            out = {}
+            for row in res.data:
+                id_type = row.get("id_type")
+                id_val = row.get("id_value")
+                if id_type and id_val:
+                    out[id_type] = id_val
+            return out
+    except Exception:
+        pass
+    return {}
+
+
+def supa_get_case_documents_with_visibility(case_id: str, audience: str = "citizen") -> List[Dict]:
+    """Retrieve case documents filtered by audience visibility."""
+    client = get_supabase_client()
+    if not client:
+        return []
+    try:
+        query = client.table("uploaded_documents").select("*").eq("case_id", case_id)
+        if audience == "citizen":
+            query = query.eq("citizen_visible", True)
+        elif audience == "family":
+            query = query.eq("family_visible", True)
+        res = query.execute()
+        return res.data or []
+    except Exception:
+        return []
 

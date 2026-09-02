@@ -52,7 +52,23 @@ async def get_current_user(
 
     user = get_user_by_id(user_id)
     if user is None:
+        from app.auth.config import DEMO_MODE, APP_ENV
         token_role = payload.get("role")
+        # In production, or for PLATFORM_ADMIN, or for deleted/revoked users,
+        # missing user from authoritative identity store is strictly rejected (401).
+        if (
+            APP_ENV == "production"
+            or not DEMO_MODE
+            or (token_role and token_role == Role.PLATFORM_ADMIN.value)
+            or user_id.startswith("deleted_")
+            or user_id.startswith("revoked_")
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User account no longer exists in authoritative identity store.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
         if token_role:
             try:
                 user = AuthUser(
@@ -85,6 +101,34 @@ async def get_current_user(
     if token_facilities and not user.facility_ids:
         user.facility_ids = token_facilities
 
+    token_station_id = payload.get("police_station_id")
+    if token_station_id:
+        user.police_station_id = token_station_id
+
+    token_station = payload.get("police_station")
+    if token_station:
+        user.police_station = token_station
+
+    token_jurisdictions = payload.get("jurisdiction_ids")
+    if token_jurisdictions and not user.jurisdiction_ids:
+        user.jurisdiction_ids = token_jurisdictions
+
+    token_state_id = payload.get("state_id")
+    if token_state_id:
+        user.state_id = token_state_id
+
+    token_state = payload.get("state")
+    if token_state:
+        user.state = token_state
+
+    token_scope = payload.get("scope_type")
+    if token_scope:
+        user.scope_type = token_scope
+
+    token_dist_ids = payload.get("authorized_district_ids")
+    if token_dist_ids and not user.authorized_district_ids:
+        user.authorized_district_ids = token_dist_ids
+
     return user
 
 
@@ -99,6 +143,17 @@ def require_role(*roles: Role) -> Callable:
 
     async def _check(current_user: AuthUser = Depends(get_current_user)) -> AuthUser:
         if current_user.role not in role_set:
+            try:
+                from app.repositories.audit_repository import audit_authorization_denied
+                audit_authorization_denied(
+                    user_id=current_user.id,
+                    user_role=current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role),
+                    required_roles=[r.value for r in role_set],
+                    attempted_action="ROLE_GUARD_CHECK",
+                )
+            except Exception:
+                pass
+
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=(

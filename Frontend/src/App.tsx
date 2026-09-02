@@ -311,7 +311,6 @@ function App() {
                       "SUPERVISING_LEGAL_OFFICER",
                       "PLATFORM_ADMIN",
                       "GOV_ADMIN",
-                      "POLICE_OFFICER",
                       "DEFENSE_ADVOCATE",
                       "CONTROLLED_EXTERNAL_ADVOCATE",
                       "READ_ONLY_AUDITOR",

@@ -55,7 +55,7 @@ def test_medical_data_abac_quarantining_and_redaction():
 
     # 2. Unauthorized Police Officer -> Medical details redacted
     police_token = _get_token("POLICE_OFFICER")
-    police_resp = client.get("/accused/acc_utp_0007", headers={"Authorization": f"Bearer {police_token}"})
+    police_resp = client.get("/accused/acc_utp_0001", headers={"Authorization": f"Bearer {police_token}"})
     assert police_resp.status_code == 200
     police_data = police_resp.json()
     assert police_data["medical_record"]["is_redacted"] is True

@@ -107,3 +107,20 @@ async def get_my_case_citizen_view(
     Zero internal police or prosecution notes exposed.
     """
     return get_citizen_view(user=current_user)
+
+
+@citizen_router.get("/timeline", response_model=List[Dict[str, Any]])
+async def get_my_case_citizen_timeline(
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """
+    Get citizen-safe chronological milestone timeline for the logged-in citizen's linked case.
+    Filters out internal audit events, security boundary logs, and raw system calculations.
+    """
+    if not current_user.linked_case_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active legal aid case is linked to your account.",
+        )
+    from app.services.accused_service import get_citizen_timeline
+    return get_citizen_timeline(case_id=current_user.linked_case_id, user=current_user)

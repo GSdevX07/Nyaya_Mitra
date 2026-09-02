@@ -277,116 +277,128 @@ export const IdentityResolutionPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Human Decision Control Box — Enlarged Action Center */}
-              <div className="bg-card border-2 border-border rounded-xl p-6 space-y-5 shadow-md">
-                <div>
-                  <h4 className="text-base font-bold text-foreground flex items-center gap-2">
-                    <GitMerge className="h-5 w-5 text-primary" /> Judicial De-duplication Decision
-                  </h4>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Select the statutory action to apply across state prison and court registries. This action is permanently logged into the immutable audit trail.
+              {/* Human Decision Control Box — Read-Only for GOV_ADMIN */}
+              {user?.role === 'GOV_ADMIN' ? (
+                <div className="bg-card border-2 border-border rounded-xl p-6 space-y-3 shadow-md">
+                  <div className="flex items-center gap-2 text-primary font-bold text-sm">
+                    <ShieldCheck className="h-5 w-5" />
+                    <span>State Administrator Oversight Mode (Read-Only)</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    State Legal Services Authority administrators monitor identity collision rates, match explanations, and resolution audits. Operational merge and alias mutation actions are reserved for Supervising Legal Officers and DLSA Authorities.
                   </p>
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <button
-                    onClick={() => setResolutionAction('MERGE_RECORDS')}
-                    className={`p-4 rounded-xl border-2 text-sm font-bold transition-all flex flex-col items-center text-center gap-2 shadow-sm ${
-                      resolutionAction === 'MERGE_RECORDS'
-                        ? 'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-500/30'
-                        : 'bg-secondary/40 border-border text-foreground hover:border-emerald-500 hover:bg-emerald-500/5'
-                    }`}
-                  >
-                    <GitMerge className="h-6 w-6 text-emerald-500" />
-                    <span>Merge Under Canonical ID</span>
-                    <span className="text-[11px] font-normal opacity-80">Unify dockets across facilities</span>
-                  </button>
-
-                  <button
-                    onClick={() => setResolutionAction('MARK_AS_ALIAS')}
-                    className={`p-4 rounded-xl border-2 text-sm font-bold transition-all flex flex-col items-center text-center gap-2 shadow-sm ${
-                      resolutionAction === 'MARK_AS_ALIAS'
-                        ? 'bg-purple-600 text-white border-purple-600 ring-2 ring-purple-500/30'
-                        : 'bg-secondary/40 border-border text-foreground hover:border-purple-500 hover:bg-purple-500/5'
-                    }`}
-                  >
-                    <Layers className="h-6 w-6 text-purple-500" />
-                    <span>Link As Alias Profile</span>
-                    <span className="text-[11px] font-normal opacity-80">Preserve cross-alias reference</span>
-                  </button>
-
-                  <button
-                    onClick={() => setResolutionAction('REJECT_MATCH')}
-                    className={`p-4 rounded-xl border-2 text-sm font-bold transition-all flex flex-col items-center text-center gap-2 shadow-sm ${
-                      resolutionAction === 'REJECT_MATCH'
-                        ? 'bg-rose-600 text-white border-rose-600 ring-2 ring-rose-500/30'
-                        : 'bg-secondary/40 border-border text-foreground hover:border-rose-500 hover:bg-rose-500/5'
-                    }`}
-                  >
-                    <XCircle className="h-6 w-6 text-rose-500" />
-                    <span>Mark As Distinct Persons</span>
-                    <span className="text-[11px] font-normal opacity-80">Separate cases permanently</span>
-                  </button>
-                </div>
-
-                {resolutionAction && (
-                  <div className="space-y-4 pt-4 border-t border-border">
-                    {resolutionAction === 'MERGE_RECORDS' && (
-                      <div className="p-4 bg-amber-500/10 border-2 border-amber-500/30 rounded-xl space-y-2 text-xs font-mono text-amber-800 dark:text-amber-300">
-                        <div className="font-bold flex items-center gap-2 text-sm uppercase">
-                          <AlertTriangle className="h-4 w-4 text-amber-600" /> High-Impact Identity Mutation Warning
-                        </div>
-                        <p>
-                          Merging under Canonical ID permanently unifies detention dockets, biometric aliases, and criminal histories across state facilities. This irreversible action will be stamped with your officer credentials ({user?.full_name || user?.role}) in the permanent audit ledger.
-                        </p>
-                      </div>
-                    )}
-
-                    <label className="text-sm font-bold text-foreground block">
-                      Resolution Notes & Evidentiary Rationale: <span className="text-destructive">*</span>
-                    </label>
-                    <textarea
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      placeholder="Enter specific legal rationale (e.g. verified father name, physical identification marks, and CCTNS biometric record)..."
-                      className="w-full bg-background border-2 border-border rounded-xl p-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary min-h-[100px] leading-relaxed"
-                    />
-
-                    {resolutionAction === 'MERGE_RECORDS' && (
-                      <label className="flex items-start gap-3 p-3 bg-secondary/50 border border-border rounded-lg text-xs font-semibold cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={confirmMerge}
-                          onChange={(e) => setConfirmMerge(e.target.checked)}
-                          className="mt-0.5 rounded border-border text-primary focus:ring-primary h-4 w-4"
-                        />
-                        <span className="text-foreground">
-                          I confirm that I have reviewed the corroborated traits, conflict flags, and facility records, and authorize this permanent identity merge under canonical ID.
-                        </span>
-                      </label>
-                    )}
-
-                    <div className="flex items-center justify-end gap-3 pt-2">
-                      <button
-                        onClick={() => {
-                          setResolutionAction(null);
-                          setConfirmMerge(false);
-                        }}
-                        className="px-5 py-2.5 rounded-lg border border-border text-sm font-medium hover:bg-secondary text-foreground transition-colors"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={handleResolve}
-                        disabled={submitting || (resolutionAction === 'MERGE_RECORDS' && (!confirmMerge || notes.trim().length < 10)) || !notes.trim()}
-                        className="px-6 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2 shadow-sm transition-all"
-                      >
-                        {submitting ? 'Applying Decision...' : 'Confirm Decision & Record Audit'}
-                      </button>
-                    </div>
+              ) : (
+                <div className="bg-card border-2 border-border rounded-xl p-6 space-y-5 shadow-md">
+                  <div>
+                    <h4 className="text-base font-bold text-foreground flex items-center gap-2">
+                      <GitMerge className="h-5 w-5 text-primary" /> Judicial De-duplication Decision
+                    </h4>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Select the statutory action to apply across state prison and court registries. This action is permanently logged into the immutable audit trail.
+                    </p>
                   </div>
-                )}
-              </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <button
+                      onClick={() => setResolutionAction('MERGE_RECORDS')}
+                      className={`p-4 rounded-xl border-2 text-sm font-bold transition-all flex flex-col items-center text-center gap-2 shadow-sm ${
+                        resolutionAction === 'MERGE_RECORDS'
+                          ? 'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-500/30'
+                          : 'bg-secondary/40 border-border text-foreground hover:border-emerald-500 hover:bg-emerald-500/5'
+                      }`}
+                    >
+                      <GitMerge className="h-6 w-6 text-emerald-500" />
+                      <span>Merge Under Canonical ID</span>
+                      <span className="text-[11px] font-normal opacity-80">Unify dockets across facilities</span>
+                    </button>
+
+                    <button
+                      onClick={() => setResolutionAction('MARK_AS_ALIAS')}
+                      className={`p-4 rounded-xl border-2 text-sm font-bold transition-all flex flex-col items-center text-center gap-2 shadow-sm ${
+                        resolutionAction === 'MARK_AS_ALIAS'
+                          ? 'bg-purple-600 text-white border-purple-600 ring-2 ring-purple-500/30'
+                          : 'bg-secondary/40 border-border text-foreground hover:border-purple-500 hover:bg-purple-500/5'
+                      }`}
+                    >
+                      <Layers className="h-6 w-6 text-purple-500" />
+                      <span>Link As Alias Profile</span>
+                      <span className="text-[11px] font-normal opacity-80">Preserve cross-alias reference</span>
+                    </button>
+
+                    <button
+                      onClick={() => setResolutionAction('REJECT_MATCH')}
+                      className={`p-4 rounded-xl border-2 text-sm font-bold transition-all flex flex-col items-center text-center gap-2 shadow-sm ${
+                        resolutionAction === 'REJECT_MATCH'
+                          ? 'bg-rose-600 text-white border-rose-600 ring-2 ring-rose-500/30'
+                          : 'bg-secondary/40 border-border text-foreground hover:border-rose-500 hover:bg-rose-500/5'
+                      }`}
+                    >
+                      <XCircle className="h-6 w-6 text-rose-500" />
+                      <span>Mark As Distinct Persons</span>
+                      <span className="text-[11px] font-normal opacity-80">Separate cases permanently</span>
+                    </button>
+                  </div>
+
+                  {resolutionAction && (
+                    <div className="space-y-4 pt-4 border-t border-border">
+                      {resolutionAction === 'MERGE_RECORDS' && (
+                        <div className="p-4 bg-amber-500/10 border-2 border-amber-500/30 rounded-xl space-y-2 text-xs font-mono text-amber-800 dark:text-amber-300">
+                          <div className="font-bold flex items-center gap-2 text-sm uppercase">
+                            <AlertTriangle className="h-4 w-4 text-amber-600" /> High-Impact Identity Mutation Warning
+                          </div>
+                          <p>
+                            Merging under Canonical ID permanently unifies detention dockets, biometric aliases, and criminal histories across state facilities. This irreversible action will be stamped with your officer credentials ({user?.full_name || user?.role}) in the permanent audit ledger.
+                          </p>
+                        </div>
+                      )}
+
+                      <label className="text-sm font-bold text-foreground block">
+                        Resolution Notes & Evidentiary Rationale: <span className="text-destructive">*</span>
+                      </label>
+                      <textarea
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder="Enter specific legal rationale (e.g. verified father name, physical identification marks, and CCTNS biometric record)..."
+                        className="w-full bg-background border-2 border-border rounded-xl p-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary min-h-[100px] leading-relaxed"
+                      />
+
+                      {resolutionAction === 'MERGE_RECORDS' && (
+                        <label className="flex items-start gap-3 p-3 bg-secondary/50 border border-border rounded-lg text-xs font-semibold cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={confirmMerge}
+                            onChange={(e) => setConfirmMerge(e.target.checked)}
+                            className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                          />
+                          <span className="text-muted-foreground leading-normal">
+                            I formally certify as {user?.role} that biometric traits, parentage records, and facility admission files have been verified to establish identical persona.
+                          </span>
+                        </label>
+                      )}
+
+                      <div className="flex items-center justify-end gap-3 pt-2">
+                        <button
+                          onClick={() => {
+                            setResolutionAction(null);
+                            setConfirmMerge(false);
+                          }}
+                          className="px-5 py-2.5 rounded-lg border border-border text-sm font-medium hover:bg-secondary text-foreground transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleResolve}
+                          disabled={submitting || (resolutionAction === 'MERGE_RECORDS' && (!confirmMerge || notes.trim().length < 10)) || !notes.trim()}
+                          className="px-6 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2 shadow-sm transition-all"
+                        >
+                          {submitting ? 'Applying Decision...' : 'Confirm Decision & Record Audit'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

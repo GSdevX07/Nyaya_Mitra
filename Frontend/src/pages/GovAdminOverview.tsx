@@ -85,15 +85,18 @@ export function GovAdminOverview() {
             Facility-Level Undertrial Distribution
           </h2>
           <div className="space-y-3 text-xs font-mono">
-            {(reports?.court_jurisdiction_breakdown || [
-              { jail: "Tihar Central Prison Complex", count: 3 },
-              { jail: "Mandoli Sub-Jail No. 1", count: 2 },
-            ]).map((item: any, idx: number) => (
-              <div key={idx} className="p-3 bg-secondary/30 rounded border border-border flex justify-between items-center">
-                <span className="font-bold text-foreground">{item.jail}</span>
-                <span className="font-bold text-primary">{item.count} inmates</span>
+            {(reports?.court_jurisdiction_breakdown || []).length === 0 ? (
+              <div className="p-3 bg-secondary/20 rounded border border-border text-center text-muted-foreground">
+                Facility distribution data loading from database...
               </div>
-            ))}
+            ) : (
+              (reports?.court_jurisdiction_breakdown || []).map((item: any, idx: number) => (
+                <div key={idx} className="p-3 bg-secondary/30 rounded border border-border flex justify-between items-center">
+                  <span className="font-bold text-foreground">{item.jail}</span>
+                  <span className="font-bold text-primary">{item.count} inmates</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
 

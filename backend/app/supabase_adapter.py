@@ -271,3 +271,80 @@ def supa_get_entity_audit_trail(entity_type: str, entity_id: str) -> List[Dict]:
         .execute()
     )
     return res.data or []
+
+
+def supa_get_all_audit_events(limit: int = 50) -> List[Dict]:
+    client = get_supabase_client()
+    if not client:
+        return []
+    res = (
+        client.table("audit_events")
+        .select("*")
+        .order("timestamp", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return res.data or []
+
+
+# ── Family Contacts Queries ───────────────────────────────────────────────────
+
+def supa_get_family_contacts(accused_id: str) -> List[Dict]:
+    client = get_supabase_client()
+    if not client:
+        return []
+    res = (
+        client.table("family_contacts")
+        .select("*")
+        .eq("accused_id", accused_id)
+        .order("is_primary_contact", desc=True)
+        .execute()
+    )
+    return res.data or []
+
+
+# ── Hearings Schedule Queries ─────────────────────────────────────────────────
+
+def supa_get_hearings_schedule() -> List[Dict]:
+    client = get_supabase_client()
+    if not client:
+        return []
+    res = (
+        client.table("hearings_schedule")
+        .select("*")
+        .order("hearing_date", desc=False)
+        .execute()
+    )
+    return res.data or []
+
+
+# ── Identity Merge Candidates Queries ─────────────────────────────────────────
+
+def supa_get_identity_merge_candidates() -> List[Dict]:
+    client = get_supabase_client()
+    if not client:
+        return []
+    res = (
+        client.table("identity_merge_candidates")
+        .select("*")
+        .eq("review_status", "PENDING_HUMAN_REVIEW")
+        .order("match_confidence", desc=True)
+        .execute()
+    )
+    return res.data or []
+
+
+def supa_resolve_merge_candidate(candidate_id: str, action: str, notes: str, reviewed_by: str) -> Optional[Dict]:
+    client = get_supabase_client()
+    if not client:
+        return None
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    client.table("identity_merge_candidates").update({
+        "review_status": action,
+        "reviewed_by": reviewed_by,
+        "reviewed_at": now_iso,
+        "resolution_notes": notes,
+    }).eq("id", candidate_id).execute()
+    res = client.table("identity_merge_candidates").select("*").eq("id", candidate_id).single().execute()
+    return res.data
+

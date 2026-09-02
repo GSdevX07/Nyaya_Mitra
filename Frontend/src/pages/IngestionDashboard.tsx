@@ -3,8 +3,7 @@ import {
   Database, UploadCloud, RefreshCw, AlertTriangle, CheckCircle2,
   ShieldCheck, Users, Check, X
 } from "lucide-react";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+import { authFetch, API_BASE_URL } from "@/lib/api";
 
 interface Connector {
   id: string;
@@ -74,16 +73,16 @@ export function IngestionDashboard() {
 
   const fetchTelemetry = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/ingestion/dashboard`);
+      const res = await authFetch(`${API_BASE_URL}/ingestion/dashboard`);
       if (res.ok) {
         const data = await res.json();
         setTelemetry(data);
       }
-      const cRes = await fetch(`${API_BASE_URL}/ingestion/conflicts`);
+      const cRes = await authFetch(`${API_BASE_URL}/ingestion/conflicts`);
       if (cRes.ok) {
         setConflicts(await cRes.json());
       }
-      const mRes = await fetch(`${API_BASE_URL}/ingestion/identity-merges`);
+      const mRes = await authFetch(`${API_BASE_URL}/ingestion/identity-merges`);
       if (mRes.ok) {
         setMerges(await mRes.json());
       }
@@ -99,7 +98,7 @@ export function IngestionDashboard() {
   const handleSyncTrigger = async (connectorId: string) => {
     setSyncingId(connectorId);
     try {
-      const res = await fetch(`${API_BASE_URL}/ingestion/connectors/${connectorId}/sync`, {
+      const res = await authFetch(`${API_BASE_URL}/ingestion/connectors/${connectorId}/sync`, {
         method: "POST",
       });
       if (res.ok) {
@@ -114,7 +113,7 @@ export function IngestionDashboard() {
 
   const handleResolveConflict = async (conflictId: string, resolution: "ACCEPTED_PROPOSED" | "KEPT_CANONICAL") => {
     try {
-      const res = await fetch(`${API_BASE_URL}/ingestion/conflicts/${conflictId}/resolve`, {
+      const res = await authFetch(`${API_BASE_URL}/ingestion/conflicts/${conflictId}/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ resolution, notes: "Resolved in Ingestion Dashboard" }),
@@ -130,7 +129,7 @@ export function IngestionDashboard() {
 
   const handleResolveIdentityMerge = async (mergeId: string, confirmMerge: boolean) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/ingestion/identity-merges/${mergeId}/resolve`, {
+      const res = await authFetch(`${API_BASE_URL}/ingestion/identity-merges/${mergeId}/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirm_merge: confirmMerge, notes: "Identity reviewed by officer" }),
@@ -155,7 +154,7 @@ export function IngestionDashboard() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await fetch(`${API_BASE_URL}/ingestion/upload`, {
+      const res = await authFetch(`${API_BASE_URL}/ingestion/upload`, {
         method: "POST",
         body: formData,
       });

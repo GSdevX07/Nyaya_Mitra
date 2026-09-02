@@ -524,3 +524,114 @@ export async function fetchDemoUsers() {
   }
   return await res.json();
 }
+
+export async function fetchAuditEvents(limit: number = 50) {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/audit-events?limit=${limit}`);
+    if (!res.ok) throw new Error(`Failed to fetch audit events: HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("Backend audit events unavailable:", err);
+    return [];
+  }
+}
+
+export async function fetchCurrentUserProfile() {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/auth/me`);
+    if (!res.ok) throw new Error(`Failed to fetch current user: HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("Backend /auth/me unavailable:", err);
+    return null;
+  }
+}
+
+// ── Governed Legal Knowledge Layer API ────────────────────────────────────────
+
+export async function fetchLegalSources(domain?: string, lifecycleStatus?: string, jurisdiction?: string) {
+  try {
+    const params = new URLSearchParams();
+    if (domain) params.append("domain", domain);
+    if (lifecycleStatus && lifecycleStatus !== "ALL") params.append("lifecycle_status", lifecycleStatus);
+    if (jurisdiction) params.append("jurisdiction", jurisdiction);
+    const url = `${API_BASE_URL}/api/legal-sources${params.toString() ? `?${params.toString()}` : ""}`;
+    const res = await authFetch(url);
+    if (!res.ok) throw new Error(`Failed to fetch legal sources: HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("Legal sources fetch fallback:", err);
+    return [];
+  }
+}
+
+export async function fetchLegalSourceDetail(sourceId: string) {
+  const res = await authFetch(`${API_BASE_URL}/api/legal-sources/${sourceId}`);
+  if (!res.ok) throw new Error(`Failed to fetch source details: HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function createLegalSource(data: any) {
+  const res = await authFetch(`${API_BASE_URL}/api/legal-sources`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Failed to create legal source: HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function updateLegalSourceLifecycle(sourceId: string, status: string, notes?: string, supersededById?: string) {
+  const res = await authFetch(`${API_BASE_URL}/api/legal-sources/${sourceId}/lifecycle`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status, notes, superseded_by_id: supersededById }),
+  });
+  if (!res.ok) throw new Error(`Failed to update lifecycle: HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function retrieveLegalKnowledge(query: string, domain?: string, includeSuperseded: boolean = false, limit: number = 5) {
+  const res = await authFetch(`${API_BASE_URL}/api/legal-knowledge/retrieve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, domain, include_superseded: includeSuperseded, limit }),
+  });
+  if (!res.ok) throw new Error(`Failed to retrieve legal knowledge: HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function verifyCitationIntegrity(draftStatement: string) {
+  const res = await authFetch(`${API_BASE_URL}/api/legal-knowledge/verify-citations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ draft_statement: draftStatement }),
+  });
+  if (!res.ok) throw new Error(`Failed to verify citation integrity: HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function runLegalKnowledgeEvaluation() {
+  const res = await authFetch(`${API_BASE_URL}/api/legal-knowledge/evaluate`);
+  if (!res.ok) throw new Error(`Failed to run legal evaluation: HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function fetchLegalEscalations(status: string = "PENDING_REVIEW") {
+  const res = await authFetch(`${API_BASE_URL}/api/legal-knowledge/escalations?status=${encodeURIComponent(status)}`);
+  if (!res.ok) throw new Error(`Failed to fetch legal escalations: HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function resolveLegalEscalation(escalationId: string, notes: string, status: string = "RESOLVED") {
+  const res = await authFetch(`${API_BASE_URL}/api/legal-knowledge/escalations/${escalationId}/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes, status }),
+  });
+  if (!res.ok) throw new Error(`Failed to resolve legal escalation: HTTP ${res.status}`);
+  return await res.json();
+}
+
+
+

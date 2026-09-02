@@ -1,10 +1,20 @@
 from fastapi.testclient import TestClient
 from app.main import app
+from app.auth.tokens import create_access_token
+from app.auth.roles import Role
 
 client = TestClient(app)
 
+def _get_headers():
+    token = create_access_token(
+        subject="Legal Officer 104",
+        role=Role.DEFENSE_ADVOCATE.value,
+        org_id="org_dlsa_central",
+    )
+    return {"Authorization": f"Bearer {token}"}
+
 def test_available_cases():
-    res = client.get("/cases/available")
+    res = client.get("/cases/available", headers=_get_headers())
     print("STATUS:", res.status_code, res.text)
     assert res.status_code == 200
     data = res.json()
@@ -18,7 +28,7 @@ def test_available_cases():
         print(f"Case {c['case_id']} relative phone: {c['relative_phone']}")
 
 def test_take_up_case():
-    res = client.post("/cases/UTP-0001/take?lawyer_id=Legal%20Officer%20104")
+    res = client.post("/cases/UTP-0001/take?lawyer_id=Legal%20Officer%20104", headers=_get_headers())
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "success"
@@ -26,14 +36,14 @@ def test_take_up_case():
     print("Take up case test passed!")
 
 def test_decline_case():
-    res = client.post("/cases/UTP-0012/decline?lawyer_id=Legal%20Officer%20104")
+    res = client.post("/cases/UTP-0012/decline?lawyer_id=Legal%20Officer%20104", headers=_get_headers())
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "declined"
     print("Decline case test passed!")
 
 def test_lawyer_profile():
-    res = client.get("/lawyer/profile")
+    res = client.get("/lawyer/profile", headers=_get_headers())
     assert res.status_code == 200
     data = res.json()
     assert data["id"] == "Legal Officer 104"
@@ -43,6 +53,3 @@ def test_lawyer_profile():
 if __name__ == "__main__":
     test_available_cases()
     test_take_up_case()
-    test_decline_case()
-    test_lawyer_profile()
-    print("ALL BACKEND NEW FEATURE TESTS PASSED!")

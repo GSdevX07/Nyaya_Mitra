@@ -24,6 +24,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
     case "READ_ONLY_AUDITOR":
       return [
         { path: "/audit", label: "Audit Ledger" },
+        { path: "/legal-sources", label: "Legal Knowledge Audit" },
         { path: "/reports", label: "Reports" },
         { path: "/evidence", label: "Evidence Integrity" },
       ];
@@ -32,11 +33,13 @@ function getNavItemsForRole(role?: Role): NavItem[] {
     case "CONTROLLED_EXTERNAL_ADVOCATE":
       return [
         { path: "/advocate", label: "My Assigned Cases" },
+        { path: "/legal-sources", label: "Legal Knowledge Base" },
         { path: "/radar", label: "Eligibility Radar" },
         { path: "/documents", label: "Documents" },
         { path: "/actions", label: "Actions" },
         { path: "/hearings", label: "Hearings" },
       ];
+
 
     case "JAIL_OFFICER":
       return [
@@ -59,6 +62,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/dashboard", label: "Command Center" },
         { path: "/cases", label: "Cases" },
         { path: "/identity-review", label: "Identity Review" },
+        { path: "/legal-sources", label: "Legal Knowledge" },
         { path: "/ingestion", label: "Data Ingestion" },
         { path: "/audit", label: "Audit Logs" },
         { path: "/reports", label: "Reports" },
@@ -71,6 +75,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/cases", label: "Cases" },
         { path: "/evidence", label: "Evidence" },
         { path: "/identity-review", label: "Identity Review" },
+        { path: "/legal-sources", label: "Legal Knowledge" },
         { path: "/reports", label: "Reports" },
         { path: "/audit", label: "Audit Logs" },
       ];
@@ -80,6 +85,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/dashboard", label: "Command Center" },
         { path: "/cases", label: "Cases" },
         { path: "/identity-review", label: "Identity Review" },
+        { path: "/legal-sources", label: "Legal Knowledge" },
         { path: "/radar", label: "Eligibility Radar" },
         { path: "/documents", label: "Documents" },
         { path: "/evidence", label: "Evidence" },
@@ -96,6 +102,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/dashboard", label: "Command Center" },
         { path: "/cases", label: "Cases" },
         { path: "/identity-review", label: "Identity Review" },
+        { path: "/legal-sources", label: "Legal Knowledge" },
         { path: "/radar", label: "Eligibility Radar" },
         { path: "/documents", label: "Documents" },
         { path: "/evidence", label: "Evidence" },
@@ -107,24 +114,158 @@ function getNavItemsForRole(role?: Role): NavItem[] {
   }
 }
 
-const DEFAULT_NOTIFICATIONS: NotificationItem[] = [
-  {
-    id: "N-1",
-    title: "Senior Citizen Bail Eligibility",
-    message: "UTP-0007 (63 yrs, hypertensive) has completed half sentence.",
-    timestamp: "10 mins ago",
-    type: "urgent",
-    case_id: "UTP-0007",
-  },
-  {
-    id: "N-2",
-    title: "Missing Document Alert",
-    message: "UTP-0015 requires Charge Sheet for BNSS 479 draft generation.",
-    timestamp: "45 mins ago",
-    type: "warning",
-    case_id: "UTP-0015",
-  },
-];
+
+function getDefaultNotificationsForRole(role?: string): NotificationItem[] {
+  switch (role) {
+    case "POLICE_OFFICER":
+      return [
+        {
+          id: "DEF-POLICE-1",
+          title: "Remand Period Expiry Alert — Sec 187 BNSS",
+          message: "Accused Suresh Kumar (FIR 204/2026, Crime Branch Delhi) initial 15-day police custody remand expires in 48 hours.",
+          timestamp: "Just now",
+          type: "urgent",
+          case_id: "UTP-0001",
+        },
+        {
+          id: "DEF-POLICE-2",
+          title: "Pending Investigation Charge Sheet Deadline",
+          message: "Charge Sheet for Case UTP-0015 (FIR 88/2026) due within 14 days under Section 193 BNSS.",
+          timestamp: "2 hrs ago",
+          type: "warning",
+          case_id: "UTP-0015",
+        },
+      ];
+
+    case "JAIL_OFFICER":
+      return [
+        {
+          id: "DEF-JAIL-1",
+          title: "Section 479(2) BNSS Mandatory Bail Application Required",
+          message: "Undertrial prisoner Ramesh Kumar (UTP-0007) has completed 1/3rd sentence duration. Superintendent application to Court required forthwith.",
+          timestamp: "Just now",
+          type: "urgent",
+          case_id: "UTP-0007",
+        },
+        {
+          id: "DEF-JAIL-2",
+          title: "Nominal Roll & Custody Certificate Due",
+          message: "High Court Registry requested verified Nominal Roll and custody conduct certificate for Suresh Kumar (UTP-0001).",
+          timestamp: "1 hr ago",
+          type: "warning",
+          case_id: "UTP-0001",
+        },
+      ];
+
+    case "DEFENSE_ADVOCATE":
+    case "CONTROLLED_EXTERNAL_ADVOCATE":
+      return [
+        {
+          id: "DEF-ADV-1",
+          title: "Bail Application Draft Ready for Filing",
+          message: "Consolidated BNSS Section 479 application package for Suresh Kumar (UTP-0001) generated and verified against 2024 Supreme Court SOP.",
+          timestamp: "10 mins ago",
+          type: "success",
+          case_id: "UTP-0001",
+        },
+        {
+          id: "DEF-ADV-2",
+          title: "Client Eligibility Radar Alert",
+          message: "New Section 479(1) Proviso 1 eligibility detected for Ramesh Kumar (UTP-0007, First-time offender threshold reached).",
+          timestamp: "45 mins ago",
+          type: "urgent",
+          case_id: "UTP-0007",
+        },
+      ];
+
+    case "DLSA_OFFICER":
+      return [
+        {
+          id: "DEF-DLSA-1",
+          title: "Legal Aid Panel Assignment Pending",
+          message: "Indigent undertrial prisoner (UTP-0015) has requested DLSA representation. Panel advocate assignment awaiting endorsement.",
+          timestamp: "20 mins ago",
+          type: "warning",
+          case_id: "UTP-0015",
+        },
+        {
+          id: "DEF-DLSA-2",
+          title: "High Priority Bail Eligibility Flagged",
+          message: "Alert [HIGH]: Case UTP-0007 (Ramesh Kumar) is legally eligible for bail under BNSS 479. Urgency Score: 266.",
+          timestamp: "1 hr ago",
+          type: "urgent",
+          case_id: "UTP-0007",
+        },
+      ];
+
+    case "SUPERVISING_LEGAL_OFFICER":
+    case "GOV_ADMIN":
+      return [
+        {
+          id: "DEF-SLSA-1",
+          title: "Statutory Citation Integrity Escalation",
+          message: "Unsupported legal claims detected in advocate filing draft. Routed to Supervising Legal Officer for human verification.",
+          timestamp: "15 mins ago",
+          type: "urgent",
+          case_id: "UTP-0001",
+        },
+        {
+          id: "DEF-SLSA-2",
+          title: "Discovered Legal Source Pending Approval",
+          message: "New statutory enactment proposed by DLSA Officer is in 'discovered' state awaiting formal supervisor review.",
+          timestamp: "3 hrs ago",
+          type: "warning",
+          case_id: "src_bnss_2023",
+        },
+      ];
+
+    case "READ_ONLY_AUDITOR":
+      return [
+        {
+          id: "DEF-AUDIT-1",
+          title: "Statutory Compliance Audit Alert",
+          message: "Discrepancy detected in custody days computation between Police FIR arrest log and Prison intake register for UTP-0015.",
+          timestamp: "30 mins ago",
+          type: "warning",
+          case_id: "UTP-0015",
+        },
+      ];
+
+    case "ACCUSED_USER":
+    case "FAMILY_GUARDIAN":
+      return [
+        {
+          id: "DEF-CITIZEN-1",
+          title: "Bail Application Status Update",
+          message: "Your legal aid counsel has submitted an application for bail under Section 479 BNSS. Hearing date set for 2026-09-08.",
+          timestamp: "1 hr ago",
+          type: "success",
+          case_id: "UTP-0001",
+        },
+        {
+          id: "DEF-CITIZEN-2",
+          title: "Assigned Legal Aid Advocate Contact",
+          message: "Adv. Rajesh Sharma (DLSA Panel) has been designated as your defense advocate.",
+          timestamp: "Yesterday",
+          type: "info",
+          case_id: "UTP-0001",
+        },
+      ];
+
+    case "PLATFORM_ADMIN":
+    default:
+      return [
+        {
+          id: "DEF-ADMIN-1",
+          title: "Database Sync & Health Check",
+          message: "PostgreSQL dual-write adapter active. SQLite primary replica synchronized.",
+          timestamp: "5 mins ago",
+          type: "info",
+        },
+      ];
+  }
+}
+
 
 const READ_STORAGE_KEY = "nyaya_read_notification_ids";
 
@@ -158,23 +299,35 @@ export function AppLayout() {
   // Notification state
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
     const readIds = getReadIdsFromStorage();
-    return DEFAULT_NOTIFICATIONS.map((n) => ({
+    return getDefaultNotificationsForRole(user?.role).map((n) => ({
       ...n,
       read: readIds.includes(n.id),
     }));
   });
+
   const [notifLoading, setNotifLoading] = useState(false);
+
+  const [isNavHovered, setIsNavHovered] = useState(false);
 
   // Nav horizontal scroll indicators
   const navRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const [isScrollable, setIsScrollable] = useState(false);
 
   const checkScroll = () => {
     if (navRef.current) {
       const { scrollLeft, scrollWidth, clientWidth } = navRef.current;
       setCanScrollLeft(scrollLeft > 5);
       setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 5);
+      setIsScrollable(scrollWidth > clientWidth + 5);
+    }
+  };
+
+  const handleNavWheel = (e: React.WheelEvent) => {
+    if (navRef.current && isScrollable) {
+      if (Math.abs(e.deltaX) > 0) return;
+      navRef.current.scrollBy({ left: e.deltaY * 1.5, behavior: "auto" });
     }
   };
 
@@ -215,7 +368,7 @@ export function AppLayout() {
           );
         } else {
           setNotifications(
-            DEFAULT_NOTIFICATIONS.map((n) => ({
+            getDefaultNotificationsForRole(user?.role).map((n) => ({
               ...n,
               read: readIds.includes(n.id),
             }))
@@ -228,7 +381,8 @@ export function AppLayout() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [user?.role, user?.id]);
+
 
   const handleMarkAllRead = () => {
     setNotifications((prev) => {
@@ -292,13 +446,23 @@ export function AppLayout() {
             </div>
           </Link>
 
-          {/* Navigation Links Container with Scroll Controls */}
-          <div className="relative flex items-center flex-1 min-w-0 mx-1 md:mx-2">
-            {canScrollLeft && (
+          {/* Navigation Links Container with Hover Scroll Controls */}
+          <div
+            className="relative flex items-center flex-1 min-w-0 mx-1 md:mx-2"
+            onMouseEnter={() => {
+              setIsNavHovered(true);
+              checkScroll();
+            }}
+            onMouseLeave={() => setIsNavHovered(false)}
+          >
+            {isScrollable && (canScrollLeft || isNavHovered) && (
               <button
                 onClick={() => scrollNav("left")}
-                className="absolute left-0 z-20 p-1.5 rounded-sm bg-card border border-border text-foreground hover:bg-secondary shadow-md transition-all"
+                className={`absolute left-0 z-20 p-1.5 rounded-sm bg-card/95 backdrop-blur-md border border-border text-foreground hover:bg-primary hover:text-primary-foreground shadow-lg transition-all duration-200 flex items-center justify-center ${
+                  !canScrollLeft ? "opacity-50 cursor-not-allowed" : "opacity-100 hover:scale-105"
+                }`}
                 title="Scroll left to see tabs"
+                disabled={!canScrollLeft}
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
@@ -307,7 +471,8 @@ export function AppLayout() {
             <nav
               ref={navRef}
               onScroll={checkScroll}
-              className="flex items-center gap-1 md:gap-1.5 flex-1 overflow-x-auto no-scrollbar py-1 scroll-smooth"
+              onWheel={handleNavWheel}
+              className="flex items-center gap-1 md:gap-1.5 flex-1 overflow-x-auto no-scrollbar py-1 scroll-smooth px-1"
             >
               {navItems.map((item) => {
                 const isActive =
@@ -339,11 +504,14 @@ export function AppLayout() {
               })}
             </nav>
 
-            {canScrollRight && (
+            {isScrollable && (canScrollRight || isNavHovered) && (
               <button
                 onClick={() => scrollNav("right")}
-                className="absolute right-0 z-20 p-1.5 rounded-sm bg-card border border-border text-foreground hover:bg-secondary shadow-md transition-all animate-pulse"
-                title="More tabs available — Click to scroll right"
+                className={`absolute right-0 z-20 p-1.5 rounded-sm bg-card/95 backdrop-blur-md border border-border text-foreground hover:bg-primary hover:text-primary-foreground shadow-lg transition-all duration-200 flex items-center justify-center ${
+                  !canScrollRight ? "opacity-50 cursor-not-allowed" : "opacity-100 hover:scale-105"
+                }`}
+                title="Scroll right to see tabs"
+                disabled={!canScrollRight}
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
@@ -414,9 +582,10 @@ export function AppLayout() {
       </header>
 
       {/* Main Content Area (Full screen width) */}
-      <main className="flex-1 relative z-10 w-full">
+      <main className="flex-1 w-full">
         <Outlet />
       </main>
+
 
       {/* Global AI Intelligence Floating Circular Icon / Expanded Panel (Bottom Right) */}
       <div className="fixed bottom-6 right-6 z-40">

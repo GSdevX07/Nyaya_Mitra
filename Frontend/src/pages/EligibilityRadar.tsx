@@ -16,8 +16,7 @@ export function EligibilityRadar() {
     async function load() {
       setLoading(true);
       const data = await fetchCases();
-      // Only show cases assigned to this lawyer
-      setCases(data.filter((c: any) => c.case.assignment_status === "ASSIGNED"));
+      setCases(data);
       setLoading(false);
     }
     load();

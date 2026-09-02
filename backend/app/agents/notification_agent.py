@@ -78,7 +78,8 @@ def trigger_notification(case: CaseRecord, urgency_score: int) -> dict:
     # ── 4. Save to database ──────────────────────────────────────────────────
     notif_type = "urgent" if alert_level == "HIGH" else "info"
     title = "High Priority Bail Eligibility Flagged" if alert_level == "HIGH" else "Standard Update"
-    add_notification(case.case_id, title, message, notif_type)
+    add_notification(case.case_id, title, message, notif_type, target_role="DLSA_OFFICER,DEFENSE_ADVOCATE")
+
 
     # ── 5. Build and return structured log record ────────────────────────────
     timestamp = datetime.now(tz=timezone.utc).isoformat()

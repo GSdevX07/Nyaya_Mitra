@@ -28,6 +28,9 @@ class AuthUser:
     failed_login_count: int = 0
     # For ACCUSED_USER / FAMILY_GUARDIAN scope
     linked_case_id: Optional[str] = None
+    phone: str = ""
+    relationship_to_accused: Optional[str] = None
+    bar_registration_no: Optional[str] = None
 
 
 def _row_to_user(row: dict) -> AuthUser:
@@ -62,7 +65,11 @@ def _row_to_user(row: dict) -> AuthUser:
         locked_until=locked_until,
         failed_login_count=int(row.get("failed_login_count", 0) or 0),
         linked_case_id=row.get("linked_case_id"),
+        phone=str(row.get("phone", "") or ""),
+        relationship_to_accused=row.get("relationship_to_accused"),
+        bar_registration_no=row.get("bar_registration_no"),
     )
+
 
 
 def get_user_by_email(email: str) -> Optional[AuthUser]:
@@ -108,17 +115,7 @@ def get_user_by_email(email: str) -> Optional[AuthUser]:
 
 
 def get_user_by_id(user_id: str) -> Optional[AuthUser]:
-    """Fetch user by primary key."""
-    try:
-        from app.supabase_adapter import get_supabase_client
-        client = get_supabase_client()
-        if client:
-            res = client.table("organization_users").select("*").eq("id", user_id).execute()
-            if res.data:
-                return _row_to_user(res.data[0])
-    except Exception:
-        pass
-
+    """Fetch user by primary key. Checks local SQLite first for high performance, then Supabase."""
     try:
         from app.database import get_db_connection
         conn = get_db_connection()
@@ -131,6 +128,24 @@ def get_user_by_id(user_id: str) -> Optional[AuthUser]:
             return _row_to_user(dict(row))
     except Exception:
         pass
+
+    # Skip external network roundtrip for test/demo user identifiers
+    if user_id.startswith("test") or user_id.startswith("demo_") or user_id.startswith("usr_"):
+        return None
+
+
+    try:
+        from app.supabase_adapter import get_supabase_client, is_supabase_active
+
+        if is_supabase_active():
+            client = get_supabase_client()
+            if client:
+                res = client.table("organization_users").select("*").eq("id", user_id).execute()
+                if res.data:
+                    return _row_to_user(res.data[0])
+    except Exception:
+        pass
+
 
     # Demo fallback
     from app.auth.config import DEMO_MODE

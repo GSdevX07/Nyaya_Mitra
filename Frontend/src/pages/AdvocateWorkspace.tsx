@@ -1,26 +1,56 @@
 import { useState, useEffect } from "react";
 import {
-  Briefcase, Scale, CheckCircle2, ChevronRight
+  Briefcase, Scale, CheckCircle2, ChevronRight, PlusCircle, Loader2
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { fetchCases, type CaseRecord } from "../lib/api";
+import { fetchCases, takeUpCase, type CaseRecord } from "../lib/api";
 
 export function AdvocateWorkspace() {
   const [assignedCases, setAssignedCases] = useState<CaseRecord[]>([]);
+  const [availableCases, setAvailableCases] = useState<CaseRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [takingCaseId, setTakingCaseId] = useState<string | null>(null);
+
+  const loadAdvocateCases = async () => {
+    setLoading(true);
+    try {
+      const raw = await fetchCases();
+      const extracted = (raw || []).map((item: any) => (item.case || item) as CaseRecord);
+      const assigned = extracted.filter((c) => c.assignment_status === "ASSIGNED" || c.assigned_lawyer_id);
+      const available = extracted.filter((c) => c.assignment_status !== "ASSIGNED" && !c.assigned_lawyer_id);
+      setAssignedCases(assigned);
+      setAvailableCases(available);
+    } catch (err) {
+      console.error("Failed to load advocate cases:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function loadAdvocateCases() {
-      try {
-        const raw = await fetchCases();
-        const extracted = (raw || []).map((item: any) => (item.case || item) as CaseRecord);
-        const assigned = extracted.filter((c) => c.assignment_status === "ASSIGNED" || c.assigned_lawyer_id);
-        setAssignedCases(assigned);
-      } catch (err) {
-        console.error("Failed to load advocate cases:", err);
-      }
-    }
     loadAdvocateCases();
   }, []);
+
+  const handleTakeCase = async (caseId: string) => {
+    setTakingCaseId(caseId);
+    try {
+      await takeUpCase(caseId);
+      await loadAdvocateCases();
+    } catch (err) {
+      console.error("Failed to take case:", err);
+    } finally {
+      setTakingCaseId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="p-12 flex flex-col items-center justify-center min-h-[50vh] gap-3">
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+        <p className="text-xs font-mono text-muted-foreground">Loading advocate briefing workspace...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
@@ -130,6 +160,63 @@ export function AdvocateWorkspace() {
           ))}
         </div>
       </div>
+
+      {/* Available Cases Pool */}
+      {availableCases.length > 0 && (
+        <div className="bg-card border-2 border-border rounded-sm overflow-hidden">
+          <div className="p-4 border-b border-border bg-secondary/30 flex items-center justify-between">
+            <span className="font-serif font-bold text-xs uppercase tracking-wider text-muted-foreground">
+              Available Matters for DLSA Counsel Assignment ({availableCases.length} unassigned)
+            </span>
+            <span className="text-[11px] font-mono text-primary font-bold">
+              Self-Assignment Enabled
+            </span>
+          </div>
+
+          <div className="divide-y divide-border">
+            {availableCases.map((c) => (
+              <div key={c.case_id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-secondary/10 transition-colors">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-base text-foreground font-serif">{c.name}</span>
+                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-secondary border border-border">
+                      {c.case_id}
+                    </span>
+                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
+                      {c.legal_code}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground font-mono">
+                    <span>Offences: <strong className="text-foreground">{c.offense_sections?.join(", ")}</strong></span>
+                    <span>•</span>
+                    <span>Custody: <strong className="text-foreground">{c.custody_days} days</strong></span>
+                    <span>•</span>
+                    <span>Facility: <strong className="text-foreground">{c.jail_location}</strong></span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <Link
+                    to={`/case/${c.case_id}`}
+                    className="px-3 py-1.5 border border-border bg-secondary hover:bg-muted text-foreground text-xs font-semibold rounded-sm"
+                  >
+                    View File
+                  </Link>
+                  <button
+                    onClick={() => handleTakeCase(c.case_id)}
+                    disabled={takingCaseId === c.case_id}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-serif font-bold text-xs rounded-sm flex items-center gap-1 transition-colors disabled:opacity-50"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    {takingCaseId === c.case_id ? "Assigning..." : "Take Up Matter"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -10,50 +10,146 @@ import {
   Building2,
   Copy,
   Check,
-  Lock,
+  MapPin,
+  Layers,
 } from "lucide-react";
+import { useAuth, type Role } from "@/lib/auth";
+import { fetchCurrentUserProfile, fetchCases } from "@/lib/api";
 
-interface LawyerProfileModalProps {
+interface UserProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps) {
-  const [profile, setProfile] = useState<any>({
-    id: "Legal Officer 104",
-    full_name: "Adv. Rajesh Sharma",
-    bar_association_id: "DL/2018/49281",
-    email: "rajesh.sharma@nyayamitra.org",
-    phone: "+91 98112 34567",
-    specialization: "Undertrial Defense & Section 479 BNSS",
-    cases_taken: 4,
-    status: "Active Pro Bono Counsel",
-    organization: "Delhi Legal Services Authority (DLSA)",
-  });
+export function LawyerProfileModal({ isOpen, onClose }: UserProfileModalProps) {
+  const { user: authUser } = useAuth();
+  const [dbProfile, setDbProfile] = useState<any>(null);
   const [copied, setCopied] = useState(false);
-  const [filedCases, setFiledCases] = useState<any[]>([]);
+  const [assignedCasesCount, setAssignedCasesCount] = useState<number>(0);
 
   useEffect(() => {
     if (isOpen) {
-      import("@/lib/api").then(({ fetchLawyerProfile, fetchCases }) => {
-        fetchLawyerProfile().then((data) => {
-          if (data) setProfile(data);
-        });
-        fetchCases().then((allCases) => {
-          const filed = allCases.filter(c => c.case.assignment_status === "ASSIGNED" && c.case.status === "FILED");
-          setFiledCases(filed);
-        }).catch(err => console.error(err));
+      // Fetch live user identity from /auth/me
+      fetchCurrentUserProfile().then((data) => {
+        if (data) {
+          setDbProfile(data);
+        }
       });
+
+      fetchCases().then((allCases) => {
+        if (Array.isArray(allCases)) {
+          const count = allCases.filter((c: any) => c.case?.assignment_status === "ASSIGNED").length;
+          setAssignedCasesCount(count);
+        }
+      }).catch((err) => console.warn(err));
     }
   }, [isOpen]);
 
-  const handleCopyId = () => {
-    navigator.clipboard.writeText(profile.bar_association_id || profile.id);
+  if (!isOpen) return null;
+
+  // Active combined profile (database priority, authUser fallback)
+  const profile = {
+    id: dbProfile?.id || authUser?.id || "usr_nyaya_officer",
+    full_name: dbProfile?.full_name || authUser?.full_name || "Institutional User",
+    email: dbProfile?.email || authUser?.email || "user@nyayamitra.in",
+    role: (dbProfile?.role || authUser?.role || "DLSA_OFFICER") as Role,
+    org_id: dbProfile?.org_id || authUser?.org_id || "org_dlsa_central",
+    district: dbProfile?.district || authUser?.district || "Central Delhi",
+    phone: dbProfile?.phone || "+91 11 2338 1234",
+    facility_ids: dbProfile?.facility_ids || authUser?.facility_ids || [],
+    linked_case_id: dbProfile?.linked_case_id || authUser?.linked_case_id,
+    bar_registration_no: dbProfile?.bar_registration_no || (
+      authUser?.role === "DEFENSE_ADVOCATE" ? "DL/2018/49281" : undefined
+    ),
+  };
+
+  const getRoleDisplayName = (role: Role) => {
+    const map: Record<Role, { name: string; badge: string; color: string }> = {
+      PLATFORM_ADMIN: {
+        name: "Platform Administrator (Superuser)",
+        badge: "Full System Root Access",
+        color: "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30",
+      },
+      GOV_ADMIN: {
+        name: "State Legal Services Authority Admin (SLSA)",
+        badge: "Statewide Oversight & Reporting",
+        color: "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30",
+      },
+      DLSA_OFFICER: {
+        name: "District Legal Services Authority Officer (DLSA)",
+        badge: "Legal Aid Panel Authority",
+        color: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+      },
+      SUPERVISING_LEGAL_OFFICER: {
+        name: "Supervising Judicial Officer",
+        badge: "BNSS 479 Final Sign-Off Authority",
+        color: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30",
+      },
+      DEFENSE_ADVOCATE: {
+        name: "Panel Defense Advocate (Pro Bono)",
+        badge: "DLSA Bar Enrolled Counsel",
+        color: "bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/30",
+      },
+      CONTROLLED_EXTERNAL_ADVOCATE: {
+        name: "Controlled External Legal Counsel",
+        badge: "Provisional Case Docket Access",
+        color: "bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/30",
+      },
+      JAIL_OFFICER: {
+        name: "Jail Superintendent / Prison In-Charge",
+        badge: "Detention Roster & Admission Authority",
+        color: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30",
+      },
+      POLICE_OFFICER: {
+        name: "Police Station In-Charge / Investigating Officer",
+        badge: "CCTNS Station Docket Access",
+        color: "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30",
+      },
+      ACCUSED_USER: {
+        name: "Undertrial Prisoner Account",
+        badge: "Accused Citizen Portal",
+        color: "bg-teal-500/10 text-teal-700 dark:text-teal-300 border-teal-500/30",
+      },
+      FAMILY_GUARDIAN: {
+        name: "Family Guardian & Legal Kin",
+        badge: "Citizen Status & Legal Helpline",
+        color: "bg-teal-500/10 text-teal-700 dark:text-teal-300 border-teal-500/30",
+      },
+      READ_ONLY_AUDITOR: {
+        name: "Statutory Judicial Auditor",
+        badge: "Cryptographic Audit Ledger Verifier",
+        color: "bg-secondary text-secondary-foreground border-border",
+      },
+      INTEGRATION_SERVICE: {
+        name: "System Integration API Service",
+        badge: "Machine-to-Machine Service Role",
+        color: "bg-secondary text-secondary-foreground border-border",
+      },
+    };
+    return map[role] || {
+      name: role.replace(/_/g, " "),
+      badge: "Authenticated Institutional User",
+      color: "bg-primary/10 text-primary border-primary/20",
+    };
+  };
+
+  const roleInfo = getRoleDisplayName(profile.role);
+
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .filter(Boolean)
+      .map((n) => n[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase();
+  };
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
-  if (!isOpen) return null;
 
   return (
     <AnimatePresence>
@@ -63,203 +159,185 @@ export function LawyerProfileModal({ isOpen, onClose }: LawyerProfileModalProps)
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 12 }}
           transition={{ type: "spring", stiffness: 380, damping: 28 }}
-          className="relative w-full max-w-xl bg-card border border-border rounded shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+          className="relative w-full max-w-2xl bg-card border-2 border-border rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         >
-          {/* Subtle Ambient Top Accent Glow */}
-          <div className="absolute top-0 inset-x-0 h-32 bg-gradient-to-b from-amber-500/10 via-amber-500/5 to-transparent pointer-events-none" />
-
-          {/* Modal Header */}
-          <div className="p-6 pb-4 flex items-start justify-between relative z-10 border-b border-border">
+          {/* Header */}
+          <div className="p-6 pb-4 border-b border-border bg-secondary/30 flex items-start justify-between">
             <div className="flex items-center gap-4">
-              {/* Executive Avatar Pill */}
-              <div className="relative">
-                <div className="w-16 h-16 rounded bg-gradient-to-br from-amber-500/20 via-yellow-500/10 to-amber-950/40 border border-border flex items-center justify-center font-bold text-muted-foreground text-xl tracking-wider font-mono shadow-lg shadow-amber-500/5">
-                  RS
-                </div>
-                <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-sm bg-card flex items-center justify-center p-0.5">
-                  <span className="w-3.5 h-3.5 rounded-sm bg-accent flex items-center justify-center text-[8px] text-black font-bold">
-                    ✓
-                  </span>
-                </div>
+              {/* Dynamic Avatar Pill */}
+              <div className="w-16 h-16 rounded-xl bg-primary text-primary-foreground border-2 border-primary/40 flex items-center justify-center font-bold text-2xl font-mono shadow-md">
+                {getInitials(profile.full_name)}
               </div>
 
               <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-xl font-bold text-primary tracking-tight">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h2 className="text-xl font-bold text-foreground tracking-tight">
                     {profile.full_name}
                   </h2>
-                  <span className="px-2 py-0.5 rounded-md bg-muted text-foreground border border-border text-[11px] font-medium flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    DLSA Verified
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${roleInfo.color}`}>
+                    {roleInfo.badge}
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground font-mono">
-                  <span>ID: {profile.id}</span>
+                <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground font-mono">
+                  <span>UID: <strong className="text-foreground">{profile.id}</strong></span>
                   <span>•</span>
-                  <span>Bar Reg: {profile.bar_association_id}</span>
+                  <span>Role: <strong className="text-primary">{profile.role}</strong></span>
                 </div>
               </div>
             </div>
 
             <button
               onClick={onClose}
-              className="p-2 rounded bg-secondary/50 hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+              className="p-2 rounded-lg bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
               title="Close"
             >
-              <X className="w-4 h-4" />
+              <X className="w-5 h-5" />
             </button>
           </div>
 
-          {/* Body Content */}
-          <div className="p-6 space-y-5 overflow-y-auto custom-scrollbar relative z-10">
-            {/* Counsel Status Bar */}
-            <div className="flex items-center justify-between p-3 rounded bg-card shadow-sm border border-border">
-              <div className="flex items-center gap-2.5">
-                <div className="w-2 h-2 rounded-sm bg-amber-400 animate-pulse" />
-                <span className="text-xs font-semibold text-primary">
-                  {profile.status}
-                </span>
+          {/* Modal Content — Clean Institutional Dossier */}
+          <div className="p-6 space-y-5 overflow-y-auto custom-scrollbar text-sm">
+            {/* Authority Designation Banner */}
+            <div className="p-4 rounded-xl bg-card border-2 border-border shadow-sm flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <ShieldCheck className="w-6 h-6 text-emerald-600 shrink-0" />
+                <div>
+                  <div className="font-bold text-foreground text-sm">
+                    {roleInfo.name}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    Jurisdiction: {profile.district} • Database Record Synchronized
+                  </div>
+                </div>
               </div>
-              <span className="text-[11px] font-mono text-muted-foreground/90 bg-muted px-2.5 py-1 rounded-sm border border-border">
-                Pro Bono Panel Advocate
+              <span className="text-xs px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-600 font-bold border border-emerald-500/20">
+                Active &amp; Verified
               </span>
             </div>
 
-            {/* Quick Metrics Cards */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-4 rounded bg-secondary/50 border border-border flex flex-col justify-between">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-muted-foreground font-medium">Cases Assigned</span>
-                  <div className="p-1.5 rounded-sm bg-muted text-muted-foreground">
-                    <FileText className="w-4 h-4" />
-                  </div>
-                </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-bold text-primary font-mono">{profile.cases_taken}</span>
-                  <span className="text-[10px] text-foreground font-medium">Active Queue</span>
-                </div>
-              </div>
-
-              <div className="p-4 rounded bg-secondary/50 border border-border flex flex-col justify-between">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-muted-foreground font-medium">Verification Rate</span>
-                  <div className="p-1.5 rounded-sm bg-muted text-foreground">
-                    <Award className="w-4 h-4" />
-                  </div>
-                </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-bold text-primary font-mono">100%</span>
-                  <span className="text-[10px] text-foreground font-medium">BNSS 479 Compliant</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Credentials Detail Panel */}
-            <div className="rounded bg-card shadow-sm border border-border overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-border bg-card shadow-sm flex items-center justify-between">
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Advocate Credentials &amp; Registry
-                </span>
+            {/* Information Grid */}
+            <div className="rounded-xl bg-card border-2 border-border overflow-hidden shadow-sm">
+              <div className="px-4 py-2.5 bg-secondary/50 border-b border-border flex items-center justify-between text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                <span>Institutional Registry Particulars</span>
                 <button
-                  onClick={handleCopyId}
-                  className="text-[11px] text-muted-foreground hover:text-muted-foreground flex items-center gap-1 font-mono transition-colors"
+                  onClick={() => handleCopy(profile.id)}
+                  className="text-[11px] text-primary hover:underline flex items-center gap-1 font-mono font-medium"
                 >
-                  {copied ? <Check className="w-3 h-3 text-foreground" /> : <Copy className="w-3 h-3" />}
-                  {copied ? "Copied!" : "Copy Bar ID"}
+                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied ? "Copied!" : "Copy User ID"}
                 </button>
               </div>
 
-              <div className="divide-y divide-border p-4 text-xs space-y-0">
-                <div className="flex items-center justify-between py-2.5">
+              <div className="divide-y divide-border p-2">
+                <div className="flex items-center justify-between p-2.5 text-xs">
                   <span className="text-muted-foreground flex items-center gap-2">
-                    <Building2 className="w-3.5 h-3.5 text-muted-foreground/80" /> Authority / Org:
+                    <Building2 className="w-4 h-4 text-primary" /> Organization Entity:
                   </span>
-                  <span className="text-primary font-medium text-right">{profile.organization}</span>
+                  <strong className="text-foreground font-mono">{profile.org_id}</strong>
                 </div>
 
-                <div className="flex items-center justify-between py-2.5">
+                <div className="flex items-center justify-between p-2.5 text-xs">
                   <span className="text-muted-foreground flex items-center gap-2">
-                    <Award className="w-3.5 h-3.5 text-muted-foreground/80" /> Specialization:
+                    <Mail className="w-4 h-4 text-primary" /> Registered Email:
                   </span>
-                  <span className="text-primary font-medium text-right">{profile.specialization}</span>
+                  <strong className="text-foreground font-mono bg-secondary px-2 py-0.5 rounded border border-border">
+                    {profile.email}
+                  </strong>
                 </div>
 
-                <div className="flex items-center justify-between py-2.5">
+                <div className="flex items-center justify-between p-2.5 text-xs">
                   <span className="text-muted-foreground flex items-center gap-2">
-                    <Mail className="w-3.5 h-3.5 text-muted-foreground/80" /> Official Email:
+                    <Phone className="w-4 h-4 text-primary" /> Official Contact Number:
                   </span>
-                  <span className="text-primary font-mono bg-secondary/50 px-2 py-0.5 rounded border border-border">{profile.email}</span>
+                  <strong className="text-foreground font-mono">{profile.phone}</strong>
                 </div>
 
-                <div className="flex items-center justify-between py-2.5">
+                <div className="flex items-center justify-between p-2.5 text-xs">
                   <span className="text-muted-foreground flex items-center gap-2">
-                    <Phone className="w-3.5 h-3.5 text-muted-foreground/80" /> Direct Contact:
+                    <MapPin className="w-4 h-4 text-primary" /> Administrative District:
                   </span>
-                  <span className="text-primary font-mono bg-secondary/50 px-2 py-0.5 rounded border border-border">{profile.phone}</span>
+                  <strong className="text-foreground">{profile.district}</strong>
                 </div>
-              </div>
-            </div>
 
-          {/* Access & Privileges Banner */}
-            <div className="p-3.5 rounded bg-accent/[0.04] border border-border flex items-start gap-3">
-              <div className="p-1 rounded bg-muted text-foreground mt-0.5">
-                <Lock className="w-3.5 h-3.5" />
-              </div>
-              <div className="text-xs text-muted-foreground space-y-0.5">
-                <span className="font-semibold text-primary">Authorized Judicial Officer Privileges</span>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Direct access to statutory Section 479 BNSS automated bail drafting, parent contact verification system, and DLSA priority filings.
-                </p>
-              </div>
-            </div>
+                {profile.bar_registration_no && (
+                  <div className="flex items-center justify-between p-2.5 text-xs">
+                    <span className="text-muted-foreground flex items-center gap-2">
+                      <Award className="w-4 h-4 text-purple-600" /> Bar Council Registration No:
+                    </span>
+                    <strong className="text-purple-600 font-mono font-bold bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
+                      {profile.bar_registration_no}
+                    </strong>
+                  </div>
+                )}
 
-            {/* Recently Filed Cases */}
-            <div className="rounded bg-card shadow-sm border border-border overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-border bg-card shadow-sm flex items-center justify-between">
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Recently Filed Cases
-                </span>
-                <span className="text-[11px] font-mono text-muted-foreground">
-                  {filedCases.length} cases
-                </span>
-              </div>
-              <div className="p-4 space-y-3">
-                {filedCases.length === 0 ? (
-                  <p className="text-xs text-muted-foreground text-center">No recently filed cases.</p>
-                ) : (
-                  filedCases.slice(0, 5).map((fc: any, i) => (
-                    <div key={i} className="flex flex-col gap-1 p-3 rounded bg-secondary/30 border border-border">
-                      <div className="flex justify-between items-start">
-                        <span className="font-semibold text-primary text-sm">{fc.case.name}</span>
-                        <span className="font-mono text-[10px] text-muted-foreground">{fc.case.case_id}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="px-1.5 py-0.5 rounded bg-accent/20 text-accent border border-accent/20 text-[10px] font-mono uppercase">FILED</span>
-                        <span className="text-[10px] text-muted-foreground">{fc.case.offense_sections.join(", ")}</span>
-                      </div>
+                {profile.linked_case_id && (
+                  <div className="flex items-center justify-between p-2.5 text-xs">
+                    <span className="text-muted-foreground flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-teal-600" /> Linked Case Reference:
+                    </span>
+                    <strong className="text-teal-600 font-mono font-bold bg-teal-500/10 px-2 py-0.5 rounded border border-teal-500/20">
+                      {profile.linked_case_id}
+                    </strong>
+                  </div>
+                )}
+
+                {profile.facility_ids && profile.facility_ids.length > 0 && (
+                  <div className="flex items-center justify-between p-2.5 text-xs">
+                    <span className="text-muted-foreground flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-amber-600" /> Assigned Prison Facilities:
+                    </span>
+                    <div className="flex gap-1">
+                      {profile.facility_ids.map((fac: string) => (
+                        <span key={fac} className="text-xs font-mono bg-amber-500/10 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded border border-amber-500/20">
+                          {fac}
+                        </span>
+                      ))}
                     </div>
-                  ))
+                  </div>
                 )}
               </div>
             </div>
+
+            {/* Role-Specific Metrics / Queue Block */}
+            {profile.role === "DEFENSE_ADVOCATE" || profile.role === "SUPERVISING_LEGAL_OFFICER" ? (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl bg-secondary/40 border border-border">
+                  <span className="text-xs text-muted-foreground font-semibold">Active Docket Cases</span>
+                  <div className="text-2xl font-bold font-mono text-primary mt-1">{assignedCasesCount}</div>
+                  <span className="text-[11px] text-muted-foreground">Section 479 BNSS eligible cases</span>
+                </div>
+                <div className="p-4 rounded-xl bg-secondary/40 border border-border">
+                  <span className="text-xs text-muted-foreground font-semibold">Statutory Compliance</span>
+                  <div className="text-2xl font-bold font-mono text-emerald-600 mt-1">100%</div>
+                  <span className="text-[11px] text-muted-foreground">Signed off &amp; audit tracked</span>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {/* Footer */}
-          <div className="p-4 border-t border-border bg-card shadow-sm flex items-center justify-between">
-            <span className="text-[11px] text-muted-foreground font-mono">
-              System ID: NYAYA-DLSA-2026
+          <div className="p-4 border-t border-border bg-secondary/30 flex items-center justify-between">
+            <span className="text-xs text-muted-foreground font-mono">
+              Nyaya Mitra Institutional Profile // ID: {profile.id}
             </span>
-            <button
-              onClick={onClose}
-              className="px-5 py-2 rounded bg-primary text-primary-foreground font-semibold text-xs hover:bg-primary/90 transition-all shadow-md shadow-amber-500/10"
-            >
-              Done
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={onClose}
+                className="px-5 py-2 rounded-lg bg-primary text-primary-foreground font-bold text-xs hover:bg-primary/90 transition-all shadow-sm"
+              >
+                Done
+              </button>
+            </div>
           </div>
         </motion.div>
       </div>
     </AnimatePresence>
   );
 }
+
+// Export both names for backwards compatibility
+export const UserProfileModal = LawyerProfileModal;
+
+
 

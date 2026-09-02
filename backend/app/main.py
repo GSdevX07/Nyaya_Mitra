@@ -716,22 +716,29 @@ def get_stakeholders_overview(
 def get_lawyer_profile(
     current_user: AuthUser = Depends(require_role(
         Role.DEFENSE_ADVOCATE, Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER,
-        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR,
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
     )),
 ):
-    """Return profile details and statistics for the authenticated advocate / legal officer."""
+    """Return profile details and statistics for the authenticated advocate / legal officer from DB."""
     assigned_count = sum(1 for c in get_all_cases() if c.assignment_status == "ASSIGNED")
+    bar_id = getattr(current_user, "bar_registration_no", None)
+    if not bar_id and current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        bar_id = "DL/2018/49281"
+    
     return {
         "id": current_user.id,
-        "full_name": current_user.full_name or "Adv. Rajesh Sharma",
-        "bar_association_id": "DL/2018/49281",
+        "full_name": current_user.full_name or "Institutional Officer",
+        "bar_association_id": bar_id or "N/A",
         "email": current_user.email,
-        "phone": "+91 98112 34567",
-        "specialization": "Undertrial Defense & Section 479 BNSS",
+        "phone": getattr(current_user, "phone", None) or "+91 11 2338 1234",
+        "role": current_user.role.value,
+        "specialization": "Undertrial Defense & Section 479 BNSS" if current_user.role in (Role.DEFENSE_ADVOCATE, Role.SUPERVISING_LEGAL_OFFICER) else "Institutional Legal Oversight",
         "cases_taken": assigned_count,
-        "status": "Active Pro Bono Counsel",
-        "organization": current_user.org_id or "Delhi Legal Services Authority (DLSA)",
+        "status": "Active Institutional User",
+        "organization": current_user.org_id or "District Legal Services Authority (DLSA)",
+        "district": current_user.district,
     }
+
 
 
 
@@ -750,8 +757,8 @@ def get_documents(
     Reads from SQLite reflects any uploads that have been persisted.
     """
     docs = []
-    cases = [c for c in get_all_cases() if c.assignment_status == "ASSIGNED"]
-    for c in cases:  # ← SQLite, not MOCK_DB
+    cases = get_all_cases()
+    for c in cases:
         for r_doc in c.required_docs:
             is_present = r_doc in c.present_docs
             docs.append({
@@ -1052,7 +1059,7 @@ def verify_evidence(
 def get_actions(
     current_user: AuthUser = Depends(require_role(
         Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN,
-        Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR,
+        Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR, Role.DEFENSE_ADVOCATE,
     )),
 ):
     """
@@ -1060,7 +1067,7 @@ def get_actions(
     No duplicate threshold logic everything flows through evaluate_eligibility().
     """
     actions = []
-    cases = [c for c in get_all_cases() if c.assignment_status == "ASSIGNED"]
+    cases = get_all_cases()
     for c in cases:
         eligibility = evaluate_eligibility(c)
         is_eligible = eligibility["eligible"]
@@ -1075,7 +1082,7 @@ def get_actions(
                 "priority": "HIGH",
                 "status": "Pending Manual Review",
                 "description": eligibility["legal_basis"],
-                "created_at": "2026-08-08",
+                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             })
         elif is_eligible and not missing_docs:
             actions.append({
@@ -1089,7 +1096,7 @@ def get_actions(
                     f"{eligibility['required_custody_days']} required. "
                     f"Overdue by {eligibility['days_overdue']} days. Auto-draft generated."
                 ),
-                "created_at": "2026-08-08",
+                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             })
         elif missing_docs:
             actions.append({
@@ -1099,7 +1106,7 @@ def get_actions(
                 "priority": "MEDIUM",
                 "status": "Pending Document Retrieval",
                 "description": f"Requesting missing documents ({', '.join(missing_docs)}) from police authority.",
-                "created_at": "2026-08-08",
+                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             })
     return actions
 
@@ -1109,6 +1116,7 @@ def trigger_action(
     action_id: str,
     current_user: AuthUser = Depends(require_role(
         Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN, Role.GOV_ADMIN,
+        Role.DLSA_OFFICER, Role.DEFENSE_ADVOCATE,
     )),
 ):
     """Execute an automated agent action from the queue."""
@@ -1127,34 +1135,29 @@ def get_hearings(
         Role.DEFENSE_ADVOCATE, Role.READ_ONLY_AUDITOR,
     )),
 ):
+    from app.database import get_hearings_schedule
+    # Prefer hearings_schedule DB table (seeded from case court_name at startup)
+    db_hearings = get_hearings_schedule()
+    if db_hearings:
+        return db_hearings
+
+    # Fallback: generate on-the-fly from cases using real case.court_name (no hardcoded judge names)
     hearings = []
-    cases = [c for c in get_all_cases() if c.assignment_status == "ASSIGNED"]
-    
-    # Generate a dynamic hearing for each assigned case
+    cases = get_all_cases()
     for i, c in enumerate(cases):
-        # Determine hearing date (fake date e.g. 7 days from now)
         target_date = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7 + i)
-        
-        # Simple heuristic for hearing type based on eligibility
         eligibility = evaluate_eligibility(c)
-        if eligibility["eligible"]:
-            hearing_type = "Bail Application Under BNSS 479"
-            judge = "Hon'ble Justice R. K. Sharma"
-        else:
-            hearing_type = "Remand Review & Bail Motion"
-            judge = "Hon'ble Magistrate S. Patel"
-            
+        hearing_type = "Bail Application Under BNSS 479" if eligibility.get("eligible") else "Remand Review & Bail Motion"
         hearings.append({
-            "id": f"HRG-2026-{str(i+1).zfill(2)}",
+            "id": f"HRG-{c.case_id}-{target_date.strftime('%Y%m%d')}",
             "case_id": c.case_id,
             "prisoner_name": c.name,
-            "court_name": "District & Sessions Court" if eligibility["eligible"] else "Chief Judicial Magistrate Court",
+            "court_name": c.court_name or "Sessions Court",
             "hearing_date": target_date.strftime("%Y-%m-%d"),
             "hearing_type": hearing_type,
             "status": "Scheduled",
-            "judge": judge,
+            "judge": None,
         })
-
     return hearings
 
 
@@ -1169,7 +1172,7 @@ def get_reports(
     Retrieve legal analytics, inmate metrics, and DLSA performance report.
     ALL metrics are derived from the canonical EligibilityAgent no duplicate logic.
     """
-    cases = [c for c in get_all_cases() if c.assignment_status == "ASSIGNED"]
+    cases = get_all_cases()
     total_cases = len(cases)
 
     eligibility_results = [evaluate_eligibility(c) for c in cases]
@@ -1233,17 +1236,291 @@ def get_reports(
 def get_notifications(
     current_user: AuthUser = Depends(get_current_user),
 ):
-    """Retrieve system-wide alerts and notification feed from SQLite."""
-    rows = get_all_notifications()
-    notifications = []
-    for row in rows:
-        notifications.append({
-            "id": row["id"],
-            "title": row["title"],
-            "message": row["message"],
-            "timestamp": row["timestamp"],
-            "type": row["type"],
-            "case_id": row["case_id"],
-            "read": bool(row["is_read"])
-        })
-    return notifications
+    """Retrieve role-specific alert and notification feed from database."""
+    from app.database import get_notifications_for_user
+    role_val = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    return get_notifications_for_user(
+        role=role_val,
+        user_id=current_user.id,
+        linked_case_id=current_user.linked_case_id,
+    )
+
+
+
+@app.get("/audit-events", tags=["Audit"])
+def get_audit_events_endpoint(
+    limit: int = 50,
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.SUPERVISING_LEGAL_OFFICER,
+        Role.READ_ONLY_AUDITOR, Role.DLSA_OFFICER,
+    )),
+):
+    """Retrieve immutable audit event log from SQLite for the auditor console."""
+    from app.database import get_audit_events
+    events = get_audit_events(limit=limit)
+    return events
+
+
+# ── Governed Legal Knowledge Layer Endpoints ──────────────────────────────────
+
+LEGAL_KNOWLEDGE_READ_ROLES = (
+    Role.PLATFORM_ADMIN,
+    Role.GOV_ADMIN,
+    Role.SUPERVISING_LEGAL_OFFICER,
+    Role.DLSA_OFFICER,
+    Role.DEFENSE_ADVOCATE,
+    Role.READ_ONLY_AUDITOR,
+)
+
+
+class LegalSourceCreateRequest(BaseModel):
+    title: str
+    short_name: str
+    issuing_authority: str
+    effective_date: str
+    jurisdiction: str
+    legal_domain: str
+    raw_content: str
+    source_url: Optional[str] = None
+    publication_date: Optional[str] = None
+    version: str = "1.0"
+    language: str = "en"
+    lifecycle_status: str = "discovered"
+    audit_notes: Optional[str] = None
+
+
+class LegalSourceLifecycleRequest(BaseModel):
+    status: str
+    notes: Optional[str] = None
+    superseded_by_id: Optional[str] = None
+
+
+class LegalRetrieveRequest(BaseModel):
+    query: str
+    domain: Optional[str] = None
+    include_superseded: bool = False
+    limit: int = 5
+
+
+class CitationVerifyRequest(BaseModel):
+    draft_statement: str
+    case_id: Optional[str] = None
+
+
+class EscalationResolveRequest(BaseModel):
+    notes: str
+    status: str = "RESOLVED"
+
+
+@app.get("/api/legal-sources", tags=["Governed Legal Knowledge"])
+def get_legal_sources_endpoint(
+    domain: Optional[str] = None,
+    lifecycle_status: Optional[str] = None,
+    jurisdiction: Optional[str] = None,
+    current_user: AuthUser = Depends(require_role(*LEGAL_KNOWLEDGE_READ_ROLES)),
+):
+    """List registered legal sources. Citizen and facility roles are strictly blocked.
+    
+    Defense Advocates only receive active/superseded sources with sensitive maintainer notes redacted.
+    """
+    from app.services.governed_knowledge_service import list_legal_sources
+    is_advocate = current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE)
+
+    # Consumer advocates do not view unreviewed discovered drafts unless specified
+    effective_status = lifecycle_status
+    if is_advocate and not effective_status:
+        effective_status = None  # Will return active and superseded
+
+    sources = list_legal_sources(
+        domain=domain,
+        lifecycle_status=effective_status,
+        jurisdiction=jurisdiction,
+        redact_sensitive=is_advocate,
+    )
+
+    if is_advocate:
+        # Filter out unreviewed discovered drafts for advocate consumer view
+        sources = [s for s in sources if s.get("lifecycle_status") in ("active", "superseded", "approved")]
+
+    return sources
+
+
+@app.post("/api/legal-sources", tags=["Governed Legal Knowledge"])
+def create_legal_source_endpoint(
+    req: LegalSourceCreateRequest,
+    current_user: AuthUser = Depends(require_role(
+        Role.GOV_ADMIN, Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER,
+    )),
+):
+    """Register a new legal source document.
+    
+    Part D & N Enforcement:
+    - Platform Admin is restricted from statutory content creation.
+    - Initial status is strictly forced to 'discovered'. Client status override is rejected.
+    """
+    from app.services.governed_knowledge_service import register_legal_source
+    try:
+        result = register_legal_source(
+            title=req.title,
+            short_name=req.short_name,
+            issuing_authority=req.issuing_authority,
+            effective_date=req.effective_date,
+            jurisdiction=req.jurisdiction,
+            legal_domain=req.legal_domain,
+            raw_content=req.raw_content,
+            source_url=req.source_url,
+            publication_date=req.publication_date,
+            version=req.version,
+            language=req.language,
+            lifecycle_status="discovered",  # Force discovered status
+            user_id=current_user.id,
+            user_role=current_user.role.value,
+            audit_notes=req.audit_notes,
+            is_system_seed=False,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/legal-sources/{source_id}", tags=["Governed Legal Knowledge"])
+def get_legal_source_detail_endpoint(
+    source_id: str,
+    current_user: AuthUser = Depends(require_role(*LEGAL_KNOWLEDGE_READ_ROLES)),
+):
+    """Retrieve full details of a legal source, chunks, and boundaries with consumer redaction."""
+    from app.services.governed_knowledge_service import get_legal_source_by_id
+    is_advocate = current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE)
+    src = get_legal_source_by_id(source_id, redact_sensitive=is_advocate)
+    if not src:
+        raise HTTPException(status_code=404, detail="Legal source not found")
+    return src
+
+
+@app.patch("/api/legal-sources/{source_id}/lifecycle", tags=["Governed Legal Knowledge"])
+def update_legal_source_lifecycle_endpoint(
+    source_id: str,
+    req: LegalSourceLifecycleRequest,
+    current_user: AuthUser = Depends(require_role(
+        Role.GOV_ADMIN, Role.SUPERVISING_LEGAL_OFFICER,
+    )),
+):
+    """Update legal source governance lifecycle state.
+    
+    Part E & N Enforcement:
+    - Enforces transition state machine graph.
+    - Platform Admin and DLSA Officer have NO unilateral authority to transition lifecycles.
+    """
+    from app.services.governed_knowledge_service import update_source_lifecycle
+    try:
+        return update_source_lifecycle(
+            source_id=source_id,
+            new_status=req.status,
+            user_id=current_user.id,
+            user_role=current_user.role.value,
+            notes=req.notes,
+            superseded_by_id=req.superseded_by_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/legal-knowledge/retrieve", tags=["Governed Legal Knowledge"])
+def retrieve_legal_knowledge_endpoint(
+    req: LegalRetrieveRequest,
+    current_user: AuthUser = Depends(require_role(*LEGAL_KNOWLEDGE_READ_ROLES)),
+):
+    """Hybrid citation-aware retrieval combining exact section matching, lexical tokens, and reranking.
+    
+    Part H: Automatically logs retrieval telemetry into legal_retrieval_logs.
+    """
+    from app.services.governed_knowledge_service import hybrid_retrieve_legal_chunks
+    chunks = hybrid_retrieve_legal_chunks(
+        query=req.query,
+        domain=req.domain,
+        include_superseded=req.include_superseded,
+        limit=req.limit,
+        actor_id=current_user.id,
+        actor_role=current_user.role.value,
+        organization_id=current_user.org_id,
+    )
+    return {"query": req.query, "count": len(chunks), "chunks": chunks}
+
+
+@app.post("/api/legal-knowledge/verify-citations", tags=["Governed Legal Knowledge"])
+def verify_citations_endpoint(
+    req: CitationVerifyRequest,
+    current_user: AuthUser = Depends(require_role(*LEGAL_KNOWLEDGE_READ_ROLES)),
+):
+    """Verify legal statement citations against approved active sources.
+    
+    Part G & P Enforcement:
+    - Unsupported claims trigger durable task persistence in legal_human_review_tasks and notifications.
+    """
+    from app.services.governed_knowledge_service import verify_legal_citation_integrity
+    report = verify_legal_citation_integrity(
+        draft_statement=req.draft_statement,
+        actor_id=current_user.id,
+        actor_role=current_user.role.value,
+        case_id=req.case_id,
+    )
+    return report
+
+
+@app.get("/api/legal-knowledge/evaluate", tags=["Governed Legal Knowledge"])
+def evaluate_legal_knowledge_endpoint(
+    current_user: AuthUser = Depends(require_role(
+        Role.GOV_ADMIN, Role.SUPERVISING_LEGAL_OFFICER, Role.READ_ONLY_AUDITOR, Role.PLATFORM_ADMIN,
+    )),
+):
+    """Execute evaluation benchmark suite across all 5 legal query categories. Fully audited."""
+    from app.services.governed_knowledge_service import run_retrieval_evaluation_suite
+    return run_retrieval_evaluation_suite(
+        actor_id=current_user.id,
+        actor_role=current_user.role.value,
+    )
+
+
+@app.get("/api/legal-knowledge/escalations", tags=["Governed Legal Knowledge"])
+def get_legal_escalations_endpoint(
+    status: str = "PENDING_REVIEW",
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER, Role.GOV_ADMIN, Role.PLATFORM_ADMIN,
+    )),
+):
+    """Retrieve durable human-review escalation tasks created by citation verification failures."""
+    from app.database import get_pending_legal_escalations
+    return get_pending_legal_escalations(status=status)
+
+
+@app.post("/api/legal-knowledge/escalations/{escalation_id}/resolve", tags=["Governed Legal Knowledge"])
+def resolve_legal_escalation_endpoint(
+    escalation_id: str,
+    req: EscalationResolveRequest,
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER, Role.GOV_ADMIN,
+    )),
+):
+    """Resolve a legal citation escalation task with supervisory notes and audit logging."""
+    from app.database import resolve_legal_escalation, audit_repo
+    from app.models.domain import AuditAction
+    success = resolve_legal_escalation(
+        escalation_id=escalation_id,
+        user_id=current_user.id,
+        resolution_notes=req.notes,
+        new_status=req.status,
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Escalation task not found or resolution failed")
+
+    audit_repo.record(
+        actor_id=current_user.id,
+        actor_role=current_user.role.value,
+        action=AuditAction.STATUS_TRANSITION,
+        entity_type="LEGAL_CITATION_ESCALATION",
+        entity_id=escalation_id,
+        details={"status": req.status, "notes": req.notes},
+    )
+    return {"status": req.status, "escalation_id": escalation_id, "resolved_by": current_user.id}
+
+

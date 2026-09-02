@@ -28,8 +28,10 @@ import { AccusedProfilePage } from "./pages/AccusedProfilePage";
 import { IdentityResolutionPage } from "./pages/IdentityResolutionPage";
 import { PoliceWorkspace } from "./pages/PoliceWorkspace";
 import { DocumentAssessmentPage } from "./pages/DocumentAssessmentPage";
+import { LegalSourcesAdmin } from "./pages/LegalSourcesAdmin";
 
 function App() {
+
   return (
     <AuthProvider>
       <Router>
@@ -238,7 +240,25 @@ function App() {
                 }
               />
               <Route
+                path="/legal-sources"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "DLSA_OFFICER",
+                      "DEFENSE_ADVOCATE",
+                      "READ_ONLY_AUDITOR",
+                    ]}
+                  >
+                    <LegalSourcesAdmin />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/radar"
+
                 element={
                   <ProtectedRoute
                     allowedRoles={[

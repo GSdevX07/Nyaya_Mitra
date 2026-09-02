@@ -7,9 +7,11 @@ from app.document_pipeline import execute_full_document_pipeline
 def test_pipeline():
     print("Testing 7-Stage Legal Document Assessment Pipeline...")
     res = execute_full_document_pipeline(
-        file_bytes=None,
-        document_name="UTP-0007_Handwritten_Remand.pdf"
+        file_bytes=b"%PDF-1.4 sample content",
+        document_name="UTP-0007_Handwritten_Remand.pdf",
+        provided_text="Remand application and custody record for accused under Section 479 BNSS 2023 for bail eligibility review.",
     )
+
 
     print(f"[OK] Document Name: {res.document_name}")
     print(f"[OK] Is Scanned/Handwritten: {res.is_scanned_handwritten} (Confidence: {res.detection_confidence})")

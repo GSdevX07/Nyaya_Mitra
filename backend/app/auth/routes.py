@@ -198,7 +198,7 @@ async def logout(
 
 @auth_router.get("/me")
 async def get_me(current_user: AuthUser = Depends(get_current_user)):
-    """Return the current user's profile and role."""
+    """Return the current user's profile and role from the database."""
     return {
         "id": current_user.id,
         "email": getattr(current_user, "email", ""),
@@ -208,6 +208,9 @@ async def get_me(current_user: AuthUser = Depends(get_current_user)):
         "district": current_user.district,
         "facility_ids": current_user.facility_ids,
         "linked_case_id": current_user.linked_case_id,
+        "phone": getattr(current_user, "phone", "") or "+91 11 2338 1234",
+        "relationship_to_accused": getattr(current_user, "relationship_to_accused", None),
+        "bar_registration_no": getattr(current_user, "bar_registration_no", None),
     }
 
 

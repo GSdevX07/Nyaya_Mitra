@@ -239,7 +239,10 @@ def supa_add_notification(record: Dict) -> bool:
     client = get_supabase_client()
     if not client:
         return False
-    client.table("notifications").upsert(record).execute()
+    rec = dict(record)
+    if "is_read" in rec:
+        rec["is_read"] = bool(rec["is_read"])
+    client.table("notifications").upsert(rec).execute()
     return True
 
 

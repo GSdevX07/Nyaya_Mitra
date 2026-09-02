@@ -30,23 +30,30 @@ function getNavItemsForRole(role?: Role): NavItem[] {
       ];
 
     case "DEFENSE_ADVOCATE":
-    case "CONTROLLED_EXTERNAL_ADVOCATE":
       return [
         { path: "/advocate", label: "My Assigned Cases" },
-        { path: "/legal-sources", label: "Legal Knowledge Base" },
         { path: "/radar", label: "Eligibility Radar" },
-        { path: "/documents", label: "Documents" },
-        { path: "/actions", label: "Actions" },
+        { path: "/documents", label: "Assigned Documents" },
+        { path: "/legal-sources", label: "Legal Knowledge Base" },
+        { path: "/actions", label: "Counsel Actions" },
         { path: "/hearings", label: "Hearings" },
       ];
 
+    case "CONTROLLED_EXTERNAL_ADVOCATE":
+      return [
+        { path: "/advocate", label: "My Assigned Cases" },
+        { path: "/documents", label: "Authorized Documents" },
+        { path: "/legal-sources", label: "Legal Knowledge Base" },
+        { path: "/hearings", label: "Hearings" },
+      ];
 
     case "JAIL_OFFICER":
       return [
         { path: "/jail", label: "Custody Desk" },
         { path: "/cases", label: "Inmate Roll" },
-        { path: "/documents", label: "Intake Docs" },
+        { path: "/documents", label: "Intake Documents" },
         { path: "/hearings", label: "Hearings" },
+        { path: "/reports", label: "Reports" },
       ];
 
     case "POLICE_OFFICER":
@@ -54,15 +61,12 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/police", label: "Police Reference Desk" },
         { path: "/cases", label: "FIR Registry" },
         { path: "/documents", label: "Case Documents" },
+        { path: "/hearings", label: "Hearings" },
       ];
 
     case "PLATFORM_ADMIN":
       return [
         { path: "/admin", label: "Admin Console" },
-        { path: "/dashboard", label: "Command Center" },
-        { path: "/cases", label: "Cases" },
-        { path: "/identity-review", label: "Identity Review" },
-        { path: "/legal-sources", label: "Legal Knowledge" },
         { path: "/ingestion", label: "Data Ingestion" },
         { path: "/audit", label: "Audit Logs" },
         { path: "/reports", label: "Reports" },
@@ -73,11 +77,10 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/gov", label: "State Overview" },
         { path: "/dashboard", label: "Command Center" },
         { path: "/cases", label: "Cases" },
-        { path: "/evidence", label: "Evidence" },
         { path: "/identity-review", label: "Identity Review" },
-        { path: "/legal-sources", label: "Legal Knowledge" },
+        { path: "/legal-sources", label: "Legal Knowledge Governance" },
         { path: "/reports", label: "Reports" },
-        { path: "/audit", label: "Audit Logs" },
+        { path: "/audit", label: "Audit" },
       ];
 
     case "SUPERVISING_LEGAL_OFFICER":
@@ -85,15 +88,15 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/dashboard", label: "Command Center" },
         { path: "/cases", label: "Cases" },
         { path: "/identity-review", label: "Identity Review" },
-        { path: "/legal-sources", label: "Legal Knowledge" },
         { path: "/radar", label: "Eligibility Radar" },
         { path: "/documents", label: "Documents" },
         { path: "/evidence", label: "Evidence" },
         { path: "/actions", label: "Actions" },
         { path: "/hearings", label: "Hearings" },
-        { path: "/audit", label: "Audit Logs" },
-        { path: "/reports", label: "Reports" },
+        { path: "/legal-sources", label: "Legal Knowledge Governance" },
         { path: "/ingestion", label: "Data Ingestion" },
+        { path: "/audit", label: "Audit" },
+        { path: "/reports", label: "Reports" },
       ];
 
     case "DLSA_OFFICER":
@@ -102,17 +105,18 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/dashboard", label: "Command Center" },
         { path: "/cases", label: "Cases" },
         { path: "/identity-review", label: "Identity Review" },
-        { path: "/legal-sources", label: "Legal Knowledge" },
         { path: "/radar", label: "Eligibility Radar" },
         { path: "/documents", label: "Documents" },
         { path: "/evidence", label: "Evidence" },
         { path: "/actions", label: "Actions" },
         { path: "/hearings", label: "Hearings" },
-        { path: "/reports", label: "Reports" },
+        { path: "/legal-sources", label: "Legal Knowledge" },
         { path: "/ingestion", label: "Data Ingestion" },
+        { path: "/reports", label: "Reports" },
       ];
   }
 }
+
 
 
 function getDefaultNotificationsForRole(role?: string): NotificationItem[] {

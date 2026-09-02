@@ -222,6 +222,7 @@ class CaseRecord(BaseModel):
     # Legal Aid Assignment Workflow
     assignment_status: str = Field(default="AVAILABLE", description="'AVAILABLE', 'ASSIGNED', or 'DECLINED'.")
     assigned_lawyer_id: Optional[str] = Field(default=None)
+    assigned_lawyer: Optional[str] = Field(default=None, description="Name or title of assigned legal aid counsel.")
 
     # Rich Dossier Sub-Models
     legal_needs: List[LegalNeedItem] = Field(default_factory=list)

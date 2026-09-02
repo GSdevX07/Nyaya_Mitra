@@ -42,18 +42,18 @@ import json
 import datetime
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, File, UploadFile, Body, Form, Depends
+from fastapi import FastAPI, HTTPException, status, File, UploadFile, Body, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.agents.orchestrator import process_case
 from app.agents.prioritization_agent import prioritize_cases
 from app.agents.eligibility_agent import evaluate_eligibility
-from app.models.schemas import CaseRecord, UrgencyFlags, CaseState
+from app.models.schemas import CaseRecord, UrgencyFlags, CaseState, LegalNeedItem, LegalNeedType
 from app.database import (
     init_db, get_all_cases, get_case, update_case_status, update_case_documents,
     add_evidence, get_all_evidence, get_evidence_item, get_all_notifications,
-    store_uploaded_document, get_case_uploaded_documents,
+    store_uploaded_document, get_case_uploaded_documents, add_notification,
 )
 from app.document_pipeline import DocumentPipelineError, DocumentPipelineResult, execute_full_document_pipeline, extract_document_text
 from app.rag.legal_ingestion import LegalIngestionError, ingest_legal_pdf
@@ -253,24 +253,87 @@ def root():
     }
 
 
+def _check_jail_facility_match(case: Any, user: AuthUser) -> bool:
+    """
+    Verify whether a case/inmate belongs to the Jail Officer's authorized facility.
+    Officers are authorized for their specific detention facility (e.g. Tihar Central Jail No. 4).
+    """
+    case_loc = (getattr(case, "jail_location", None) or "").lower().strip()
+    if not case_loc:
+        return False
+
+    user_facilities = [str(f).lower().strip() for f in (user.facility_ids or [])]
+    if not user_facilities:
+        # Default demo jail officer facility assignment: Tihar Central Jail No. 4
+        return "tihar" in case_loc and ("4" in case_loc or "no. 4" in case_loc)
+
+    for fac in user_facilities:
+        if fac in case_loc:
+            return True
+        if "fac_tihar_jail_04" in fac or "tihar" in fac:
+            if "tihar" in case_loc and ("4" in case_loc or "no. 4" in case_loc):
+                return True
+        if "rohini" in fac and "rohini" in case_loc:
+            return True
+        if "lucknow" in fac and "lucknow" in case_loc:
+            return True
+        if "mandoli" in fac and "mandoli" in case_loc:
+            return True
+    return False
+
+
 @app.get("/cases", tags=["Cases"])
 def get_cases(
     current_user: AuthUser = Depends(require_role(
         Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
         Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
-        Role.READ_ONLY_AUDITOR, Role.DEFENSE_ADVOCATE,
+        Role.READ_ONLY_AUDITOR, Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE,
     ))
 ):
     """
-    Return all cases sorted by urgency score (highest first).
-
-    Each item in the returned list includes the full CaseRecord, the
-    computed days_overdue, and the urgency_score used for sorting.
-    This is the primary data source for the lawyer dashboard queue.
+    Return cases sorted by urgency score (highest first), scoped strictly to the caller's role.
     """
+    if current_user.role in (Role.ACCUSED_USER, Role.FAMILY_GUARDIAN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Master case roster is not accessible to citizen roles.",
+        )
+
+    cases = get_all_cases()
+
+    # ── Record-Level Scoping ──────────────────────────────────────────────────
+    if current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        user_full = (current_user.full_name or "").lower()
+        cases = [
+            c for c in cases
+            if (c.assigned_lawyer_id and c.assigned_lawyer_id == current_user.id)
+            or (getattr(c, "assigned_lawyer", None) and user_full and user_full in c.assigned_lawyer.lower())
+            or (current_user.linked_case_id and c.case_id == current_user.linked_case_id)
+        ]
+    elif current_user.role == Role.POLICE_OFFICER:
+        station = (current_user.district or "kotwali").lower()
+        cases = [
+            c for c in cases
+            if (c.police_station and any(w in c.police_station.lower() for w in ["kotwali", "central", station]))
+            or (c.district and any(w in c.district.lower() for w in ["central", station]))
+        ]
+    elif current_user.role == Role.JAIL_OFFICER:
+        cases = [
+            c for c in cases
+            if c.status != CaseState.POST_RELEASE_PRESERVED
+            and _check_jail_facility_match(c, current_user)
+        ]
+    elif current_user.role == Role.SUPERVISING_LEGAL_OFFICER:
+        if current_user.district and current_user.district.lower() != "all":
+            dist = current_user.district.lower()
+            cases = [
+                c for c in cases
+                if (c.district and dist in c.district.lower())
+                or c.status in (CaseState.LAWYER_REVIEW, CaseState.APPROVED_READY_FOR_FILING, CaseState.MANUAL_REVIEW)
+            ]
+
     # Build evaluation list using the canonical Eligibility Agent
     case_evaluations = []
-    cases = get_all_cases()
     for case in cases:
         eligibility_result = evaluate_eligibility(case)
         case_evaluations.append({
@@ -291,6 +354,7 @@ def get_cases(
         }
         for entry in sorted_queue
     ]
+
 
 
 @app.get("/cases/available", tags=["Available Cases"])
@@ -330,6 +394,105 @@ def get_available_cases(
     ]
 
 
+class JailReferralPayload(BaseModel):
+    case_id: str
+    notes: Optional[str] = None
+
+
+@app.get("/jail/inmates", tags=["Jail Operations"])
+def get_jail_inmates(
+    current_user: AuthUser = Depends(require_role(
+        Role.JAIL_OFFICER, Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.SUPERVISING_LEGAL_OFFICER
+    ))
+):
+    """
+    Facility-scoped inmate roster for Jail Operations.
+    Returns prisoners currently admitted/detained at the authenticated officer's facility.
+    Excludes released individuals and prisoners in unrelated facilities.
+    """
+    all_cases = get_all_cases()
+    if current_user.role == Role.JAIL_OFFICER:
+        facility_cases = [
+            c for c in all_cases
+            if c.status != CaseState.POST_RELEASE_PRESERVED and _check_jail_facility_match(c, current_user)
+        ]
+    else:
+        facility_cases = [c for c in all_cases if c.status != CaseState.POST_RELEASE_PRESERVED]
+
+    inmates = []
+    for c in facility_cases:
+        missing = [d for d in c.required_docs if d not in c.present_docs]
+        eligibility = evaluate_eligibility(c)
+        inmates.append({
+            "case": c.model_dump(),
+            "inmate_id": c.case_id,
+            "name": c.name,
+            "jail_location": c.jail_location,
+            "admission_date": c.arrest_date,
+            "custody_days": c.custody_days,
+            "excluded_delay_days": c.excluded_delay_days,
+            "countable_days": c.custody_days - (c.excluded_delay_days or 0),
+            "required_docs": c.required_docs,
+            "present_docs": c.present_docs,
+            "missing_docs": missing,
+            "is_docs_complete": len(missing) == 0,
+            "assignment_status": c.assignment_status,
+            "assigned_lawyer": getattr(c, "assigned_lawyer", None),
+            "assigned_lawyer_id": c.assigned_lawyer_id,
+            "legal_code": c.legal_code,
+            "offense_sections": c.offense_sections,
+            "status": c.status.value,
+            "urgency_flags": c.urgency_flags.model_dump(),
+            "potential_479_eligible": eligibility.get("eligible", False),
+        })
+    return inmates
+
+
+@app.post("/jail/refer-legal-aid", tags=["Jail Operations"])
+def refer_case_to_dlsa(
+    payload: JailReferralPayload,
+    current_user: AuthUser = Depends(require_role(Role.JAIL_OFFICER, Role.PLATFORM_ADMIN)),
+):
+    """
+    Jail Superintendent referral of an undertrial prisoner to DLSA for legal aid counsel assignment.
+    Jail role cannot personally assign an advocate, but identifies need and initiates the DLSA workflow.
+    """
+    case = _find_case(payload.case_id)
+    if current_user.role == Role.JAIL_OFFICER and not _check_jail_facility_match(case, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: Inmate '{payload.case_id}' is detained outside your authorized facility jurisdiction.",
+        )
+
+    # Add Legal Need item to case
+    new_need = LegalNeedItem(
+        need_type=LegalNeedType.UNDERTRIAL_BAIL_479,
+        title="Prison Custody Legal-Aid Referral",
+        description=payload.notes or f"Jail Superintendent referred inmate {case.name} ({case.case_id}) for DLSA legal aid counsel assignment.",
+        urgency="HIGH",
+        blocking_bail_workflow=True,
+        status="ACTION_REQUIRED",
+    )
+    case.legal_needs.append(new_need)
+    update_case_status(case.case_id, CaseState.LEGAL_NEED_IDENTIFIED)
+
+    # Dispatch notification to DLSA & Supervisor
+    add_notification(
+        case_id=case.case_id,
+        title=f"Legal-Aid Referral from Prison: {case.case_id}",
+        message=f"Jail Superintendent referred inmate {case.name} ({case.case_id}) for legal-aid counsel assignment. {payload.notes or ''}".strip(),
+        notif_type="urgent",
+        target_role="DLSA_OFFICER,SUPERVISING_LEGAL_OFFICER",
+    )
+
+    return {
+        "status": "success",
+        "case_id": case.case_id,
+        "message": f"Inmate {case.name} ({case.case_id}) successfully referred to DLSA for legal aid counsel assignment.",
+        "assignment_status": case.assignment_status,
+    }
+
+
 # ── Document AI Pipeline endpoints MUST be before /cases/{case_id} ──────────
 # FastAPI resolves GET routes in registration order; if these appear after the
 # parameterised route, "sample-documents" gets matched as case_id.
@@ -344,7 +507,7 @@ def assess_legal_document(
     payload: Optional[AssessDocumentPayload] = Body(default=None),
     current_user: AuthUser = Depends(require_role(
         Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
-        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.POLICE_OFFICER,
         Role.DEFENSE_ADVOCATE,
     )),
 ):
@@ -464,31 +627,166 @@ def get_case_by_id(
     current_user: AuthUser = Depends(require_role(
         Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
         Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
-        Role.DEFENSE_ADVOCATE, Role.READ_ONLY_AUDITOR,
+        Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE, Role.READ_ONLY_AUDITOR,
     ))
 ):
     """
     Run the full agentic operations pipeline on a single case dossier.
-
-    Response includes:
-      - Canonical Accused Dossier with independent legal code context
-      - Deterministic Section 479 BNSS Rule Engine result
-      - Document completeness & blocking gaps
-      - Prioritized operational urgency
-      - Grounded statutory RAG citations
-      - Assisted petition draft (if eligible + complete)
-      - Plain-language explanation in preferred language
-      - Procedural court tracking and append-oriented activity log
+    Enforces record-level authorization per role.
     """
     case = _find_case(case_id)
-    return process_case(case)
+
+    # ── Record-Level Authorization ────────────────────────────────────────────
+    if current_user.role in (Role.ACCUSED_USER, Role.FAMILY_GUARDIAN):
+        if current_user.linked_case_id != case.case_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You are only authorized to access your own linked case record.",
+            )
+    elif current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        user_full = (current_user.full_name or "").lower()
+        is_assigned = (
+            (case.assigned_lawyer_id and case.assigned_lawyer_id == current_user.id)
+            or (current_user.linked_case_id == case.case_id)
+            or (getattr(case, "assigned_lawyer", None) and user_full and user_full in case.assigned_lawyer.lower())
+        )
+        if not is_assigned:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Defense advocates may only access explicitly assigned case dossiers.",
+            )
+    elif current_user.role == Role.POLICE_OFFICER:
+        station = (current_user.district or "kotwali").lower()
+        case_ps = (case.police_station or "").lower()
+        case_dist = (case.district or "").lower()
+        if not (any(w in case_ps for w in ["kotwali", "central", station]) or any(w in case_dist for w in ["central", station])):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Case does not belong to your jurisdictional police station.",
+            )
+    elif current_user.role == Role.JAIL_OFFICER:
+        if not _check_jail_facility_match(case, current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Inmate '{case.case_id}' is detained at '{case.jail_location}', outside your authorized facility jurisdiction.",
+            )
+    elif current_user.role == Role.SUPERVISING_LEGAL_OFFICER:
+        if current_user.district and current_user.district.lower() != "all":
+            dist = current_user.district.lower()
+            case_dist = (case.district or "").lower()
+            is_supervisory_case = case.status in (CaseState.LAWYER_REVIEW, CaseState.APPROVED_READY_FOR_FILING, CaseState.MANUAL_REVIEW)
+            if not (dist in case_dist or is_supervisory_case):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Forbidden: Case belongs to district '{case.district}', outside your supervisory jurisdiction '{current_user.district}'.",
+                )
+
+    res = process_case(case)
+
+    # Scoped Redactions for Police Officers
+    if current_user.role == Role.POLICE_OFFICER:
+        return {
+            "case": {
+                "case_id": case.case_id,
+                "name": case.name,
+                "fir_number": getattr(case, "fir_number", None) or f"FIR-2024-{case.case_id}",
+                "police_station": getattr(case, "police_station", None) or "Kotwali PS",
+                "court_name": case.court_name,
+                "district": case.district,
+                "state": case.state,
+                "arrest_date": case.arrest_date,
+                "custody_days": case.custody_days,
+                "offense_sections": case.offense_sections,
+                "legal_code": case.legal_code,
+                "status": case.status,
+                "required_docs": case.required_docs,
+                "present_docs": case.present_docs,
+                "jail_location": case.jail_location,
+                # Redacted confidential info
+                "relative_name": "[REDACTED - PRIVACY CONTROLLED]",
+                "relative_relation": "[REDACTED]",
+                "relative_phone": "[REDACTED]",
+                "permanent_address": case.permanent_address,
+                "timeline": getattr(case, "timeline", []),
+            },
+            "police_authorized_view": True,
+            "status_record": res.get("status_record"),
+            "completeness": {
+                "complete": res.get("completeness", {}).get("complete", False),
+                "missing_docs": res.get("completeness", {}).get("missing_docs", []),
+                "present_docs": res.get("completeness", {}).get("present_docs", []),
+            },
+            # Redact advocate strategy, drafts, AI logs, RAG retrieval
+            "draft": None,
+            "statutes": None,
+            "retrieval": None,
+            "agent_activity_log": [],
+            "urgency": None,
+        }
+
+    # Scoped Redactions for Jail Officers (Custody and Legal-Aid view; no legal petition drafting)
+    if current_user.role == Role.JAIL_OFFICER:
+        return {
+            "case": {
+                "case_id": case.case_id,
+                "name": case.name,
+                "fir_number": getattr(case, "fir_number", None) or f"FIR-2024-{case.case_id}",
+                "police_station": getattr(case, "police_station", None) or "Kotwali PS",
+                "court_name": case.court_name,
+                "district": case.district,
+                "state": case.state,
+                "arrest_date": case.arrest_date,
+                "custody_days": case.custody_days,
+                "excluded_delay_days": case.excluded_delay_days,
+                "countable_custody_days": case.custody_days - (case.excluded_delay_days or 0),
+                "max_sentence_days_for_offense": case.max_sentence_days_for_offense,
+                "offense_sections": case.offense_sections,
+                "legal_code": case.legal_code,
+                "status": case.status,
+                "required_docs": case.required_docs,
+                "present_docs": case.present_docs,
+                "jail_location": case.jail_location,
+                "assignment_status": case.assignment_status,
+                "assigned_lawyer": getattr(case, "assigned_lawyer", None),
+                "assigned_lawyer_id": case.assigned_lawyer_id,
+                "relative_name": case.relative_name,
+                "relative_relation": case.relative_relation,
+                "relative_phone": case.relative_phone,
+                "permanent_address": case.permanent_address,
+                "timeline": getattr(case, "timeline", []),
+                "urgency_flags": case.urgency_flags,
+            },
+            "jail_authorized_view": True,
+            "status_record": res.get("status_record"),
+            "completeness": {
+                "complete": res.get("completeness", {}).get("complete", False),
+                "missing_docs": res.get("completeness", {}).get("missing_docs", []),
+                "present_docs": res.get("completeness", {}).get("present_docs", []),
+            },
+            "eligibility": {
+                "eligible": res.get("eligibility", {}).get("eligible", False),
+                "threshold_days": res.get("eligibility", {}).get("threshold_days", 0),
+                "countable_custody_days": case.custody_days - (case.excluded_delay_days or 0),
+                "disclaimer": "Informational calculation. Legal representation determination handled by DLSA and defense counsel.",
+            },
+            # Strictly redact advocate strategy, draft petition, legal statutes, and RAG retrieval
+            "draft": None,
+            "statutes": [],
+            "retrieval": {},
+            "agent_activity_log": [],
+            "urgency": res.get("urgency"),
+        }
+
+    return res
+
+
 
 
 @app.post("/cases/{case_id}/take", tags=["Available Cases"])
 def take_up_case(
     case_id: str,
     current_user: AuthUser = Depends(require_role(
-        Role.DEFENSE_ADVOCATE, Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN,
+        Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE, Role.PLATFORM_ADMIN,
     ))
 ):
     """
@@ -572,11 +870,11 @@ def approve_case(
             id=f"TLE-{case_id}-APPR-{datetime.datetime.now().strftime('%M%S')}",
             timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
             event_type="DRAFT",
-            title="Bail Petition Approved & Marked Ready for Filing",
-            description=f"Draft reviewed and formally signed off by {lawyer_id}. Ready for court registry submission.",
+            title="Petition Approved for Filing — Supervisory Sign-Off",
+            description=f"Draft reviewed and formally approved by {lawyer_id} ({current_user.role.value}). Ready for court registry submission.",
             actor=lawyer_id,
-            actor_role="Defence Legal-Aid Advocate",
-            source="Advocate Review Gateway",
+            actor_role=current_user.role.value,
+            source="Supervisory Review Gateway",
             is_human_verified=True,
         ),
     )
@@ -615,11 +913,11 @@ def file_case_in_court(
             id=f"TLE-{case_id}-FILE-{datetime.datetime.now().strftime('%M%S')}",
             timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
             event_type="FILING",
-            title="Bail Petition Filed in Court Registry",
-            description=f"Petition formally lodged under filing reference: {filing_ref}.",
+            title="Petition Filing Recorded in System",
+            description=f"Petition formally lodged under filing reference: {filing_ref}. Recorded by {current_user.full_name or current_user.id} ({current_user.role.value}).",
             actor=current_user.full_name or current_user.id,
-            actor_role="Court Official",
-            source="Court Filing Registry",
+            actor_role=current_user.role.value,
+            source="Institutional Filing Record (Nyaya Mitra)",
             is_human_verified=True,
         ),
     )
@@ -638,11 +936,38 @@ def get_case_timeline(
     current_user: AuthUser = Depends(require_role(
         Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
         Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
-        Role.DEFENSE_ADVOCATE, Role.READ_ONLY_AUDITOR,
+        Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE, Role.READ_ONLY_AUDITOR,
     ))
 ):
     """Retrieve chronological case timeline with data provenance."""
     case = _find_case(case_id)
+    if current_user.role == Role.JAIL_OFFICER:
+        if not _check_jail_facility_match(case, current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Case '{case_id}' belongs to a different detention facility.",
+            )
+    elif current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        user_full = (current_user.full_name or "").lower()
+        is_assigned = (
+            (case.assigned_lawyer_id and case.assigned_lawyer_id == current_user.id)
+            or (current_user.linked_case_id == case.case_id)
+            or (getattr(case, "assigned_lawyer", None) and user_full and user_full in case.assigned_lawyer.lower())
+        )
+        if not is_assigned:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Advocates may only view timeline of assigned cases.",
+            )
+    elif current_user.role == Role.POLICE_OFFICER:
+        station = (current_user.district or "kotwali").lower()
+        case_ps = (case.police_station or "").lower()
+        case_dist = (case.district or "").lower()
+        if not (any(w in case_ps for w in ["kotwali", "central", station]) or any(w in case_dist for w in ["central", station])):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Case does not belong to your jurisdictional police station.",
+            )
     return {
         "case_id": case_id,
         "timeline": case.timeline,
@@ -676,24 +1001,7 @@ def get_stakeholders_overview(
     assigned_count = sum(1 for c in cases if c.assignment_status == "ASSIGNED")
     ready_for_filing = sum(1 for c in cases if c.status.value in ["APPROVED_READY_FOR_FILING", "DRAFT_READY"])
 
-    return {
-        "jail_view": {
-            "title": "Jail Administration & Custody Monitoring",
-            "total_inmates_monitored": total,
-            "undertrials_count": len(undertrials),
-            "convicted_count": len(convicted),
-            "missing_records_count": missing_docs_count,
-            "legal_aid_requested_count": total - assigned_count,
-            "operational_note": "Timely / near-real-time visibility where institutional data is connected.",
-        },
-        "dlsa_view": {
-            "title": "District Legal Services Authority Action Queue",
-            "statutory_eligibility_signals": eligible_count,
-            "high_urgency_cases": overdue_count,
-            "unassigned_legal_aid_demand": total - assigned_count,
-            "document_bottlenecks": missing_docs_count,
-            "assigned_active_counsel": assigned_count,
-        },
+    response = {
         "slsa_view": {
             "title": "SLSA Supervisory Overview",
             "districts_reporting": 4,
@@ -702,14 +1010,43 @@ def get_stakeholders_overview(
             "institutional_resolution_rate": f"{round((assigned_count / total * 100) if total else 0)}%",
             "privacy_notice": "Supervisory aggregate visibility without exposing individual PII.",
         },
-        "advocate_view": {
+    }
+
+    if current_user.role in (Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR):
+        response["jail_view"] = {
+            "title": "Jail Administration & Custody Monitoring",
+            "total_inmates_monitored": total,
+            "undertrials_count": len(undertrials),
+            "convicted_count": len(convicted),
+            "missing_records_count": missing_docs_count,
+            "legal_aid_requested_count": total - assigned_count,
+            "operational_note": "Timely / near-real-time visibility where institutional data is connected.",
+        }
+        response["dlsa_view"] = {
+            "title": "District Legal Services Authority Action Queue",
+            "statutory_eligibility_signals": eligible_count,
+            "high_urgency_cases": overdue_count,
+            "unassigned_legal_aid_demand": total - assigned_count,
+            "document_bottlenecks": missing_docs_count,
+            "assigned_active_counsel": assigned_count,
+        }
+        response["advocate_view"] = {
             "title": "Defence Legal-Aid Advocate Workspace",
             "active_briefs": assigned_count,
             "ready_for_filing_petitions": ready_for_filing,
             "hearings_this_month": len(cases),
             "evidence_vault_items": len(get_all_evidence()),
-        },
-    }
+        }
+    elif current_user.role == Role.DLSA_OFFICER:
+        response["dlsa_view"] = {
+            "title": "District Legal Services Authority Action Queue",
+            "statutory_eligibility_signals": eligible_count,
+            "high_urgency_cases": overdue_count,
+            "unassigned_legal_aid_demand": total - assigned_count,
+            "document_bottlenecks": missing_docs_count,
+            "assigned_active_counsel": assigned_count,
+        }
+    return response
 
 
 @app.get("/lawyer/profile", tags=["Lawyer Profile"])
@@ -725,17 +1062,39 @@ def get_lawyer_profile(
     if not bar_id and current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
         bar_id = "DL/2018/49281"
     
+    if current_user.role == Role.SUPERVISING_LEGAL_OFFICER:
+        specialization = "Supervisory Legal Services Oversight & BNSS Governance"
+        status_label = "Active Supervisory Legal Officer"
+        org_label = current_user.org_id or "State Legal Services Authority (SLSA)"
+        phone_val = getattr(current_user, "phone", None) or "N/A"
+        cases_val = 0
+        bar_association = "N/A"
+    elif current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        specialization = "Undertrial Defense & Section 479 BNSS"
+        status_label = "Active Pro Bono Counsel"
+        org_label = current_user.org_id or "District Legal Services Authority (DLSA)"
+        phone_val = getattr(current_user, "phone", None) or "N/A"
+        cases_val = assigned_count
+        bar_association = bar_id or "N/A"
+    else:
+        specialization = "Institutional Legal Oversight"
+        status_label = "Active Institutional User"
+        org_label = current_user.org_id or "District Legal Services Authority (DLSA)"
+        phone_val = getattr(current_user, "phone", None) or "N/A"
+        cases_val = 0
+        bar_association = "N/A"
+
     return {
         "id": current_user.id,
         "full_name": current_user.full_name or "Institutional Officer",
-        "bar_association_id": bar_id or "N/A",
+        "bar_association_id": bar_association,
         "email": current_user.email,
-        "phone": getattr(current_user, "phone", None) or "+91 11 2338 1234",
+        "phone": phone_val,
         "role": current_user.role.value,
-        "specialization": "Undertrial Defense & Section 479 BNSS" if current_user.role in (Role.DEFENSE_ADVOCATE, Role.SUPERVISING_LEGAL_OFFICER) else "Institutional Legal Oversight",
-        "cases_taken": assigned_count,
-        "status": "Active Institutional User",
-        "organization": current_user.org_id or "District Legal Services Authority (DLSA)",
+        "specialization": specialization,
+        "cases_taken": cases_val,
+        "status": status_label,
+        "organization": org_label,
         "district": current_user.district,
     }
 
@@ -749,7 +1108,7 @@ def get_documents(
     current_user: AuthUser = Depends(require_role(
         Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
         Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
-        Role.DEFENSE_ADVOCATE, Role.READ_ONLY_AUDITOR,
+        Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE, Role.READ_ONLY_AUDITOR,
     ))
 ):
     """
@@ -758,6 +1117,15 @@ def get_documents(
     """
     docs = []
     cases = get_all_cases()
+    if current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        user_full = (current_user.full_name or "").lower()
+        cases = [
+            c for c in cases
+            if (c.assigned_lawyer_id and c.assigned_lawyer_id == current_user.id)
+            or (getattr(c, "assigned_lawyer", None) and user_full and user_full in c.assigned_lawyer.lower())
+            or (current_user.linked_case_id and c.case_id == current_user.linked_case_id)
+        ]
+
     for c in cases:
         for r_doc in c.required_docs:
             is_present = r_doc in c.present_docs
@@ -780,11 +1148,31 @@ def get_case_documents(
     current_user: AuthUser = Depends(require_role(
         Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
         Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
-        Role.DEFENSE_ADVOCATE,
+        Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE,
     ))
 ):
     """Retrieve document status breakdown for a single case."""
     case = _find_case(case_id)
+
+    if current_user.role == Role.JAIL_OFFICER:
+        if not _check_jail_facility_match(case, current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Inmate '{case.case_id}' is detained outside your authorized facility jurisdiction.",
+            )
+    elif current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        user_full = (current_user.full_name or "").lower()
+        is_assigned = (
+            (case.assigned_lawyer_id and case.assigned_lawyer_id == current_user.id)
+            or (current_user.linked_case_id == case.case_id)
+            or (getattr(case, "assigned_lawyer", None) and user_full and user_full in case.assigned_lawyer.lower())
+        )
+        if not is_assigned:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Defense advocates may only access documents for assigned cases.",
+            )
+
     missing = [d for d in case.required_docs if d not in case.present_docs]
     return {
         "case_id": case_id,
@@ -817,6 +1205,52 @@ async def upload_document(
       Supabase table.
     - present_docs on the case is updated so the document flips to 'Present'.
     """
+    # ── 0. Enforce Case & Role Document Type Scoping ──────────────────────────
+    case = _find_case(case_id)
+    if current_user.role == Role.JAIL_OFFICER:
+        if not _check_jail_facility_match(case, current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Cannot upload document for prisoner '{case_id}' detained outside your authorized prison facility.",
+            )
+        JAIL_ALLOWED_DOCUMENT_TYPES = {
+            "prison_admission_record",
+            "custody_certificate",
+            "nominal_roll",
+            "prison_conduct_record",
+            "medical_certificate",
+            "remand_order",
+            "other_prison_record",
+        }
+        clean_doc = document_type.lower().strip().replace(" ", "_")
+        if clean_doc not in JAIL_ALLOWED_DOCUMENT_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Jail officers may only upload prison intake, custody certificates, nominal rolls, conduct, medical, or remand copies held by the prison. Primary investigation records ('{document_type}') must be submitted by Police or Court authorities.",
+            )
+    elif current_user.role == Role.SUPERVISING_LEGAL_OFFICER:
+        if current_user.district and current_user.district.lower() != "all":
+            dist = current_user.district.lower()
+            if not (case.district and dist in case.district.lower()):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Forbidden: Case belongs to district '{case.district}', outside your supervisory jurisdiction '{current_user.district}'.",
+                )
+        SUPERVISOR_ALLOWED_DOCUMENT_TYPES = {
+            "supervisory_review_note",
+            "oversight_order",
+            "compliance_memo",
+            "correction_notice",
+            "legal_opinion",
+            "supervisory_order",
+        }
+        clean_doc = document_type.lower().strip().replace(" ", "_")
+        if clean_doc not in SUPERVISOR_ALLOWED_DOCUMENT_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Supervisory officers may only upload supervisory review notes, oversight orders, or compliance memos. Primary institutional records ('{document_type}') must be submitted by originating authorities (Police/Jail/DLSA).",
+            )
+
     # ── 1. Read file bytes if a file was provided ─────────────────────────────
     file_bytes: Optional[bytes] = None
     file_name: str = "manual_entry.txt"
@@ -858,6 +1292,10 @@ async def upload_document(
         file_size = len(file_bytes)
 
     # ── 4. Persist to Supabase uploaded_documents table ──────────────────────
+    source_auth = "PRISON" if current_user.role == Role.JAIL_OFFICER else ("SUPERVISOR" if current_user.role == Role.SUPERVISING_LEGAL_OFFICER else "POLICE" if current_user.role == Role.POLICE_OFFICER else "INSTITUTIONAL")
+    doc_status = "PENDING_VERIFICATION" if current_user.role == Role.JAIL_OFFICER else "VERIFIED"
+    auth_src = True if current_user.role == Role.JAIL_OFFICER else False
+
     try:
         store_uploaded_document(
             case_id=case_id,
@@ -870,23 +1308,28 @@ async def upload_document(
             file_hash=file_hash,
             file_size_bytes=file_size,
             mime_type=mime_type,
+            source_authority=source_auth,
+            uploaded_by=current_user.id,
+            document_status=doc_status,
+            authoritative_source=auth_src,
         )
     except Exception as exc:
         # Non-fatal: log but don't block the upload workflow
         print(f"[WARN] store_uploaded_document failed: {exc}")
 
     # ── 5. Update present_docs on the case ───────────────────────────────────
-    case = _find_case(case_id)
+    # Primary institutional uploads update present_docs; supervisory notes and jail intake uploads do not immediately alter final verified completeness
     updated_docs = list(case.present_docs)
-    if document_type not in updated_docs:
-        updated_docs.append(document_type)
-    update_case_documents(case_id, updated_docs)
-
     all_required = set(case.required_docs)
-    if all_required.issubset(set(updated_docs)):
-        update_case_status(case_id, CaseState.DOCUMENTS_COMPLETE)
-    else:
-        update_case_status(case_id, CaseState.DOCUMENTS_MISSING)
+    if current_user.role not in (Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER):
+        if document_type not in updated_docs:
+            updated_docs.append(document_type)
+        update_case_documents(case_id, updated_docs)
+
+        if all_required.issubset(set(updated_docs)):
+            update_case_status(case_id, CaseState.DOCUMENTS_COMPLETE)
+        else:
+            update_case_status(case_id, CaseState.DOCUMENTS_MISSING)
 
     # ── 6. Add SHA-256 evidence record ───────────────────────────────────────
     evidence_hash = file_hash or hashlib.sha256(final_text.encode()).hexdigest()
@@ -942,7 +1385,23 @@ async def assess_document_file(
     except DocumentPipelineError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    return result.model_dump()
+    dump = result.model_dump()
+    if current_user.role == Role.JAIL_OFFICER:
+        dump["granite_assessment"] = {
+            "assessment_id": "INTAKE-DOC",
+            "model_name": "Intake-Extraction-Only",
+            "case_id": case_id or "UNKNOWN",
+            "eligibility_status": "PENDING_LEGAL_REVIEW",
+            "confidence_score": 1.0,
+            "urgency_rating": "INFORMATIONAL",
+            "statutory_ground": "Custody Intake Record",
+            "legal_summary": "Text extracted successfully. Legal analysis and eligibility determination are reserved for DLSA and defense counsel.",
+            "key_findings": ["Prison document text extracted and classified."],
+            "recommended_action": "Refer to DLSA for legal assessment.",
+            "ai_generated_report_draft": "Custody intake document recorded.",
+        }
+        dump["rag_statute_citations"] = []
+    return dump
 
 
 @app.get("/documents/uploaded/{case_id}", tags=["Documents"])
@@ -960,8 +1419,26 @@ def get_uploaded_documents(
     Returns file metadata, extracted text, OCR engine used, SHA-256 hash,
     and upload timestamp for every document uploaded against this case.
     """
+    case = _find_case(case_id)
+    if current_user.role == Role.JAIL_OFFICER:
+        if not _check_jail_facility_match(case, current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Case '{case_id}' is outside your authorized prison facility jurisdiction.",
+            )
     try:
         records = get_case_uploaded_documents(case_id)
+        if current_user.role == Role.JAIL_OFFICER:
+            PRISON_ALLOWED = {
+                "prison_admission_record", "custody_certificate", "nominal_roll",
+                "prison_conduct_record", "medical_certificate", "remand_order",
+                "other_prison_record", "remand_order_copy",
+            }
+            records = [
+                r for r in records
+                if r.get("document_type", "").lower().strip().replace(" ", "_") in PRISON_ALLOWED
+                or r.get("source_authority") == "PRISON"
+            ]
         return records
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Could not fetch uploaded documents: {exc}")
@@ -989,6 +1466,9 @@ def get_evidence(
         c = cases.get(record["case_id"])
         if not c:
             continue
+        if current_user.role == Role.SUPERVISING_LEGAL_OFFICER and current_user.district and current_user.district.lower() != "all":
+            if not (c.district and current_user.district.lower() in c.district.lower()):
+                continue
             
         results.append({
             "id": record["evidence_id"],
@@ -1017,7 +1497,7 @@ def verify_evidence(
     Verify an evidence item's integrity by recomputing its SHA-256 hash
     from the original bytes and comparing it to the stored hash.
 
-    Returns MATCH (authentic) or MISMATCH (tampered) based on the hash comparison.
+    Returns INTEGRITY_VERIFIED (hash match) or INTEGRITY_VIOLATION (tampered).
     """
     # 1. Fetch the stored evidence record
     record = get_evidence_item(evidence_id)
@@ -1028,9 +1508,33 @@ def verify_evidence(
     document_type = record["document_type"]
     stored_hash = record["stored_hash"]
 
+    # Authorization: Verify supervisor has jurisdiction over the case
+    case = _find_case(case_id)
+    if current_user.role == Role.SUPERVISING_LEGAL_OFFICER and current_user.district and current_user.district.lower() != "all":
+        if not (case.district and current_user.district.lower() in case.district.lower()):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Evidence belongs to case in district '{case.district}', outside your supervisory jurisdiction '{current_user.district}'.",
+            )
+    elif current_user.role == Role.JAIL_OFFICER:
+        if not _check_jail_facility_match(case, current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Evidence belongs to inmate detained outside your authorized facility jurisdiction.",
+            )
+        JAIL_ALLOWED_VERIFY_DOCS = {
+            "prison_admission_record", "custody_certificate", "nominal_roll",
+            "prison_conduct_record", "medical_certificate", "remand_order",
+            "other_prison_record", "remand_order_copy",
+        }
+        clean_doc = document_type.lower().strip().replace(" ", "_")
+        if clean_doc not in JAIL_ALLOWED_VERIFY_DOCS and clean_doc != "remand_order":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Jail officers may only verify custody and prison-held record integrity. Institutional documents ('{document_type}') must be verified by court or legal authority.",
+            )
+
     # 2. Re-read the physical file.
-    # IMPORTANT: The seed hash in database.py uses "verified_content_{case_id}_{doc_type}".
-    # We must use the exact same deterministic string here so the comparison is valid.
     mock_file_bytes = f"verified_content_{case_id}_{document_type}".encode()
     
     # 3. Compute the *current* hash
@@ -1039,7 +1543,7 @@ def verify_evidence(
     # 4. Compare cryptographic hashes
     is_match = current_hash == stored_hash
     
-    status = "Verified Authentic" if is_match else "Integrity Violation"
+    status = "INTEGRITY_VERIFIED" if is_match else "INTEGRITY_VIOLATION"
 
     return {
         "evidence_id": evidence_id,
@@ -1068,6 +1572,18 @@ def get_actions(
     """
     actions = []
     cases = get_all_cases()
+    if current_user.role == Role.SUPERVISING_LEGAL_OFFICER and current_user.district and current_user.district.lower() != "all":
+        dist = current_user.district.lower()
+        cases = [c for c in cases if c.district and dist in c.district.lower()]
+    elif current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        user_full = (current_user.full_name or "").lower()
+        cases = [
+            c for c in cases
+            if (c.assigned_lawyer_id and c.assigned_lawyer_id == current_user.id)
+            or (getattr(c, "assigned_lawyer", None) and user_full and user_full in c.assigned_lawyer.lower())
+            or (current_user.linked_case_id and c.case_id == current_user.linked_case_id)
+        ]
+
     for c in cases:
         eligibility = evaluate_eligibility(c)
         is_eligible = eligibility["eligible"]
@@ -1119,11 +1635,59 @@ def trigger_action(
         Role.DLSA_OFFICER, Role.DEFENSE_ADVOCATE,
     )),
 ):
-    """Execute an automated agent action from the queue."""
+    """Execute an automated agent action from the queue with role-based action type validation."""
+    action_upper = action_id.upper()
+
+    # Role-specific action validation
+    if current_user.role == Role.SUPERVISING_LEGAL_OFFICER:
+        FORBIDDEN_SUPERVISOR_ACTIONS = ("COURT_FILE", "JUDICIAL_ORDER", "POLICE_TASK", "JAIL_INTAKE")
+        if any(f in action_upper for f in FORBIDDEN_SUPERVISOR_ACTIONS):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Action '{action_id}' requires judicial, police, or jail operational authority.",
+            )
+    elif current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        FORBIDDEN_ADVOCATE_ACTIONS = ("COURT_FILE", "JUDICIAL_ORDER", "POLICE_TASK", "JAIL_INTAKE", "ASSIGN", "SUPERVISOR")
+        if any(f in action_upper for f in FORBIDDEN_ADVOCATE_ACTIONS):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Action '{action_id}' is restricted to supervisory, judicial, police, or jail authorities.",
+            )
+
+    # Scoping: Validate target case if encoded in action_id (e.g. ACT-UTP-0001-BAIL)
+    parts = action_id.split("-")
+    if len(parts) >= 3 and parts[0] == "ACT":
+        target_case_id = f"{parts[1]}-{parts[2]}" if len(parts) >= 4 else parts[1]
+        try:
+            target_case = _find_case(target_case_id)
+            if current_user.role == Role.SUPERVISING_LEGAL_OFFICER and current_user.district and current_user.district.lower() != "all":
+                dist = current_user.district.lower()
+                if not (target_case.district and dist in target_case.district.lower()):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Forbidden: Case '{target_case_id}' belongs to district '{target_case.district}', outside your supervisory jurisdiction '{current_user.district}'.",
+                    )
+            elif current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+                user_full = (current_user.full_name or "").lower()
+                is_assigned = (
+                    (target_case.assigned_lawyer_id and target_case.assigned_lawyer_id == current_user.id)
+                    or (current_user.linked_case_id == target_case.case_id)
+                    or (getattr(target_case, "assigned_lawyer", None) and user_full and user_full in target_case.assigned_lawyer.lower())
+                )
+                if not is_assigned:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Forbidden: Case '{target_case_id}' is not assigned to you.",
+                    )
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
     return {
         "action_id": action_id,
         "status": "Executed Successfully",
-        "message": f"Action {action_id} triggered by {current_user.id} (DLSA submission simulated)."
+        "message": f"Action {action_id} triggered by {current_user.id} ({current_user.role.value}).",
     }
 
 
@@ -1132,33 +1696,98 @@ def get_hearings(
     current_user: AuthUser = Depends(require_role(
         Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
         Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
-        Role.DEFENSE_ADVOCATE, Role.READ_ONLY_AUDITOR,
+        Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE, Role.READ_ONLY_AUDITOR,
     )),
 ):
     from app.database import get_hearings_schedule
+    cases = get_all_cases()
+    case_map = {c.case_id: c for c in cases}
+
     # Prefer hearings_schedule DB table (seeded from case court_name at startup)
     db_hearings = get_hearings_schedule()
-    if db_hearings:
-        return db_hearings
-
-    # Fallback: generate on-the-fly from cases using real case.court_name (no hardcoded judge names)
     hearings = []
-    cases = get_all_cases()
-    for i, c in enumerate(cases):
-        target_date = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7 + i)
-        eligibility = evaluate_eligibility(c)
-        hearing_type = "Bail Application Under BNSS 479" if eligibility.get("eligible") else "Remand Review & Bail Motion"
-        hearings.append({
-            "id": f"HRG-{c.case_id}-{target_date.strftime('%Y%m%d')}",
-            "case_id": c.case_id,
-            "prisoner_name": c.name,
-            "court_name": c.court_name or "Sessions Court",
-            "hearing_date": target_date.strftime("%Y-%m-%d"),
-            "hearing_type": hearing_type,
-            "status": "Scheduled",
-            "judge": None,
-        })
+    if db_hearings:
+        hearings = [dict(h) for h in db_hearings]
+    else:
+        # Fallback: generate on-the-fly from cases using real case.court_name (no hardcoded judge names)
+        for i, c in enumerate(cases):
+            target_date = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7 + i)
+            eligibility = evaluate_eligibility(c)
+            hearing_type = "Bail Application Under BNSS 479" if eligibility.get("eligible") else "Remand Review & Bail Motion"
+            hearings.append({
+                "id": f"HRG-{c.case_id}-{target_date.strftime('%Y%m%d')}",
+                "case_id": c.case_id,
+                "prisoner_name": c.name,
+                "court_name": c.court_name or "Sessions Court",
+                "hearing_date": target_date.strftime("%Y-%m-%d"),
+                "hearing_type": hearing_type,
+                "status": "Scheduled",
+                "judge": getattr(c, "judge", None) or "Hon'ble Special Judicial Magistrate",
+            })
+
+    # Enrich with police and FIR metadata
+    for h in hearings:
+        c_obj = case_map.get(h.get("case_id"))
+        if c_obj:
+            h["fir_number"] = getattr(c_obj, "fir_number", None) or f"FIR-2024-{c_obj.case_id}"
+            h["police_station"] = getattr(c_obj, "police_station", None) or "Kotwali PS"
+            h["district"] = getattr(c_obj, "district", None) or "Central Delhi"
+            present_docs = getattr(c_obj, "present_docs", []) or []
+            if "charge_sheet" not in present_docs:
+                h["police_task"] = "Charge sheet submission pending before magistrate"
+            elif "remand_order" not in present_docs:
+                h["police_task"] = "Remand extension order compliance required"
+            else:
+                h["police_task"] = "Case diary on record; production warrant compliance"
+            if not h.get("judge"):
+                h["judge"] = getattr(c_obj, "judge", None) or "Hon'ble Special Judicial Magistrate"
+        else:
+            h["fir_number"] = f"FIR-2024-{h.get('case_id')}"
+            h["police_station"] = "Kotwali PS"
+            h["district"] = "Central Delhi"
+            h["police_task"] = "Remand review scheduled; case diary verification"
+            if not h.get("judge"):
+                h["judge"] = "Hon'ble Special Judicial Magistrate"
+
+    # Scoping for Police Officer: Station/district authorization only
+    if current_user.role == Role.POLICE_OFFICER:
+        station = (current_user.district or "kotwali").lower()
+        hearings = [
+            h for h in hearings
+            if any(w in (h.get("police_station") or "").lower() for w in ["kotwali", "central", station])
+            or any(w in (h.get("district") or "").lower() for w in ["central", station])
+        ]
+    elif current_user.role == Role.JAIL_OFFICER:
+        hearings = [
+            h for h in hearings
+            if case_map.get(h.get("case_id"))
+            and _check_jail_facility_match(case_map[h.get("case_id")], current_user)
+            and case_map[h.get("case_id")].status != CaseState.POST_RELEASE_PRESERVED
+        ]
+        for h in hearings:
+            c_obj = case_map.get(h.get("case_id"))
+            h["custody_task"] = "Production warrant compliance / Escort coordination required"
+            if c_obj:
+                h["jail_location"] = c_obj.jail_location
+    elif current_user.role == Role.SUPERVISING_LEGAL_OFFICER:
+        if current_user.district and current_user.district.lower() != "all":
+            dist = current_user.district.lower()
+            hearings = [
+                h for h in hearings
+                if dist in (h.get("district") or "").lower()
+            ]
+    elif current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        user_full = (current_user.full_name or "").lower()
+        assigned_case_ids = {
+            c.case_id for c in cases
+            if (c.assigned_lawyer_id and c.assigned_lawyer_id == current_user.id)
+            or (getattr(c, "assigned_lawyer", None) and user_full and user_full in c.assigned_lawyer.lower())
+            or (current_user.linked_case_id and c.case_id == current_user.linked_case_id)
+        }
+        hearings = [h for h in hearings if h.get("case_id") in assigned_case_ids]
+
     return hearings
+
 
 
 @app.get("/reports", tags=["Reports"])
@@ -1173,6 +1802,10 @@ def get_reports(
     ALL metrics are derived from the canonical EligibilityAgent no duplicate logic.
     """
     cases = get_all_cases()
+    if current_user.role == Role.SUPERVISING_LEGAL_OFFICER and current_user.district and current_user.district.lower() != "all":
+        dist = current_user.district.lower()
+        cases = [c for c in cases if c.district and dist in c.district.lower()]
+
     total_cases = len(cases)
 
     eligibility_results = [evaluate_eligibility(c) for c in cases]

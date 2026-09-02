@@ -199,7 +199,29 @@ def get_accused_profile(accused_id: str, user: AuthUser) -> Dict[str, Any]:
     result["connected_cases"] = connected_cases
     result["total_cases_count"] = len(connected_cases)
 
+    # ── Record-Level Authorization ────────────────────────────────────────────
+    connected_case_ids = [c["case_id"].lower() for c in connected_cases]
+    if user.role in (Role.ACCUSED_USER, Role.FAMILY_GUARDIAN):
+        if user.linked_case_id and user.linked_case_id.lower() not in connected_case_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You are only authorized to view your own case dossier.",
+            )
+    elif user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        user_full = (user.full_name or "").lower()
+        is_assigned = any(
+            c["case_id"] == user.linked_case_id
+            or (c.get("assigned_lawyer") and (c["assigned_lawyer"] == user.id or (user_full and user_full in c["assigned_lawyer"].lower())))
+            for c in connected_cases
+        )
+        if not is_assigned:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Defense advocates may only access explicitly assigned accused profiles.",
+            )
+
     # ABAC Medical Data Quarantining
+
     if not _has_medical_access(user):
         if result.get("medical_record"):
             result["medical_record"] = {
@@ -226,8 +248,38 @@ def get_accused_timeline(accused_id: str, user: AuthUser) -> List[Dict[str, Any]
     No hardcoded dates, names, or record IDs.
     """
     accused_id = accused_id.strip()
+    if user.role in (Role.ACCUSED_USER, Role.FAMILY_GUARDIAN):
+        clean_req = accused_id.lower().replace("acc_", "").replace("_", "-")
+        if user.linked_case_id and clean_req != user.linked_case_id.lower().replace("_", "-"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You are only authorized to view your own case timeline.",
+            )
+    elif user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        user_full = (user.full_name or "").lower()
+        clean_needle = accused_id.lower().replace("acc_", "").replace("_", "-")
+        from app.database import get_all_cases
+        all_cases = get_all_cases()
+        matching_cases = [
+            c for c in all_cases
+            if c.case_id.lower().replace("_", "-") == clean_needle
+            or ("acc_" + c.case_id.lower().replace("-", "_")) == accused_id.lower()
+        ]
+        is_assigned = any(
+            (c.assigned_lawyer_id and c.assigned_lawyer_id == user.id)
+            or (getattr(c, "assigned_lawyer", None) and user_full and user_full in c.assigned_lawyer.lower())
+            or (user.linked_case_id and c.case_id == user.linked_case_id)
+            for c in matching_cases
+        )
+        if not is_assigned:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Defense advocates may only access timelines of assigned accused individuals.",
+            )
+
     from app.database import get_db_connection, get_all_cases
     from app.agents.eligibility_agent import evaluate_eligibility
+
 
     timeline: List[Dict[str, Any]] = []
     court_cases_rows = custody_rows = doc_rows = audit_rows = []

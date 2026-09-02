@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { AlertCircle, Scan, Lock, CheckCircle2, RefreshCw } from "lucide-react";
+import { AlertCircle, Scan, Lock, CheckCircle2, RefreshCw, ShieldCheck } from "lucide-react";
 import { fetchEvidence, verifyEvidence } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 interface EvidenceItem {
   id: string;
@@ -18,6 +19,10 @@ interface EvidenceItem {
 }
 
 export function EvidencePage() {
+  const { hasRole } = useAuth();
+  // DLSA officers, Supervisors, Platform Admins, Gov Admins, and Jail Officers can trigger cryptographic hash re-verification.
+  const canVerify = hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "PLATFORM_ADMIN", "GOV_ADMIN", "JAIL_OFFICER");
+
   const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
@@ -67,13 +72,13 @@ export function EvidencePage() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="px-2.5 py-0.5 rounded-sm text-xs font-semibold bg-accent/10 text-accent border border-accent/20">
-              AI Verification Engine
+              Hash & Record Integrity Verification
             </span>
-            <span className="text-xs text-muted-foreground font-mono">Chain-of-Custody Authenticity Check</span>
+            <span className="text-xs text-muted-foreground font-mono">Hash Integrity & Chain-of-Custody Status</span>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-primary">Evidence & Record Verification</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-primary">Evidence & Record Integrity</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Automated verification of remand orders, police arrest logs, and legal documentation integrity.
+            Cryptographic hash comparison of remand orders, arrest logs, and legal documentation integrity. Verifies file byte-level integrity, not judicial authentication.
           </p>
         </div>
 
@@ -88,7 +93,7 @@ export function EvidencePage() {
       {/* Grid */}
       {loading ? (
         <div className="p-16 text-center text-muted-foreground animate-pulse">
-          Running AI authenticity verification scan...
+          Running cryptographic hash verification scan...
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -116,7 +121,7 @@ export function EvidencePage() {
                   ) : (
                     <AlertCircle className="w-3.5 h-3.5" />
                   )}
-                  {item.authenticity_score}% Match
+                  {item.authenticity_score}% Hash Match
                 </span>
               </div>
 
@@ -160,14 +165,20 @@ export function EvidencePage() {
                   </span>
                 )}
 
-                <button
-                  onClick={() => handleVerify(item.id)}
-                  disabled={verifyingId === item.id}
-                  className="px-3.5 py-1.5 bg-accent text-accent-foreground font-semibold rounded text-xs hover:opacity-90 transition-opacity flex items-center gap-1.5"
-                >
-                  <Scan className={`w-3.5 h-3.5 ${verifyingId === item.id ? "animate-spin" : ""}`} />
-                  {verifyingId === item.id ? "Scanning..." : "Re-Verify Record"}
-                </button>
+                {canVerify ? (
+                  <button
+                    onClick={() => handleVerify(item.id)}
+                    disabled={verifyingId === item.id}
+                    className="px-3.5 py-1.5 bg-accent text-accent-foreground font-semibold rounded text-xs hover:opacity-90 transition-opacity flex items-center gap-1.5"
+                  >
+                    <Scan className={`w-3.5 h-3.5 ${verifyingId === item.id ? "animate-spin" : ""}`} />
+                    {verifyingId === item.id ? "Scanning..." : "Re-Verify Record"}
+                  </button>
+                ) : (
+                  <span className="px-3 py-1.5 bg-muted text-muted-foreground text-xs font-mono font-bold rounded border border-border flex items-center gap-1.5" title="Evidence verification requires Supervisory Legal Officer or Advocate authorization">
+                    <ShieldCheck className="w-3.5 h-3.5" /> View Only
+                  </span>
+                )}
               </div>
             </div>
           ))}

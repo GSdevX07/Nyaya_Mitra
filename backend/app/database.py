@@ -95,7 +95,9 @@ def _build_initial_hero_cases() -> List[CaseRecord]:
             relative_relation="Father",
             relative_phone="+91 98765 11001",
             permanent_address="Plot 42, Gandhi Nagar, Sector 4, Chennai, TN - 600001",
-            assignment_status="AVAILABLE",
+            assignment_status="ASSIGNED",
+            assigned_lawyer_id="demo_advocate",
+            assigned_lawyer="Adv. Rajesh Sharma (Demo)",
             data_source_status=DataSourceStatus.DEMO_SYNTHETIC,
             legal_needs=[
                 LegalNeedItem(
@@ -185,6 +187,8 @@ def _build_initial_hero_cases() -> List[CaseRecord]:
             relative_phone="+91 98765 77007",
             permanent_address="Flat 12B, Old City Suburb, Jaipur, RJ - 302001",
             assignment_status="AVAILABLE",
+            assigned_lawyer_id=None,
+            assigned_lawyer=None,
             data_source_status=DataSourceStatus.DEMO_SYNTHETIC,
             legal_needs=[
                 LegalNeedItem(
@@ -265,6 +269,8 @@ def _build_initial_hero_cases() -> List[CaseRecord]:
             relative_phone="+91 98765 15015",
             permanent_address="Village Rampur, Post Office Sub-Jail Zone, Lucknow, UP - 226001",
             assignment_status="AVAILABLE",
+            assigned_lawyer_id=None,
+            assigned_lawyer=None,
             data_source_status=DataSourceStatus.DEMO_SYNTHETIC,
             legal_needs=[
                 LegalNeedItem(
@@ -935,9 +941,23 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
             file_hash TEXT,
             file_size_bytes INTEGER DEFAULT 0,
             mime_type TEXT,
+            source_authority TEXT DEFAULT 'INSTITUTIONAL',
+            uploaded_by TEXT,
+            document_status TEXT DEFAULT 'PENDING_VERIFICATION',
+            authoritative_source INTEGER DEFAULT 0,
             uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("PRAGMA table_info(uploaded_documents)")
+    up_cols = {col[1] for col in cursor.fetchall()}
+    if "source_authority" not in up_cols:
+        cursor.execute("ALTER TABLE uploaded_documents ADD COLUMN source_authority TEXT DEFAULT 'INSTITUTIONAL'")
+    if "uploaded_by" not in up_cols:
+        cursor.execute("ALTER TABLE uploaded_documents ADD COLUMN uploaded_by TEXT")
+    if "document_status" not in up_cols:
+        cursor.execute("ALTER TABLE uploaded_documents ADD COLUMN document_status TEXT DEFAULT 'PENDING_VERIFICATION'")
+    if "authoritative_source" not in up_cols:
+        cursor.execute("ALTER TABLE uploaded_documents ADD COLUMN authoritative_source INTEGER DEFAULT 0")
 
     # 8. Notifications & Immutable Audit Log
     cursor.execute("""
@@ -1364,8 +1384,8 @@ def init_db():
                 )
             else:
                 cursor.execute(
-                    "UPDATE cases SET data = ?, status = ? WHERE case_id = ?",
-                    (c.model_dump_json(), c.status.value, c.case_id),
+                    "UPDATE cases SET data = ?, status = ?, assignment_status = ?, assigned_lawyer_id = ? WHERE case_id = ?",
+                    (c.model_dump_json(), c.status.value, c.assignment_status, c.assigned_lawyer_id, c.case_id),
                 )
 
         # Seed identity merge candidates from real case data (replaces _DEMO_DUPLICATE_CANDIDATES)
@@ -1402,6 +1422,18 @@ def init_db():
 
         conn.commit()
         conn.close()
+
+        # Sync hero cases to Supabase if active
+        try:
+            from app.supabase_adapter import is_supabase_active, supa_upsert_legacy_case
+            if is_supabase_active():
+                for c in hero_cases:
+                    try:
+                        supa_upsert_legacy_case(c.case_id, c.model_dump(), c.status.value, c.assignment_status, c.assigned_lawyer_id)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     except Exception as e:
         print(f"[WARN] SQLite init_db failed: {e}")
@@ -1939,8 +1971,8 @@ def _seed_governed_legal_sources(cursor) -> None:
         {
             "id": "NOTIF-JAIL-01",
             "case_id": "UTP-0007",
-            "title": "Section 479(2) BNSS Mandatory Bail Application Required",
-            "message": "Undertrial prisoner Ramesh Kumar (UTP-0007) has completed 1/3rd sentence duration as a first-time offender. Superintendent application to Court required forthwith.",
+            "title": "Section 479(2) BNSS Potential Threshold Reached — Review Required",
+            "message": "Undertrial prisoner Ramesh Kumar (UTP-0007) has reached 1/3rd detention threshold. Refer custody records to DLSA for legal-aid review and representation coordination.",
             "type": "urgent",
             "target_role": "JAIL_OFFICER",
         },
@@ -2523,6 +2555,10 @@ def store_uploaded_document(
     file_hash: str,
     file_size_bytes: int,
     mime_type: str,
+    source_authority: str = "INSTITUTIONAL",
+    uploaded_by: Optional[str] = None,
+    document_status: str = "PENDING_VERIFICATION",
+    authoritative_source: bool = False,
 ) -> str:
     """Persist uploaded document metadata and extracted text."""
     import hashlib
@@ -2541,6 +2577,10 @@ def store_uploaded_document(
         "file_hash": file_hash,
         "file_size_bytes": file_size_bytes,
         "mime_type": mime_type,
+        "source_authority": source_authority,
+        "uploaded_by": uploaded_by,
+        "document_status": document_status,
+        "authoritative_source": int(authoritative_source),
         "uploaded_at": created_at,
     }
     _MEMORY_UPLOADED_DOCS.append(record)
@@ -2550,11 +2590,12 @@ def store_uploaded_document(
         cursor = conn.cursor()
         cursor.execute(
             """INSERT OR REPLACE INTO uploaded_documents 
-               (id, case_id, document_type, file_name, extracted_text, custom_text, is_handwritten, ocr_engine, file_hash, file_size_bytes, mime_type, uploaded_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, case_id, document_type, file_name, extracted_text, custom_text, is_handwritten, ocr_engine, file_hash, file_size_bytes, mime_type, source_authority, uploaded_by, document_status, authoritative_source, uploaded_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 stable_id, case_id, document_type, file_name, extracted_text, custom_text,
-                int(is_handwritten), ocr_engine, file_hash, file_size_bytes, mime_type, created_at,
+                int(is_handwritten), ocr_engine, file_hash, file_size_bytes, mime_type,
+                source_authority, uploaded_by, document_status, int(authoritative_source), created_at,
             ),
         )
         conn.commit()
@@ -2626,6 +2667,16 @@ def add_notification(
         conn.close()
     except Exception as e:
         print(f"[WARN] SQLite add_notification error: {e}")
+
+    # Supabase sync if active
+    try:
+        from app.supabase_adapter import is_supabase_active, supa_add_notification
+        if is_supabase_active():
+            supa_rec = dict(record)
+            supa_rec["is_read"] = False
+            supa_add_notification(supa_rec)
+    except Exception as e:
+        print(f"[WARN] Supabase add_notification error: {e}")
 
     return notif_id
 

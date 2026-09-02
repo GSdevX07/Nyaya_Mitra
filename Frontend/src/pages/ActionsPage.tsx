@@ -15,13 +15,86 @@ interface ActionItem {
 }
 
 export function ActionsPage() {
-  const { hasRole } = useAuth();
+  const { hasRole, user } = useAuth();
   const [actions, setActions] = useState<ActionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
   const [executedIds, setExecutedIds] = useState<Set<string>>(new Set());
 
+  const isDlsa = user?.role === "DLSA_OFFICER";
+  const isSupervisor = user?.role === "SUPERVISING_LEGAL_OFFICER";
+  const isAdvocate = user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE";
+
+  // DLSA officers may dispatch institutional and procedural notices only.
+  const DLSA_PERMITTED_ACTION_TYPES = [
+    "MISSING_DOCUMENT",
+    "DOCUMENT_REQUEST",
+    "LEGAL_AID",
+    "DLSA",
+    "SECTION_479",
+    "REMAND",
+    "PANEL",
+    "FOLLOWUP",
+    "INSTITUTIONAL",
+    "ADVOCATE_ASSIGN",
+    "NOTIFY",
+  ];
+
+  // Supervising Legal Officers execute supervisory escalation, compliance review,
+  // approval queue, and institutional follow-up actions.
+  // They may NOT execute direct judicial determinations, court filing, or police/jail custody tasks.
+  const SUPERVISOR_PERMITTED_ACTION_TYPES = [
+    "ESCALATION",
+    "REVIEW",
+    "COMPLIANCE",
+    "CORRECTION",
+    "APPROVAL",
+    "SECTION_479",
+    "LEGAL_AID",
+    "MISSING_DOCUMENT",
+    "DOCUMENT_REQUEST",
+    "PANEL",
+    "NOTIFY",
+    "FOLLOWUP",
+    "INSTITUTIONAL",
+  ];
+
+  // Defense advocates may dispatch counsel actions related to their assigned cases:
+  // bail applications, document requests, legal briefs, and petition drafting.
+  const ADVOCATE_PERMITTED_ACTION_TYPES = [
+    "BAIL",
+    "DOCS",
+    "REVIEW",
+    "CORRECTION",
+    "LEGAL_NOTE",
+    "PETITION",
+  ];
+
   const canExecute = hasRole("DLSA_OFFICER", "SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN", "DEFENSE_ADVOCATE");
+
+  // Allow dispatch for permitted action types per role
+  const canDispatchAction = (act: ActionItem): boolean => {
+    if (!canExecute) return false;
+    if (isDlsa) {
+      return DLSA_PERMITTED_ACTION_TYPES.some((allowed) =>
+        act.action_type.toUpperCase().includes(allowed) ||
+        act.description.toUpperCase().includes(allowed)
+      );
+    }
+    if (isSupervisor) {
+      return SUPERVISOR_PERMITTED_ACTION_TYPES.some((allowed) =>
+        act.action_type.toUpperCase().includes(allowed) ||
+        act.description.toUpperCase().includes(allowed)
+      );
+    }
+    if (isAdvocate) {
+      return ADVOCATE_PERMITTED_ACTION_TYPES.some((allowed) =>
+        act.action_type.toUpperCase().includes(allowed) ||
+        act.description.toUpperCase().includes(allowed)
+      );
+    }
+    return true; // Platform Admins
+  };
 
   const loadActions = async () => {
     setLoading(true);
@@ -99,7 +172,7 @@ export function ActionsPage() {
                   View Case <ArrowRight className="w-3 h-3" />
                 </Link>
 
-                {canExecute ? (
+                {canDispatchAction(act) ? (
                   <button
                     onClick={() => handleTrigger(act.id)}
                     disabled={triggeringId === act.id || executedIds.has(act.id)}
@@ -122,6 +195,27 @@ export function ActionsPage() {
                       ? "Dispatching..."
                       : "Dispatch Action"}
                   </button>
+                ) : isAdvocate ? (
+                  <span
+                    className="px-3 py-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-mono font-bold rounded border border-amber-500/30 flex items-center gap-1.5"
+                    title="This action requires institutional or supervisory authority"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" /> Institutional Action Only
+                  </span>
+                ) : isSupervisor ? (
+                  <span
+                    className="px-3 py-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-mono font-bold rounded border border-amber-500/30 flex items-center gap-1.5"
+                    title="This action type requires Court or Originating Institutional authority"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" /> Judicial/Originating Auth Required
+                  </span>
+                ) : isDlsa ? (
+                  <span
+                    className="px-3 py-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-mono font-bold rounded border border-amber-500/30 flex items-center gap-1.5"
+                    title="This action type requires Supervisory Legal Officer or Court authorization"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" /> Supervisor Auth Required
+                  </span>
                 ) : (
                   <span className="px-3 py-1.5 bg-muted text-muted-foreground text-xs font-mono font-bold rounded border border-border flex items-center gap-1.5">
                     <ShieldCheck className="w-3.5 h-3.5" /> Read-Only View

@@ -18,6 +18,7 @@ import {
   Hash,
 } from "lucide-react";
 import { fetchDocuments, uploadDocumentFile } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 interface DocItem {
   id: string;
@@ -69,6 +70,12 @@ function getFileTypeIcon(file: File) {
 }
 
 export function DocumentsPage() {
+  const { user } = useAuth();
+  const isSupervisor = user?.role === "SUPERVISING_LEGAL_OFFICER";
+  const isAdvocate = user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE";
+  const isPolice = user?.role === "POLICE_OFFICER";
+  const isJail = user?.role === "JAIL_OFFICER";
+
   const [docs, setDocs] = useState<DocItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -363,14 +370,51 @@ export function DocumentsPage() {
                     value={uploadDocType}
                     onChange={(e) => setUploadDocType(e.target.value)}
                     className="w-full px-3 py-2.5 bg-secondary/50 border border-border rounded-xl text-primary text-sm focus:outline-none focus:border-accent/60 transition-colors"
+                    required
                   >
                     <option value="" disabled className="bg-card">Select a Document Type</option>
-                    <option value="charge_sheet" className="bg-card">Charge Sheet</option>
-                    <option value="remand_order" className="bg-card">Remand Order</option>
-                    <option value="prior_bail_order_if_any" className="bg-card">Prior Bail Order</option>
-                    <option value="medical_certificate" className="bg-card">Medical Certificate</option>
-                    <option value="identity_proof" className="bg-card">Identity Proof</option>
-                    <option value="other" className="bg-card">Other Document</option>
+                    {isSupervisor ? (
+                      <>
+                        <option value="supervisory_review_note" className="bg-card">Supervisory Review Note</option>
+                        <option value="legal_brief" className="bg-card">Legal Governance Brief</option>
+                        <option value="compliance_memo" className="bg-card">Compliance Memorandum</option>
+                        <option value="statutory_exception_declaration" className="bg-card">Statutory Exception Declaration</option>
+                        <option value="other" className="bg-card">Other Oversight Document</option>
+                      </>
+                    ) : isAdvocate ? (
+                      <>
+                        <option value="legal_brief" className="bg-card">Counsel Representation / Vakalatnama</option>
+                        <option value="prior_bail_order_if_any" className="bg-card">Prior Bail Order</option>
+                        <option value="medical_certificate" className="bg-card">Medical Records</option>
+                        <option value="identity_proof" className="bg-card">Identity Proof</option>
+                        <option value="other" className="bg-card">Other Document</option>
+                      </>
+                    ) : isPolice ? (
+                      <>
+                        <option value="charge_sheet" className="bg-card">Charge Sheet</option>
+                        <option value="remand_order" className="bg-card">Remand Application / Order</option>
+                        <option value="fir_copy" className="bg-card">FIR Copy</option>
+                        <option value="identity_proof" className="bg-card">Arrest Memo / Identity Proof</option>
+                        <option value="other" className="bg-card">Other Police Record</option>
+                      </>
+                    ) : isJail ? (
+                      <>
+                        <option value="remand_order" className="bg-card">Judicial Remand Order</option>
+                        <option value="custody_certificate" className="bg-card">Custody Certificate</option>
+                        <option value="medical_certificate" className="bg-card">Prison Medical Screening</option>
+                        <option value="other" className="bg-card">Other Intake Record</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="charge_sheet" className="bg-card">Charge Sheet</option>
+                        <option value="remand_order" className="bg-card">Remand Order</option>
+                        <option value="prior_bail_order_if_any" className="bg-card">Prior Bail Order</option>
+                        <option value="medical_certificate" className="bg-card">Medical Certificate</option>
+                        <option value="identity_proof" className="bg-card">Identity Proof</option>
+                        <option value="supervisory_review_note" className="bg-card">Supervisory Review Note</option>
+                        <option value="other" className="bg-card">Other Document</option>
+                      </>
+                    )}
                   </select>
                 </div>
               </div>

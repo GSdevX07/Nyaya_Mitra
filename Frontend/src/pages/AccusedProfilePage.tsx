@@ -126,6 +126,19 @@ export const AccusedProfilePage: React.FC = () => {
     }
   }, [accusedId, token]);
 
+  const backRoute =
+    user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE"
+      ? "/advocate"
+      : user?.role === "POLICE_OFFICER"
+      ? "/police"
+      : user?.role === "JAIL_OFFICER"
+      ? "/jail"
+      : user?.role === "ACCUSED_USER"
+      ? "/my-case"
+      : user?.role === "FAMILY_GUARDIAN"
+      ? "/family/status"
+      : "/cases";
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -140,8 +153,8 @@ export const AccusedProfilePage: React.FC = () => {
         <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-3" />
         <h2 className="text-xl font-bold">Accused Profile Not Found</h2>
         <p className="text-muted-foreground mt-1">No consolidated records located for identifier: {accusedId}</p>
-        <Link to="/cases" className="mt-4 inline-flex items-center gap-2 text-primary hover:underline text-sm font-medium">
-          <ArrowLeft className="h-4 w-4" /> Return to Cases Ledger
+        <Link to={backRoute} className="mt-4 inline-flex items-center gap-2 text-primary hover:underline text-sm font-medium">
+          <ArrowLeft className="h-4 w-4" /> Return to Matters
         </Link>
       </div>
     );
@@ -156,8 +169,8 @@ export const AccusedProfilePage: React.FC = () => {
     <div className="space-y-8 pb-16 max-w-7xl mx-auto text-base">
       {/* Back Navigation & Breadcrumb — Enlarged */}
       <div className="flex items-center justify-between">
-        <Link to="/cases" className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
-          <ArrowLeft className="h-4 w-4" /> Back to Case Master
+        <Link to={backRoute} className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="h-4 w-4" /> Back to Dashboard / Workspace
         </Link>
         <div className="flex items-center gap-3">
           <span className="text-xs px-3 py-1.5 rounded-full font-mono font-bold bg-secondary border border-border text-foreground shadow-sm">

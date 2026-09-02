@@ -102,8 +102,6 @@ function App() {
                     allowedRoles={[
                       "JAIL_OFFICER",
                       "PLATFORM_ADMIN",
-                      "DLSA_OFFICER",
-                      "SUPERVISING_LEGAL_OFFICER",
                       "GOV_ADMIN",
                     ]}
                   >
@@ -119,8 +117,6 @@ function App() {
                       "DEFENSE_ADVOCATE",
                       "CONTROLLED_EXTERNAL_ADVOCATE",
                       "PLATFORM_ADMIN",
-                      "SUPERVISING_LEGAL_OFFICER",
-                      "DLSA_OFFICER",
                     ]}
                   >
                     <AdvocateWorkspace />
@@ -135,8 +131,6 @@ function App() {
                       "POLICE_OFFICER",
                       "PLATFORM_ADMIN",
                       "GOV_ADMIN",
-                      "DLSA_OFFICER",
-                      "SUPERVISING_LEGAL_OFFICER",
                     ]}
                   >
                     <PoliceWorkspace />
@@ -154,16 +148,13 @@ function App() {
                       "SUPERVISING_LEGAL_OFFICER",
                       "PLATFORM_ADMIN",
                       "GOV_ADMIN",
-                      "JAIL_OFFICER",
-                      "POLICE_OFFICER",
-                      "DEFENSE_ADVOCATE",
-                      "READ_ONLY_AUDITOR",
                     ]}
                   >
                     <CommandCenter />
                   </ProtectedRoute>
                 }
               />
+
               <Route
                 path="/case/:id"
                 element={
@@ -303,6 +294,8 @@ function App() {
                       "JAIL_OFFICER",
                       "POLICE_OFFICER",
                       "DEFENSE_ADVOCATE",
+                      "CONTROLLED_EXTERNAL_ADVOCATE",
+                      "READ_ONLY_AUDITOR",
                     ]}
                   >
                     <DocumentsPage />
@@ -318,9 +311,10 @@ function App() {
                       "SUPERVISING_LEGAL_OFFICER",
                       "PLATFORM_ADMIN",
                       "GOV_ADMIN",
-                      "JAIL_OFFICER",
                       "POLICE_OFFICER",
                       "DEFENSE_ADVOCATE",
+                      "CONTROLLED_EXTERNAL_ADVOCATE",
+                      "READ_ONLY_AUDITOR",
                     ]}
                   >
                     <DocumentAssessmentPage />
@@ -368,7 +362,9 @@ function App() {
                       "PLATFORM_ADMIN",
                       "GOV_ADMIN",
                       "DEFENSE_ADVOCATE",
+                      "CONTROLLED_EXTERNAL_ADVOCATE",
                       "JAIL_OFFICER",
+                      "POLICE_OFFICER",
                     ]}
                   >
                     <HearingsPage />

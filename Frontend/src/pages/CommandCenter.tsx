@@ -1,35 +1,50 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import {
-  Building2,
   Scale,
   Shield,
-  Briefcase,
-  AlertTriangle,
-  Clock,
   ChevronRight,
   Loader2,
   RefreshCw,
   UserCheck,
 } from "lucide-react";
+
 import { fetchStakeholdersOverview, fetchCases, type CaseRecord } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
-type StakeholderRole = "jail" | "dlsa" | "slsa" | "advocate";
-
-function getInitialStakeholderRole(role?: string): StakeholderRole {
-  if (role === "JAIL_OFFICER") return "jail";
-  if (role === "DEFENSE_ADVOCATE" || role === "CONTROLLED_EXTERNAL_ADVOCATE") return "advocate";
-  if (role === "GOV_ADMIN" || role === "READ_ONLY_AUDITOR") return "slsa";
-  return "dlsa";
-}
-
 export function CommandCenter() {
   const { user } = useAuth();
-  const [role, setRole] = useState<StakeholderRole>(() => getInitialStakeholderRole(user?.role));
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<any>(null);
   const [cases, setCases] = useState<CaseRecord[]>([]);
+
+  // ── Role Redirection for Specialized Workspaces ───────────────────────────
+  // Roles with dedicated workspaces must not view institutional command center
+  if (user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE") {
+    return <Navigate to="/advocate" replace />;
+  }
+  if (user?.role === "JAIL_OFFICER") {
+    return <Navigate to="/jail" replace />;
+  }
+  if (user?.role === "POLICE_OFFICER") {
+    return <Navigate to="/police" replace />;
+  }
+  if (user?.role === "READ_ONLY_AUDITOR") {
+    return <Navigate to="/audit" replace />;
+  }
+  if (user?.role === "PLATFORM_ADMIN") {
+    return <Navigate to="/admin" replace />;
+  }
+  if (user?.role === "ACCUSED_USER") {
+    return <Navigate to="/my-case" replace />;
+  }
+  if (user?.role === "FAMILY_GUARDIAN") {
+    return <Navigate to="/family/status" replace />;
+  }
+
+  const isSupervisor = user?.role === "SUPERVISING_LEGAL_OFFICER";
+  const isGovAdmin = user?.role === "GOV_ADMIN";
+  const isDlsa = !isSupervisor && !isGovAdmin; // Default to DLSA_OFFICER
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -55,76 +70,55 @@ export function CommandCenter() {
   const undertrials = cases.filter(
     (c) => (!c.prisoner_category || c.prisoner_category === "UNDERTRIAL") && c.status !== "POST_RELEASE_PRESERVED"
   );
-  const convicted = cases.filter((c) => c.prisoner_category === "CONVICTED");
-  const postRelease = cases.filter(
-    (c) => c.status === "POST_RELEASE_PRESERVED" || c.status === "RELEASED"
-  );
+
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
-      {/* Header & Role Switcher */}
+      {/* Header with Authenticated Role Clearance Badge (No manual role switching) */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-border pb-6">
         <div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground">
-              Multi-Stakeholder Legal Operations
+              {isSupervisor
+                ? "Supervisory Legal Operations"
+                : isGovAdmin
+                ? "State Legal Services Authority (SLSA)"
+                : "District Legal Aid Coordination"}
             </span>
             <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-primary/10 text-primary border border-primary/20">
-              Institutional Visibility
+              {user?.role}
             </span>
           </div>
           <h1 className="text-2xl md:text-3xl font-bold font-serif text-foreground mt-1">
-            Nyaya Mitra Command Center
+            {isSupervisor
+              ? "Supervisory Legal Operations Command"
+              : isGovAdmin
+              ? "SLSA State Institutional Overview"
+              : "DLSA Remand & Legal Aid Command Center"}
           </h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Coordinating legal services across Prisons, Remand Courts, DLSAs, SLSAs, and Legal Aid Advocates.
+            {isSupervisor
+              ? "Supervising DLSA caseloads, exception handling, SLA monitoring, and legal knowledge governance."
+              : isGovAdmin
+              ? "State-level oversight, district performance monitoring, and compliance tracking."
+              : "Managing undertrial triage, Section 479 BNSS signals, remand court first-production, and panel assignments."}
           </p>
         </div>
 
-        {/* Stakeholder Role Selector */}
-        <div className="flex items-center gap-1.5 p-1 bg-secondary border border-border rounded-sm">
-          <button
-            onClick={() => setRole("dlsa")}
-            className={`px-3 py-1.5 rounded-sm text-xs font-semibold font-serif flex items-center gap-1.5 transition-all ${
-              role === "dlsa"
-                ? "bg-card text-foreground shadow-sm font-bold"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Scale className="w-3.5 h-3.5 text-primary" /> DLSA Remand Desk
-          </button>
-          <button
-            onClick={() => setRole("jail")}
-            className={`px-3 py-1.5 rounded-sm text-xs font-semibold font-serif flex items-center gap-1.5 transition-all ${
-              role === "jail"
-                ? "bg-card text-foreground shadow-sm font-bold"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Building2 className="w-3.5 h-3.5 text-primary" /> Jail Operations
-          </button>
-          <button
-            onClick={() => setRole("advocate")}
-            className={`px-3 py-1.5 rounded-sm text-xs font-semibold font-serif flex items-center gap-1.5 transition-all ${
-              role === "advocate"
-                ? "bg-card text-foreground shadow-sm font-bold"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Briefcase className="w-3.5 h-3.5 text-primary" /> Defence Counsel
-          </button>
-          <button
-            onClick={() => setRole("slsa")}
-            className={`px-3 py-1.5 rounded-sm text-xs font-semibold font-serif flex items-center gap-1.5 transition-all ${
-              role === "slsa"
-                ? "bg-card text-foreground shadow-sm font-bold"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Shield className="w-3.5 h-3.5 text-primary" /> SLSA Supervisory
-          </button>
+        {/* Authenticated Identity Clearance Indicator */}
+        <div className="flex items-center gap-2 px-3.5 py-2 bg-secondary/70 border border-border rounded-sm shadow-sm">
+          <Shield className="w-4 h-4 text-primary shrink-0" />
+          <div>
+            <div className="text-[10px] uppercase tracking-wider font-mono font-bold text-muted-foreground">
+              Authenticated Scope
+            </div>
+            <div className="text-xs font-serif font-bold text-foreground">
+              {user?.full_name || "Authorized Officer"}
+            </div>
+          </div>
         </div>
       </div>
+
 
       {loading ? (
         <div className="p-12 flex flex-col items-center justify-center min-h-[40vh] gap-3">
@@ -186,8 +180,8 @@ export function CommandCenter() {
             </div>
           </div>
 
-          {/* VIEW 1: DLSA REMAND & FIRST PRODUCTION QUEUE */}
-          {role === "dlsa" && (
+          {/* VIEW 1: DLSA REMAND & LEGAL AID OPERATIONS */}
+          {isDlsa && (
             <div className="space-y-6">
               <div className="p-5 border border-primary/20 bg-primary/5 rounded-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
@@ -286,159 +280,156 @@ export function CommandCenter() {
             </div>
           )}
 
-          {/* VIEW 2: JAIL OPERATIONS VIEW */}
-          {role === "jail" && (
+          {/* VIEW 2: SUPERVISORY LEGAL OPERATIONS & GOVERNANCE */}
+          {isSupervisor && (
             <div className="space-y-6">
-              <div className="p-5 border border-primary/20 bg-primary/5 rounded-sm">
-                <h2 className="font-bold font-serif text-base text-foreground">
-                  Jail Administration & Custody Records Coordination
-                </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Timely / near-real-time visibility into legal-assistance and advocate requirements where institutional data is connected.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="p-5 border border-border bg-card rounded-sm space-y-4">
-                  <h3 className="text-sm font-bold font-serif uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-primary" /> Undertrial Detention & Delay Exclusions
-                  </h3>
-                  <div className="space-y-3 text-xs">
-                    {undertrials.map((c) => (
-                      <div key={c.case_id} className="p-3 rounded bg-secondary/30 border border-border/60 flex justify-between items-center">
-                        <div>
-                          <span className="font-bold text-foreground">{c.name}</span> ({c.case_id})
-                          <p className="text-muted-foreground text-[11px] mt-0.5">
-                            Calendar Time: {c.custody_days}d | Attributable Delay Excluded: {c.excluded_delay_days || 0}d
-                          </p>
-                        </div>
-                        <span className="text-xs font-mono font-bold text-primary">
-                          {c.custody_days - (c.excluded_delay_days || 0)}d countable
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+              <div className="p-5 border border-primary/20 bg-primary/5 rounded-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h2 className="font-bold font-serif text-base text-foreground">
+                    Supervisory Legal Operations Command — Escalation & Governance Desk
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Oversight of Section 479 BNSS eligibility determinations, citation validation escalations, panel lawyer performance, and legal knowledge governance.
+                  </p>
                 </div>
-
-                <div className="p-5 border border-border bg-card rounded-sm space-y-4">
-                  <h3 className="text-sm font-bold font-serif uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-amber-500" /> Pending Remand / Chargesheet Records
-                  </h3>
-                  <div className="space-y-3 text-xs">
-                    {cases
-                      .filter((c) => (c.required_docs?.length || 0) > (c.present_docs?.length || 0))
-                      .map((c) => (
-                        <div key={c.case_id} className="p-3 rounded bg-amber-500/5 border border-amber-500/20 space-y-1.5">
-                          <div className="flex justify-between">
-                            <span className="font-bold text-foreground">{c.name} ({c.case_id})</span>
-                            <span className="font-mono text-[10px] text-amber-600 uppercase font-bold">Document Block</span>
-                          </div>
-                          <p className="text-muted-foreground text-[11px]">
-                            Missing from record:{" "}
-                            <strong className="text-foreground">
-                              {c.required_docs
-                                ?.filter((d: string) => !c.present_docs?.includes(d))
-                                .join(", ")
-                                .toUpperCase()}
-                            </strong>
-                          </p>
-                        </div>
-                      ))}
-                  </div>
+                <div className="flex items-center gap-2">
+                  <Link
+                    to="/legal-sources"
+                    className="px-3 py-1.5 bg-primary text-primary-foreground text-xs font-serif font-semibold rounded-sm flex items-center gap-1.5 hover:opacity-90"
+                  >
+                    <Scale className="w-3.5 h-3.5" /> Legal Governance
+                  </Link>
+                  <button
+                    onClick={loadData}
+                    className="px-3 py-1.5 border border-border rounded-sm bg-card hover:bg-secondary text-xs font-semibold flex items-center gap-1.5 shrink-0"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Refresh
+                  </button>
                 </div>
               </div>
-            </div>
-          )}
 
-          {/* VIEW 3: DEFENCE COUNSEL / LEGAL AID ADVOCATE WORKSPACE */}
-          {role === "advocate" && (
-            <div className="space-y-6">
-              <div className="p-5 border border-primary/20 bg-primary/5 rounded-sm">
-                <h2 className="font-bold font-serif text-base text-foreground">
-                  Legal Aid Defence Counsel Briefing Workspace
-                </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Assigned cases, AI-grounded draft Section 479 petitions, evidence verification, and filing registry.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 border border-border rounded-sm bg-card overflow-hidden">
-                  <div className="p-4 border-b border-border bg-secondary/40 font-bold font-serif text-xs uppercase tracking-wider text-muted-foreground">
-                    Assigned Undertrial Matters
+              {/* Supervisory Key Panels */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="p-5 border border-border bg-card rounded-sm space-y-3">
+                  <span className="text-xs font-mono text-muted-foreground uppercase font-bold block">
+                    Pending Supervisory Sign-Offs
+                  </span>
+                  <div className="text-2xl font-bold font-serif text-amber-600">
+                    {cases.filter((c) => c.status === "APPROVED_READY_FOR_FILING" || c.status === "LAWYER_REVIEW").length}
                   </div>
-                  <div className="divide-y divide-border">
-                    {undertrials.map((c) => (
-                      <div key={c.case_id} className="p-4 flex items-center justify-between gap-4 hover:bg-secondary/20">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold font-serif text-sm text-foreground">{c.name}</span>
-                            <span className="text-xs font-mono text-muted-foreground">{c.case_id}</span>
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {c.court_name} • DLSA File: {c.dlsa_reference_number}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <Link
-                            to={`/accused/acc_${c.case_id.toLowerCase().replace("-", "_")}`}
-                            className="px-2.5 py-1.5 bg-secondary hover:bg-muted text-foreground border border-border rounded-sm text-xs font-serif font-semibold flex items-center gap-1 transition-colors"
-                            title="View Accused Dossier"
-                          >
-                            <UserCheck className="w-3.5 h-3.5" /> Profile
-                          </Link>
-                          <Link
-                            to={`/cases/${c.case_id}`}
-                            className="px-3 py-1.5 bg-primary text-primary-foreground rounded-sm text-xs font-serif font-semibold flex items-center gap-1"
-                          >
-                            Open Dossier <ChevronRight className="w-3.5 h-3.5" />
-                          </Link>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Petitions requiring supervisory sign-off before official court filing.
+                  </p>
+                  <Link
+                    to="/actions"
+                    className="inline-flex items-center gap-1 text-xs font-mono font-bold text-primary hover:underline mt-2"
+                  >
+                    Open Approvals Queue <ChevronRight className="w-3.5 h-3.5" />
+                  </Link>
                 </div>
 
-                <div className="space-y-4">
-                  <div className="p-5 border border-border bg-card rounded-sm space-y-3">
-                    <h3 className="text-xs font-mono font-bold uppercase text-muted-foreground">
-                      Human Legal Gateway Rule
-                    </h3>
-                    <p className="text-xs text-foreground/80 leading-relaxed font-sans">
-                      All draft petitions generated by Nyaya Mitra require explicit review and signature by the assigned advocate. The system enforces a mandatory human sign-off gate before marking any matter ready for filing.
-                    </p>
+                <div className="p-5 border border-border bg-card rounded-sm space-y-3">
+                  <span className="text-xs font-mono text-muted-foreground uppercase font-bold block">
+                    Document Bottlenecks
+                  </span>
+                  <div className="text-2xl font-bold font-serif text-rose-600">
+                    {cases.filter((c) => (c.required_docs?.length || 0) > (c.present_docs?.length || 0)).length}
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Cases missing certified remand copies or chargesheets blocking Section 479 relief.
+                  </p>
+                  <Link
+                    to="/documents"
+                    className="inline-flex items-center gap-1 text-xs font-mono font-bold text-primary hover:underline mt-2"
+                  >
+                    Review Incomplete Records <ChevronRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
 
-                  <div className="p-5 border border-border bg-card rounded-sm space-y-3">
-                    <h3 className="text-xs font-mono font-bold uppercase text-muted-foreground">
-                      Appeals & Post-Release Coordination
-                    </h3>
-                    <div className="space-y-2 text-xs">
-                      <div className="flex justify-between border-b border-border/50 pb-1.5">
-                        <span className="text-muted-foreground">Convicted Appeals:</span>
-                        <span className="font-bold font-mono">{convicted.length}</span>
+                <div className="p-5 border border-border bg-card rounded-sm space-y-3">
+                  <span className="text-xs font-mono text-muted-foreground uppercase font-bold block">
+                    Identity Discrepancies
+                  </span>
+                  <div className="text-2xl font-bold font-serif text-foreground">
+                    Active Review
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Cross-facility duplicate candidates and prisoner aliases pending legal resolution.
+                  </p>
+                  <Link
+                    to="/identity-review"
+                    className="inline-flex items-center gap-1 text-xs font-mono font-bold text-primary hover:underline mt-2"
+                  >
+                    Resolve Identity Matches <ChevronRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
+
+              {/* Priority Review Table */}
+              <div className="border border-border rounded-sm bg-card overflow-hidden">
+                <div className="p-4 border-b border-border bg-secondary/40 flex items-center justify-between">
+                  <span className="text-xs font-bold font-serif uppercase tracking-wider text-muted-foreground">
+                    Supervised High-Priority Matters
+                  </span>
+                  <span className="text-xs font-mono text-muted-foreground">
+                    {cases.length} Total Supervised Cases
+                  </span>
+                </div>
+
+                <div className="divide-y divide-border">
+                  {cases.slice(0, 5).map((c) => (
+                    <div
+                      key={c.case_id}
+                      className="p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4 hover:bg-secondary/20 transition-colors"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold font-serif text-sm text-foreground">{c.name}</span>
+                          <span className="text-xs font-mono px-2 py-0.5 rounded bg-primary/10 text-primary font-bold">
+                            {c.case_id}
+                          </span>
+                          <span className="text-xs font-mono text-muted-foreground">
+                            {c.court_name}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Offences: {c.offense_sections?.join(", ")} | Custody: {c.custody_days}d | Status: <strong className="text-foreground">{c.status}</strong>
+                        </p>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Post-Release Records:</span>
-                        <span className="font-bold font-mono">{postRelease.length}</span>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Link
+                          to={`/cases/${c.case_id}`}
+                          className="px-3 py-1.5 bg-primary text-primary-foreground rounded-sm text-xs font-serif font-semibold flex items-center gap-1 hover:opacity-90"
+                        >
+                          Supervise Case <ChevronRight className="w-3.5 h-3.5" />
+                        </Link>
                       </div>
                     </div>
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>
           )}
 
-          {/* VIEW 4: SLSA SUPERVISORY MONITORING */}
-          {role === "slsa" && (
+          {/* VIEW 3: SLSA STATE INSTITUTIONAL OVERVIEW */}
+          {isGovAdmin && (
             <div className="space-y-6">
-              <div className="p-5 border border-primary/20 bg-primary/5 rounded-sm">
-                <h2 className="font-bold font-serif text-base text-foreground">
-                  State Legal Services Authority (SLSA) — Supervisory Overview
-                </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Macro-level monitoring across districts, compliance tracking with Section 479 BNSS, and systemic delay prevention.
-                </p>
+              <div className="p-5 border border-primary/20 bg-primary/5 rounded-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h2 className="font-bold font-serif text-base text-foreground">
+                    State Legal Services Authority (SLSA) — Supervisory Overview
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Macro-level monitoring across districts, compliance tracking with Section 479 BNSS, and systemic delay prevention.
+                  </p>
+                </div>
+                <Link
+                  to="/gov"
+                  className="px-3 py-1.5 bg-primary text-primary-foreground text-xs font-serif font-semibold rounded-sm flex items-center gap-1.5 hover:opacity-90"
+                >
+                  <Shield className="w-3.5 h-3.5" /> Full State Overview
+                </Link>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -476,6 +467,7 @@ export function CommandCenter() {
               </div>
             </div>
           )}
+
         </>
       )}
     </div>

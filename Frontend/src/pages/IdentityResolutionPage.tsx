@@ -40,6 +40,7 @@ export const IdentityResolutionPage: React.FC = () => {
   const [selectedCandidate, setSelectedCandidate] = useState<DuplicateCandidate | null>(null);
   const [resolutionAction, setResolutionAction] = useState<'MERGE_RECORDS' | 'REJECT_MATCH' | 'MARK_AS_ALIAS' | null>(null);
   const [notes, setNotes] = useState('');
+  const [confirmMerge, setConfirmMerge] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
 
@@ -330,25 +331,54 @@ export const IdentityResolutionPage: React.FC = () => {
 
                 {resolutionAction && (
                   <div className="space-y-4 pt-4 border-t border-border">
+                    {resolutionAction === 'MERGE_RECORDS' && (
+                      <div className="p-4 bg-amber-500/10 border-2 border-amber-500/30 rounded-xl space-y-2 text-xs font-mono text-amber-800 dark:text-amber-300">
+                        <div className="font-bold flex items-center gap-2 text-sm uppercase">
+                          <AlertTriangle className="h-4 w-4 text-amber-600" /> High-Impact Identity Mutation Warning
+                        </div>
+                        <p>
+                          Merging under Canonical ID permanently unifies detention dockets, biometric aliases, and criminal histories across state facilities. This irreversible action will be stamped with your officer credentials ({user?.full_name || user?.role}) in the permanent audit ledger.
+                        </p>
+                      </div>
+                    )}
+
                     <label className="text-sm font-bold text-foreground block">
-                      Resolution Notes & Evidentiary Rationale:
+                      Resolution Notes & Evidentiary Rationale: <span className="text-destructive">*</span>
                     </label>
                     <textarea
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
-                      placeholder="Enter legal rationale (e.g. verified father name, physical identification marks, and CCTNS biometric record)..."
+                      placeholder="Enter specific legal rationale (e.g. verified father name, physical identification marks, and CCTNS biometric record)..."
                       className="w-full bg-background border-2 border-border rounded-xl p-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary min-h-[100px] leading-relaxed"
                     />
+
+                    {resolutionAction === 'MERGE_RECORDS' && (
+                      <label className="flex items-start gap-3 p-3 bg-secondary/50 border border-border rounded-lg text-xs font-semibold cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={confirmMerge}
+                          onChange={(e) => setConfirmMerge(e.target.checked)}
+                          className="mt-0.5 rounded border-border text-primary focus:ring-primary h-4 w-4"
+                        />
+                        <span className="text-foreground">
+                          I confirm that I have reviewed the corroborated traits, conflict flags, and facility records, and authorize this permanent identity merge under canonical ID.
+                        </span>
+                      </label>
+                    )}
+
                     <div className="flex items-center justify-end gap-3 pt-2">
                       <button
-                        onClick={() => setResolutionAction(null)}
+                        onClick={() => {
+                          setResolutionAction(null);
+                          setConfirmMerge(false);
+                        }}
                         className="px-5 py-2.5 rounded-lg border border-border text-sm font-medium hover:bg-secondary text-foreground transition-colors"
                       >
                         Cancel
                       </button>
                       <button
                         onClick={handleResolve}
-                        disabled={submitting}
+                        disabled={submitting || (resolutionAction === 'MERGE_RECORDS' && (!confirmMerge || notes.trim().length < 10)) || !notes.trim()}
                         className="px-6 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2 shadow-sm transition-all"
                       >
                         {submitting ? 'Applying Decision...' : 'Confirm Decision & Record Audit'}

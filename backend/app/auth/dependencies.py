@@ -73,6 +73,18 @@ async def get_current_user(
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account is inactive.")
 
+    token_linked_case = payload.get("linked_case_id")
+    if token_linked_case:
+        user.linked_case_id = token_linked_case
+
+    token_full_name = payload.get("full_name")
+    if token_full_name:
+        user.full_name = token_full_name
+
+    token_facilities = payload.get("facility_ids")
+    if token_facilities and not user.facility_ids:
+        user.facility_ids = token_facilities
+
     return user
 
 

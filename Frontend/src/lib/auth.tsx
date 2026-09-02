@@ -43,8 +43,8 @@ export interface AuthContextType {
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  loginWithDemoRole: (role: Role) => Promise<void>;
+  login: (email: string, password: string) => Promise<Role>;
+  loginWithDemoRole: (role: Role) => Promise<Role>;
   logout: () => Promise<void>;
   hasRole: (...roles: Role[]) => boolean;
 }
@@ -158,10 +158,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         },
         data.refresh_token
       );
+      return data.role as Role;
     } finally {
+
       setIsLoading(false);
     }
   };
+
+
 
   const loginWithDemoRole = async (role: Role) => {
     setIsLoading(true);
@@ -189,10 +193,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         },
         data.refresh_token
       );
+      return role;
     } finally {
       setIsLoading(false);
     }
   };
+
 
   const logout = async () => {
     if (_inMemoryAccessToken) {

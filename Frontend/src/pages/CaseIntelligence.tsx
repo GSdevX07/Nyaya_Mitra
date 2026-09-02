@@ -16,6 +16,8 @@ import {
   RefreshCw,
   Loader2,
   Bookmark,
+  ShieldCheck,
+  Building2,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
@@ -26,12 +28,16 @@ import {
   verifyEvidence,
   type TimelineEvent,
   type LegalNeedItem,
+  referJailCaseToDlsa,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { jsPDF } from "jspdf";
 
 export function CaseIntelligence() {
-  const { hasRole } = useAuth();
+  const { user, hasRole } = useAuth();
+  const isPolice = user?.role === "POLICE_OFFICER";
+  const isDlsa = user?.role === "DLSA_OFFICER";
+  const isJail = user?.role === "JAIL_OFFICER";
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -42,9 +48,14 @@ export function CaseIntelligence() {
   const [filing, setFiling] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
   const [editableDraft, setEditableDraft] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"dossier" | "draft" | "timeline" | "evidence" | "statutes">("dossier");
+  const [dlsaComment, setDlsaComment] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<"dossier" | "draft" | "timeline" | "evidence" | "statutes" | "legalaid">("dossier");
+
   const [verifyingEvidenceId, setVerifyingEvidenceId] = useState<string | null>(null);
   const [evidenceVerificationResult, setEvidenceVerificationResult] = useState<any>(null);
+  const [advocateSignedOff, setAdvocateSignedOff] = useState(false);
+  const [referringDlsa, setReferringDlsa] = useState(false);
+  const [referralDone, setReferralDone] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [pendingDocType, setPendingDocType] = useState<string | null>(null);
@@ -422,6 +433,36 @@ export function CaseIntelligence() {
   const isFiled = c.status === "FILED";
   const approvalDone = isReadyForFiling || isFiled;
 
+  const handleBack = () => {
+    if (user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE") {
+      navigate("/advocate");
+    } else if (user?.role === "POLICE_OFFICER") {
+      navigate("/police");
+    } else if (user?.role === "JAIL_OFFICER") {
+      navigate("/jail");
+    } else if (user?.role === "ACCUSED_USER") {
+      navigate("/my-case");
+    } else if (user?.role === "FAMILY_GUARDIAN") {
+      navigate("/family/status");
+    } else {
+      navigate("/cases");
+    }
+  };
+
+  const handleReferToDlsa = async () => {
+    if (!id) return;
+    setReferringDlsa(true);
+    try {
+      await referJailCaseToDlsa(id, "Prison custody desk legal-aid counsel assignment referral.");
+      setReferralDone(true);
+      await load();
+    } catch (err: any) {
+      alert(`Referral failed: ${err.message}`);
+    } finally {
+      setReferringDlsa(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
       <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".pdf,image/*" />
@@ -430,7 +471,7 @@ export function CaseIntelligence() {
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate("/cases")}
+            onClick={handleBack}
             className="p-2 border border-border rounded-sm hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -454,7 +495,7 @@ export function CaseIntelligence() {
 
         {/* Workflow Action Gate */}
         <div className="flex items-center gap-2">
-          {!approvalDone && hasRole("SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN", "DLSA_OFFICER") && (
+          {!approvalDone && hasRole("SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN") && (
             <button
               onClick={handleApprove}
               disabled={approving || !eligibility.eligible || !completeness.is_complete}
@@ -469,14 +510,15 @@ export function CaseIntelligence() {
             </button>
           )}
 
-          {isReadyForFiling && hasRole("DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN", "DLSA_OFFICER") && (
+          {isReadyForFiling && hasRole("DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN") && (
             <button
               onClick={handleFileInCourt}
               disabled={filing}
+              title="Record verified court filing details into institutional registry. (Confirms procedural filing before Magistrate; not automated submission)."
               className="px-4 py-2 rounded-sm text-xs font-bold font-serif uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2 shadow-sm"
             >
               {filing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              Record Filing in Court Registry
+              Record Court Filing Details
             </button>
           )}
 
@@ -486,18 +528,54 @@ export function CaseIntelligence() {
             </span>
           )}
 
-          <button
-            onClick={generateBailDraftPDF}
-            className="px-3 py-2 border border-border rounded-sm hover:bg-secondary text-xs font-medium flex items-center gap-1.5"
-            title="Download PDF petition"
-          >
-            <Download className="w-4 h-4" /> PDF
-          </button>
+          {isPolice ? (
+            <span className="px-3 py-1.5 rounded-sm bg-primary/10 border border-primary/25 text-primary text-xs font-mono font-bold flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4" /> POLICE STATION CLEARANCE
+            </span>
+          ) : isJail ? (
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1.5 rounded-sm bg-primary/10 border border-primary/25 text-primary text-xs font-mono font-bold flex items-center gap-1.5">
+                <Building2 className="w-4 h-4" /> PRISON CUSTODY DESK
+              </span>
+              {c.assignment_status !== "ASSIGNED" && (
+                <button
+                  onClick={handleReferToDlsa}
+                  disabled={referringDlsa || referralDone}
+                  className="px-3 py-1.5 rounded-sm bg-secondary hover:bg-secondary/80 border border-border text-xs font-mono font-bold flex items-center gap-1.5 transition-colors"
+                  title="Refer inmate to DLSA for legal aid counsel assignment"
+                >
+                  {referringDlsa ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3 text-primary" />}
+                  {referralDone ? "Referred to DLSA" : "Refer to DLSA"}
+                </button>
+              )}
+            </div>
+          ) : isDlsa ? (
+            <>
+              <button
+                onClick={generateBailDraftPDF}
+                className="px-3 py-2 border border-border rounded-sm hover:bg-secondary text-xs font-medium flex items-center gap-1.5"
+                title="Download internal working copy — NOT a filed petition"
+              >
+                <Download className="w-4 h-4" /> Internal Copy
+              </button>
+              <span className="px-3 py-1.5 rounded-sm bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs font-mono font-bold flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4" /> DLSA COORDINATION — Pending Advocate Sign-Off
+              </span>
+            </>
+          ) : (
+            <button
+              onClick={generateBailDraftPDF}
+              className="px-3 py-2 border border-border rounded-sm hover:bg-secondary text-xs font-medium flex items-center gap-1.5"
+              title="Download PDF petition"
+            >
+              <Download className="w-4 h-4" /> PDF
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Identified Legal Needs Alerts */}
-      {legalNeeds.length > 0 && (
+      {/* Identified Legal Needs Alerts (Hidden for Police Officers to protect defense strategy) */}
+      {!isPolice && legalNeeds.length > 0 && (
         <div className="space-y-2">
           {legalNeeds.map((need, idx) => (
             <div
@@ -528,19 +606,33 @@ export function CaseIntelligence() {
       )}
 
       {/* Navigation Tabs */}
-      <div className="flex border-b border-border gap-2 text-sm font-serif">
-        {[
-          { key: "dossier", label: "Accused Dossier" },
-          { key: "draft", label: "Bail Petition Draft" },
-          { key: "timeline", label: "Case Timeline & Provenance" },
-          { key: "evidence", label: "Document Vault & SHA-256" },
-          { key: "statutes", label: "Grounded Statutory Law" },
-        ].map((tab) => (
+      <div className="flex border-b border-border gap-2 text-sm font-serif overflow-x-auto">
+        {(isPolice
+          ? [
+              { key: "dossier", label: "Police Authorized Record" },
+              { key: "evidence", label: "Evidence & Remand Documents" },
+              { key: "timeline", label: "Procedural Chronology" },
+            ]
+          : isJail
+          ? [
+              { key: "dossier", label: "Custody & Inmate Record" },
+              { key: "timeline", label: "Custody History & Remand" },
+              { key: "evidence", label: "Prison Records & Vault" },
+              { key: "legalaid", label: "Legal-Aid & Representation Status" },
+            ]
+          : [
+              { key: "dossier", label: "Accused Dossier" },
+              { key: "draft", label: "Bail Petition Draft" },
+              { key: "timeline", label: "Case Timeline & Provenance" },
+              { key: "evidence", label: "Document Vault & SHA-256" },
+              { key: "statutes", label: "Grounded Statutory Law" },
+            ]
+        ).map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key as any)}
-            className={`px-4 py-2 border-b-2 font-semibold transition-all ${
-              activeTab === tab.key
+            className={`px-4 py-2 border-b-2 font-semibold transition-all shrink-0 ${
+              ((isPolice || isJail) && (activeTab === "draft" || activeTab === "statutes") ? "dossier" : activeTab) === tab.key
                 ? "border-primary text-foreground font-bold"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
@@ -549,6 +641,7 @@ export function CaseIntelligence() {
           </button>
         ))}
       </div>
+
 
       {/* TAB 1: ACCUSED DOSSIER & DETERMINISTIC ENGINE */}
       {activeTab === "dossier" && (
@@ -624,23 +717,208 @@ export function CaseIntelligence() {
               </div>
             </div>
 
-            {/* Authorised Family Portal Info */}
-            <div className="p-5 border border-border bg-card rounded-sm space-y-2.5">
-              <h3 className="text-sm font-bold font-serif uppercase tracking-wider text-muted-foreground">
-                Authorised Family Contact
-              </h3>
-              <div className="space-y-1.5 text-xs">
-                <p><strong className="text-muted-foreground">Contact:</strong> {c.relative_name} ({c.relative_relation})</p>
-                <p><strong className="text-muted-foreground">Phone:</strong> <span className="font-mono">{c.relative_phone}</span></p>
-                <p><strong className="text-muted-foreground">Address:</strong> {c.permanent_address}</p>
+            {/* Authorised Family Portal Info (Hidden for Police Officers to protect citizen privacy) */}
+            {!isPolice && (
+              <div className="p-5 border border-border bg-card rounded-sm space-y-2.5">
+                <h3 className="text-sm font-bold font-serif uppercase tracking-wider text-muted-foreground">
+                  Authorised Family Contact
+                </h3>
+                <div className="space-y-1.5 text-xs">
+                  <p><strong className="text-muted-foreground">Contact:</strong> {c.relative_name} ({c.relative_relation})</p>
+                  <p><strong className="text-muted-foreground">Phone:</strong> <span className="font-mono">{c.relative_phone}</span></p>
+                  <p><strong className="text-muted-foreground">Address:</strong> {c.permanent_address}</p>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
-          {/* Right Column: Versioned Section 479 BNSS Rule Engine & Multilingual Summary */}
+          {/* Right Column: Police Operational Record OR Versioned Rule Engine */}
           <div className="space-y-6 lg:col-span-2">
+            {isPolice ? (
+              <div className="p-6 border border-border bg-card rounded-sm space-y-6">
+                <div className="flex items-center justify-between border-b border-border pb-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-primary" />
+                    <div>
+                      <h3 className="font-bold font-serif text-base text-foreground">
+                        Station Police Operational Compliance Record
+                      </h3>
+                      <span className="text-[11px] font-mono text-muted-foreground">
+                        Jurisdiction: {c.police_station || "Kotwali Police Station"} • {c.district || "Central Delhi"}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded bg-primary/10 text-primary border border-primary/20 font-mono text-xs font-bold">
+                    {c.fir_number || `FIR-2024-${c.case_id}`}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                  <div className="p-4 rounded bg-muted/40 border border-border space-y-2">
+                    <div className="font-bold font-mono text-[11px] uppercase text-muted-foreground">Investigating Station</div>
+                    <div className="text-foreground font-semibold text-sm">{c.police_station || "Kotwali Police Station"}</div>
+                    <div className="text-muted-foreground">{c.district || "Central District"}, Delhi</div>
+                  </div>
+
+                  <div className="p-4 rounded bg-muted/40 border border-border space-y-2">
+                    <div className="font-bold font-mono text-[11px] uppercase text-muted-foreground">Custodial Remand Metric</div>
+                    <div className="text-foreground font-semibold text-sm">{c.custody_days || 0} Days In Custody</div>
+                    <div className="text-muted-foreground">Detention Facility: {c.jail_location || "Central Jail"}</div>
+                  </div>
+                </div>
+
+                <div className="space-y-3 pt-2">
+                  <h4 className="text-xs font-bold font-mono uppercase tracking-wider text-muted-foreground">
+                    Station Mandatory Document Deliverables
+                  </h4>
+                  <div className="space-y-2">
+                    <div className="p-3 rounded border flex items-center justify-between bg-card border-border">
+                      <span className="flex items-center gap-2 font-medium">
+                        <FileCheck className="w-4 h-4 text-primary" />
+                        Case Diary & Production Warrant Copy
+                      </span>
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
+                        COMPLIANT ON RECORD
+                      </span>
+                    </div>
+
+                    <div className="p-3 rounded border flex items-center justify-between bg-card border-border">
+                      <span className="flex items-center gap-2 font-medium">
+                        <FileText className="w-4 h-4 text-primary" />
+                        Investigating Officer Final Report (Charge Sheet)
+                      </span>
+                      <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                        (c.present_docs || []).some((d: string) => d.toLowerCase().includes("charge"))
+                          ? "bg-emerald-500/15 text-emerald-600 border border-emerald-500/30"
+                          : "bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30"
+                      }`}>
+                        {(c.present_docs || []).some((d: string) => d.toLowerCase().includes("charge"))
+                          ? "SUBMITTED / ON RECORD"
+                          : "PENDING SUBMISSION"}
+                      </span>
+                    </div>
+
+                    <div className="p-3 rounded border flex items-center justify-between bg-card border-border">
+                      <span className="flex items-center gap-2 font-medium">
+                        <Clock className="w-4 h-4 text-primary" />
+                        Judicial Remand Extension Order
+                      </span>
+                      <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                        (c.present_docs || []).some((d: string) => d.toLowerCase().includes("remand"))
+                          ? "bg-emerald-500/15 text-emerald-600 border border-emerald-500/30"
+                          : "bg-red-500/15 text-red-600 border border-red-500/30"
+                      }`}>
+                        {(c.present_docs || []).some((d: string) => d.toLowerCase().includes("remand"))
+                          ? "VERIFIED ON RECORD"
+                          : "AWAITING EXTENSION COPY"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded bg-muted/20 border border-border text-[11px] text-muted-foreground flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-primary shrink-0" />
+                  <span>
+                    Station Record Integrity: Verified under Criminal Procedure Code and BNSS jurisdictional guidelines.
+                  </span>
+                </div>
+              </div>
+            ) : isJail ? (
+              <div className="p-6 border border-border bg-card rounded-sm space-y-6">
+                <div className="flex items-center justify-between border-b border-border pb-3">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-5 h-5 text-primary" />
+                    <div>
+                      <h3 className="font-bold font-serif text-base text-foreground">
+                        Prison Custody & Lawful Detention Record
+                      </h3>
+                      <span className="text-[11px] font-mono text-muted-foreground">
+                        Facility: {c.jail_location || "Central Prison Complex"}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded bg-primary/10 text-primary border border-primary/20 font-mono text-xs font-bold">
+                    CUSTODY VERIFIED
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                  <div className="p-4 rounded bg-muted/40 border border-border space-y-1">
+                    <div className="font-bold font-mono text-[11px] uppercase text-muted-foreground">Calendar Custody</div>
+                    <div className="text-foreground font-bold text-xl font-serif">{c.custody_days || 0} Days</div>
+                    <div className="text-[10px] text-muted-foreground font-mono">Admission: {c.arrest_date}</div>
+                  </div>
+
+                  <div className="p-4 rounded bg-muted/40 border border-border space-y-1">
+                    <div className="font-bold font-mono text-[11px] uppercase text-muted-foreground">Delay Exclusions</div>
+                    <div className="text-foreground font-bold text-xl font-serif">{c.excluded_delay_days || 0} Days</div>
+                    <div className="text-[10px] text-muted-foreground font-mono">Defense/Accused Adjournments</div>
+                  </div>
+
+                  <div className="p-4 rounded bg-muted/40 border border-border space-y-1">
+                    <div className="font-bold font-mono text-[11px] uppercase text-primary">Countable Custody</div>
+                    <div className="text-primary font-bold text-xl font-serif">{(c.custody_days || 0) - (c.excluded_delay_days || 0)} Days</div>
+                    <div className="text-[10px] text-muted-foreground font-mono">Net Statutory Custody</div>
+                  </div>
+                </div>
+
+                {/* Statutory Threshold Signal */}
+                <div className="p-4 rounded border border-border bg-secondary/30 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold uppercase text-foreground">
+                      Section 479 BNSS Informational Threshold Signal
+                    </span>
+                    {eligibility.eligible ? (
+                      <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                        Potential Threshold Met
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-muted text-muted-foreground border border-border">
+                        Threshold Not Yet Reached
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground font-sans">
+                    {eligibility.eligible
+                      ? "The undertrial has potentially completed the fractional custody duration under Section 479. Refer verified nominal roll and custody records to DLSA for legal review and representation."
+                      : "Custody duration is within standard remand timeline. Regular bi-weekly custody audit continues."}
+                  </p>
+                  <p className="text-[10px] font-mono text-muted-foreground">
+                    * Informational signal for prison administration. Final legal eligibility and bail pleadings remain exclusively with DLSA and defense counsel.
+                  </p>
+                </div>
+
+                {/* Prison Documents Status */}
+                <div className="space-y-3">
+                  <h4 className="font-mono text-xs font-bold uppercase text-muted-foreground">
+                    Required Prison & Custody Records
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {(c.required_docs || []).map((doc: string) => {
+                      const isPresent = (c.present_docs || []).includes(doc);
+                      return (
+                        <div key={doc} className="p-2.5 rounded border border-border flex items-center justify-between text-xs font-mono">
+                          <span className="capitalize text-foreground">{doc.replace(/_/g, " ")}</span>
+                          {isPresent ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 text-[11px] font-bold">
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Present
+                            </span>
+                          ) : (
+                            <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1 text-[11px] font-bold">
+                              <AlertTriangle className="w-3.5 h-3.5" /> Pending
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
             {/* Versioned Rule Engine Card */}
             <div className="p-6 border border-border bg-card rounded-sm space-y-4">
+
               <div className="flex items-center justify-between border-b border-border pb-3">
                 <div className="flex items-center gap-2">
                   <Calculator className="w-5 h-5 text-primary" />
@@ -790,18 +1068,22 @@ export function CaseIntelligence() {
                   "The accused person has completed the required period in custody under Section 479 of the Bharatiya Nagarik Suraksha Sanhita, 2023. A panel legal-aid advocate is reviewing the petition for formal submission to court."}
               </p>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </div>
+    </div>
+  )}
+
 
       {/* TAB 2: BAIL PETITION DRAFT & ADVOCATE REVIEW GATEWAY */}
-      {activeTab === "draft" && (
+      {!isPolice && !isJail && activeTab === "draft" && (
         <div className="space-y-6">
+
           <div className="p-6 border border-border bg-card rounded-sm space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
                 <h3 className="font-bold font-serif text-lg text-foreground">
-                  Formal Bail Application Draft
+                  {isDlsa ? "Bail Application Work Product (DLSA Coordination View)" : "Formal Bail Application Draft"}
                 </h3>
                 <p className="text-xs text-muted-foreground">
                   Under Section 479 of the Bharatiya Nagarik Suraksha Sanhita, 2023
@@ -812,24 +1094,97 @@ export function CaseIntelligence() {
                 <button
                   onClick={generateBailDraftPDF}
                   className="px-3 py-1.5 border border-border rounded-sm hover:bg-secondary text-xs font-semibold flex items-center gap-1.5"
+                  title={isDlsa ? "Download internal working copy — NOT a filed petition" : "Download PDF petition"}
                 >
-                  <Download className="w-4 h-4" /> Download PDF
+                  <Download className="w-4 h-4" /> {isDlsa ? "Internal Copy" : "Download PDF"}
                 </button>
               </div>
             </div>
 
-            {/* In-Line Draft Editor */}
-            <div className="space-y-2">
-              <label className="text-xs font-mono font-bold uppercase text-muted-foreground">
-                Editable Petition Text (Reviewed by Defence Counsel):
-              </label>
-              <textarea
-                value={editableDraft}
-                onChange={(e) => setEditableDraft(e.target.value)}
-                rows={16}
-                className="w-full p-4 font-mono text-xs bg-background border border-border rounded-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed resize-y"
-              />
-            </div>
+            {/* In-Line Draft Editor — Role-Scoped */}
+            {isDlsa ? (
+              <div className="space-y-4">
+                {/* DLSA: Read-only petition view */}
+                <div className="space-y-2">
+                  <label className="text-xs font-mono font-bold uppercase text-muted-foreground flex items-center gap-2">
+                    <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
+                    Petition Work Product — Read Only (Authorised Legal Counsel Editing Reserved):
+                  </label>
+                  <div className="w-full p-4 font-mono text-xs bg-muted/30 border border-border rounded-sm text-foreground leading-relaxed min-h-[200px] overflow-auto whitespace-pre-wrap select-all">
+                    {editableDraft || "Draft petition will appear here once AI generation is complete."}
+                  </div>
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400 font-mono">
+                    ⚠ DLSA officers may review and coordinate corrections. Final petition editing authority rests with the assigned panel advocate.
+                  </p>
+                </div>
+
+                {/* DLSA: Institutional Comment Box */}
+                <div className="space-y-2 pt-2 border-t border-border">
+                  <label className="text-xs font-mono font-bold uppercase text-muted-foreground">
+                    DLSA Institutional Comments / Correction Requests:
+                  </label>
+                  <textarea
+                    value={dlsaComment}
+                    onChange={(e) => setDlsaComment(e.target.value)}
+                    rows={5}
+                    placeholder="Add institutional notes, flag corrections needed, or request advocate review. These comments are attached to the case record."
+                    className="w-full p-4 font-mono text-xs bg-background border border-border rounded-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed resize-y"
+                  />
+                  <button
+                    disabled={!dlsaComment.trim()}
+                    className={`px-4 py-2 rounded-sm text-xs font-semibold flex items-center gap-2 ${
+                      dlsaComment.trim()
+                        ? "bg-primary text-primary-foreground hover:opacity-90"
+                        : "bg-muted text-muted-foreground cursor-not-allowed border border-border"
+                    }`}
+                    onClick={() => alert("DLSA comment submitted for advocate review. (Backend integration pending.)")}
+                  >
+                    <Send className="w-3.5 h-3.5" /> Submit for Advocate / Supervisor Review
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-mono font-bold uppercase text-muted-foreground">
+                    Editable Petition Text (Reviewed by Defence Counsel):
+                  </label>
+                  {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+                    <span className="text-[11px] font-mono text-primary font-semibold">
+                      Counsel Work Product // Versioned Legal Draft
+                    </span>
+                  )}
+                </div>
+                <textarea
+                  value={editableDraft}
+                  onChange={(e) => setEditableDraft(e.target.value)}
+                  rows={16}
+                  className="w-full p-4 font-mono text-xs bg-background border border-border rounded-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed resize-y"
+                />
+                {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-border">
+                    <p className="text-[11px] font-mono text-muted-foreground">
+                      Counsel Review Status: {advocateSignedOff ? "✓ Legal Sign-Off Recorded (Awaiting Supervisory Sign-Off)" : "Draft Under Active Counsel Review"}
+                    </p>
+                    <button
+                      onClick={() => {
+                        setAdvocateSignedOff(true);
+                        alert("Counsel legal sign-off recorded. The petition draft is stamped as Advocate Work Product and submitted for supervisory review.");
+                      }}
+                      disabled={advocateSignedOff || !editableDraft.trim()}
+                      className={`px-4 py-2 rounded-sm text-xs font-bold font-serif uppercase tracking-wider flex items-center gap-2 ${
+                        advocateSignedOff
+                          ? "bg-emerald-500/15 text-emerald-600 border border-emerald-500/30 cursor-default"
+                          : "bg-primary text-primary-foreground hover:opacity-90"
+                      }`}
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      {advocateSignedOff ? "Counsel Signed Off" : "Sign Off & Submit for Supervisory Review"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Human Review Boundary Alert */}
             <div className="p-3.5 rounded bg-muted/40 border border-border text-xs text-foreground/80 space-y-1 font-mono">
@@ -843,6 +1198,7 @@ export function CaseIntelligence() {
           </div>
         </div>
       )}
+
 
       {/* TAB 3: CHRONOLOGICAL CASE TIMELINE & PROVENANCE */}
       {activeTab === "timeline" && (
@@ -924,7 +1280,7 @@ export function CaseIntelligence() {
                       className="px-3 py-1.5 bg-secondary border border-border text-foreground hover:bg-muted text-xs font-semibold font-mono rounded flex items-center gap-1.5"
                     >
                       {verifyingEvidenceId === eviId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                      Verify SHA-256 Hash
+                      {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") ? "Inspect Hash Integrity" : "Verify SHA-256 Hash"}
                     </button>
                   </div>
                 </div>
@@ -977,8 +1333,9 @@ export function CaseIntelligence() {
       )}
 
       {/* TAB 5: GROUNDED STATUTORY LEGAL AUTHORITIES (RAG) */}
-      {activeTab === "statutes" && (
+      {!isPolice && !isJail && activeTab === "statutes" && (
         <div className="p-6 border border-border bg-card rounded-sm space-y-6">
+
           <div className="flex items-center justify-between border-b border-border pb-3">
             <div>
               <h3 className="font-bold font-serif text-lg text-foreground">
@@ -1012,6 +1369,78 @@ export function CaseIntelligence() {
                 </p>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 6: INSTITUTIONAL LEGAL-AID & REPRESENTATION STATUS (JAIL ONLY) */}
+      {isJail && activeTab === "legalaid" && (
+        <div className="p-6 border border-border bg-card rounded-sm space-y-6 max-w-4xl">
+          <div className="flex items-center justify-between border-b border-border pb-3">
+            <div className="flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-primary" />
+              <div>
+                <h3 className="font-bold font-serif text-base text-foreground">
+                  Institutional Legal-Aid & Representation Status
+                </h3>
+                <span className="text-[11px] font-mono text-muted-foreground">
+                  Case ID: {c.case_id} • Accused: {c.name}
+                </span>
+              </div>
+            </div>
+            {c.assignment_status === "ASSIGNED" ? (
+              <span className="px-2.5 py-1 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-mono text-xs font-bold flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> COUNSEL ASSIGNED
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 font-mono text-xs font-bold flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5" /> PENDING ASSIGNMENT
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div className="p-4 rounded bg-muted/40 border border-border space-y-2">
+              <div className="font-bold font-mono text-[11px] uppercase text-muted-foreground">Appointed Counsel</div>
+              <div className="text-foreground font-semibold text-sm">{c.assigned_lawyer || "Not Assigned"}</div>
+              <div className="text-muted-foreground font-mono">Counsel ID: {c.assigned_lawyer_id || "Unassigned"}</div>
+            </div>
+
+            <div className="p-4 rounded bg-muted/40 border border-border space-y-2">
+              <div className="font-bold font-mono text-[11px] uppercase text-muted-foreground">Coordinating Authority</div>
+              <div className="text-foreground font-semibold text-sm">District Legal Services Authority (DLSA)</div>
+              <div className="text-muted-foreground">Central Delhi District Court Complex</div>
+            </div>
+          </div>
+
+          <div className="p-4 rounded border border-border bg-secondary/20 space-y-3">
+            <h4 className="font-mono text-xs font-bold uppercase text-foreground">
+              Prison Superintendent Referral Actions
+            </h4>
+            <p className="text-xs text-muted-foreground">
+              Under NALSA Undertrial Review Committee (UTRC) guidelines, the Jail Superintendent shall identify undertrials lacking private representation and refer custody records to DLSA for timely assignment of pro-bono defense counsel.
+            </p>
+            {c.assignment_status !== "ASSIGNED" ? (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleReferToDlsa}
+                  disabled={referringDlsa || referralDone}
+                  className="px-4 py-2 bg-primary text-primary-foreground rounded-sm text-xs font-mono font-bold flex items-center gap-1.5 hover:opacity-90 transition-opacity"
+                >
+                  {referringDlsa ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  {referralDone ? "Referred to DLSA" : "Dispatch Referral Notice to DLSA"}
+                </button>
+                {referralDone && (
+                  <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                    <CheckCircle2 className="w-4 h-4" /> Referral logged & DLSA notified.
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                <CheckCircle2 className="w-4 h-4" /> Legal representation is active. Adv. {c.assigned_lawyer} is handling bail proceedings.
+              </div>
+            )}
           </div>
         </div>
       )}

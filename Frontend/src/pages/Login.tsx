@@ -32,6 +32,7 @@ export function Login() {
       case "CONTROLLED_EXTERNAL_ADVOCATE":
         return "/advocate";
       case "POLICE_OFFICER":
+        return "/police";
       case "DLSA_OFFICER":
       case "SUPERVISING_LEGAL_OFFICER":
       default:
@@ -43,12 +44,15 @@ export function Login() {
     e.preventDefault();
     setError(null);
     try {
-      await login(email, password);
-      // Determine destination
+      const loggedInRole = await login(email, password);
+      // Determine destination strictly according to authenticated role
       const fromPath = (location.state as any)?.from?.pathname;
-      const target = fromPath && fromPath !== "/dashboard" ? fromPath : "/dashboard";
+      const target = fromPath && fromPath !== "/dashboard" && fromPath !== "/" 
+        ? fromPath 
+        : getRoleDefaultRoute(loggedInRole);
       navigate(target, { replace: true });
     } catch (err: any) {
+
       setError(err?.message || "Invalid credentials or authorization failure.");
     }
   };

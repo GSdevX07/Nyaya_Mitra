@@ -116,11 +116,13 @@ export function ReportsPage() {
 
         <div className="p-6 rounded bg-card shadow-sm border border-border space-y-2">
           <div className="flex items-center justify-between text-muted-foreground">
-            <span className="text-xs">Legal Time Saved</span>
+            <span className="text-xs">Est. Processing Time Saved</span>
             <Award className="w-4 h-4 text-accent" />
           </div>
           <div className="text-3xl font-bold text-primary">{overview.estimated_hours_saved_by_ai} <span className="text-sm font-normal text-muted-foreground">hrs</span></div>
-          <div className="text-xs text-accent font-medium">Automated petition drafting</div>
+          <div className="text-xs text-muted-foreground">
+            Methodology: avg. manual review time vs. system-assisted workflow (estimate — {overview.bnss_479_eligible} cases × ~12 hrs)
+          </div>
         </div>
       </div>
 

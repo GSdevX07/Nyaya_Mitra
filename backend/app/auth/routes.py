@@ -71,12 +71,17 @@ class DemoTokenRequest(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _issue_tokens(user: AuthUser) -> TokenResponse:
+    extra = {"district": user.district}
+    if getattr(user, "linked_case_id", None):
+        extra["linked_case_id"] = user.linked_case_id
+    if getattr(user, "full_name", None):
+        extra["full_name"] = user.full_name
     access = create_access_token(
         subject=user.id,
         role=user.role.value,
         org_id=user.org_id,
         facility_ids=user.facility_ids,
-        extra_claims={"district": user.district},
+        extra_claims=extra,
     )
     refresh = create_refresh_token(subject=user.id)
     return TokenResponse(

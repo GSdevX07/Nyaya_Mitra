@@ -165,6 +165,50 @@ export interface StakeholdersOverview {
 
 // ── API Operations ───────────────────────────────────────────────────────────
 
+export interface JailInmateRecord {
+  case: CaseRecord;
+  inmate_id: string;
+  name: string;
+  jail_location: string;
+  admission_date: string;
+  custody_days: number;
+  excluded_delay_days?: number;
+  countable_days: number;
+  required_docs: string[];
+  present_docs: string[];
+  missing_docs: string[];
+  is_docs_complete: boolean;
+  assignment_status: string;
+  assigned_lawyer?: string;
+  assigned_lawyer_id?: string;
+  legal_code: string;
+  offense_sections: string[];
+  status: string;
+  urgency_flags: any;
+  potential_479_eligible: boolean;
+}
+
+export async function fetchJailInmates(): Promise<JailInmateRecord[]> {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/jail/inmates`);
+    if (!res.ok) throw new Error(`Failed to fetch jail inmates: status ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("Backend jail inmates unavailable or unauthenticated:", err);
+    return [];
+  }
+}
+
+export async function referJailCaseToDlsa(caseId: string, notes?: string) {
+  const res = await authFetch(`${API_BASE_URL}/jail/refer-legal-aid`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ case_id: caseId, notes }),
+  });
+  if (!res.ok) throw new Error(`Referral failed: status ${res.status}`);
+  return await res.json();
+}
+
 export async function fetchCases(): Promise<BackendCaseSummary[]> {
   try {
     const res = await authFetch(`${API_BASE_URL}/cases`);

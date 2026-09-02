@@ -7,6 +7,7 @@ The AuthUser dataclass is the internal representation of a logged-in identity.
 from __future__ import annotations
 import datetime
 import sqlite3
+import json
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -248,12 +249,12 @@ _DEMO_USERS: dict[str, dict] = {}
 _DEMO_USER_DEFINITIONS = [
     {"id": "demo_platform_admin",    "email": "admin@demo.nyayamitra.in",        "role": "PLATFORM_ADMIN",             "full_name": "Platform Admin (Demo)",         "organization_id": "org_dlsa_central", "district": "Central Delhi"},
     {"id": "demo_gov_admin",         "email": "govadmin@demo.nyayamitra.in",     "role": "GOV_ADMIN",                  "full_name": "Govt Admin (Demo)",             "organization_id": "org_dlsa_central", "district": "Central Delhi"},
-    {"id": "demo_jail_officer",      "email": "jail@demo.nyayamitra.in",         "role": "JAIL_OFFICER",               "full_name": "Jail Officer (Demo)",           "organization_id": "org_dlsa_central", "district": "Central Delhi"},
+    {"id": "demo_jail_officer",      "email": "jail@demo.nyayamitra.in",         "role": "JAIL_OFFICER",               "full_name": "Jail Officer (Demo)",           "organization_id": "org_tihar_jail",   "district": "West Delhi", "facility_ids": ["fac_tihar_jail_04", "Central Jail No. 4, Tihar (Synthetic)", "Tihar"]},
     {"id": "demo_police_officer",    "email": "police@demo.nyayamitra.in",       "role": "POLICE_OFFICER",             "full_name": "Police Officer (Demo)",         "organization_id": "org_dlsa_central", "district": "Central Delhi"},
     {"id": "demo_dlsa_officer",      "email": "dlsa@demo.nyayamitra.in",         "role": "DLSA_OFFICER",               "full_name": "DLSA Officer (Demo)",           "organization_id": "org_dlsa_central", "district": "Central Delhi"},
     {"id": "demo_supervising",       "email": "supervisor@demo.nyayamitra.in",   "role": "SUPERVISING_LEGAL_OFFICER",  "full_name": "Supervising Legal Officer (Demo)", "organization_id": "org_dlsa_central", "district": "Central Delhi"},
-    {"id": "demo_advocate",          "email": "advocate@demo.nyayamitra.in",     "role": "DEFENSE_ADVOCATE",           "full_name": "Defense Advocate (Demo)",       "organization_id": "org_dlsa_central", "district": "Central Delhi"},
-    {"id": "demo_ext_advocate",      "email": "extadvocate@demo.nyayamitra.in",  "role": "CONTROLLED_EXTERNAL_ADVOCATE","full_name": "External Advocate (Demo)",     "organization_id": "org_dlsa_central", "district": "Central Delhi"},
+    {"id": "demo_advocate",          "email": "advocate@demo.nyayamitra.in",     "role": "DEFENSE_ADVOCATE",           "full_name": "Defense Advocate (Demo)",       "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001"},
+    {"id": "demo_ext_advocate",      "email": "extadvocate@demo.nyayamitra.in",  "role": "CONTROLLED_EXTERNAL_ADVOCATE","full_name": "External Advocate (Demo)",     "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001"},
     {"id": "demo_accused",           "email": "accused@demo.nyayamitra.in",      "role": "ACCUSED_USER",               "full_name": "Accused Person (Demo)",         "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001"},
     {"id": "demo_family",            "email": "family@demo.nyayamitra.in",       "role": "FAMILY_GUARDIAN",            "full_name": "Family Guardian (Demo)",        "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001"},
     {"id": "demo_auditor",           "email": "auditor@demo.nyayamitra.in",      "role": "READ_ONLY_AUDITOR",          "full_name": "Read-Only Auditor (Demo)",      "organization_id": "org_dlsa_central", "district": "Central Delhi"},
@@ -266,7 +267,8 @@ def _build_demo_users() -> None:
         return
     h = _get_demo_hash()
     for defn in _DEMO_USER_DEFINITIONS:
-        entry = {**defn, "password_hash": h, "is_active": True, "failed_login_count": 0, "facility_ids": "[]"}
+        fac_ids = json.dumps(defn.get("facility_ids", [])) if isinstance(defn.get("facility_ids"), list) else defn.get("facility_ids", "[]")
+        entry = {**defn, "password_hash": h, "is_active": True, "failed_login_count": 0, "facility_ids": fac_ids}
         _DEMO_USERS[defn["email"]] = entry
 
 

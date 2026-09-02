@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from "react";
 import {
   Database, UploadCloud, RefreshCw, AlertTriangle, CheckCircle2,
-  ShieldCheck, Users, Check, X
+  ShieldCheck, ShieldAlert, Users, Check, X
 } from "lucide-react";
+
 import { authFetch, API_BASE_URL } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+
 
 interface Connector {
   id: string;
@@ -63,11 +66,18 @@ interface IngestionDashboardData {
 }
 
 export function IngestionDashboard() {
+  const { user } = useAuth();
+  const isAuditor = user?.role === "READ_ONLY_AUDITOR";
+  const isSupervisor = user?.role === "SUPERVISING_LEGAL_OFFICER";
+
   const [telemetry, setTelemetry] = useState<IngestionDashboardData | null>(null);
+
   const [conflicts, setConflicts] = useState<FieldConflict[]>([]);
   const [merges, setMerges] = useState<IdentityMatchCandidate[]>([]);
   const [syncingId, setSyncingId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"connectors" | "import" | "conflicts" | "identities">("connectors");
+  const [activeTab, setActiveTab] = useState<"connectors" | "import" | "conflicts" | "identities">(
+    isSupervisor ? "conflicts" : "connectors"
+  );
   const [csvText, setCsvText] = useState("");
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
 
@@ -245,28 +255,42 @@ export function IngestionDashboard() {
         </div>
       </div>
 
+      {/* Supervisory Governance Mode Notice */}
+      {isSupervisor && (
+        <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-sm text-xs text-amber-700 dark:text-amber-300 font-mono flex items-center gap-2.5">
+          <ShieldAlert className="w-4 h-4 text-amber-500 shrink-0" />
+          <span>
+            <strong>Supervisory Governance Mode:</strong> Technical connector synchronization and raw data imports are restricted to Platform Administrators. Review and resolve field discrepancies and cross-facility identity merges below.
+          </span>
+        </div>
+      )}
+
       {/* Navigation Tabs */}
       <div className="flex border-b-2 border-border gap-2">
-        <button
-          onClick={() => setActiveTab("connectors")}
-          className={`px-4 py-2.5 text-xs font-mono font-bold uppercase transition-all ${
-            activeTab === "connectors"
-              ? "border-b-2 border-primary text-primary -mb-[2px] bg-card"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Connectors ({telemetry?.connectors.length ?? 0})
-        </button>
-        <button
-          onClick={() => setActiveTab("import")}
-          className={`px-4 py-2.5 text-xs font-mono font-bold uppercase transition-all ${
-            activeTab === "import"
-              ? "border-b-2 border-primary text-primary -mb-[2px] bg-card"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Spreadsheet Import Hub
-        </button>
+        {!isSupervisor && (
+          <>
+            <button
+              onClick={() => setActiveTab("connectors")}
+              className={`px-4 py-2.5 text-xs font-mono font-bold uppercase transition-all ${
+                activeTab === "connectors"
+                  ? "border-b-2 border-primary text-primary -mb-[2px] bg-card"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Connectors ({telemetry?.connectors.length ?? 0})
+            </button>
+            <button
+              onClick={() => setActiveTab("import")}
+              className={`px-4 py-2.5 text-xs font-mono font-bold uppercase transition-all ${
+                activeTab === "import"
+                  ? "border-b-2 border-primary text-primary -mb-[2px] bg-card"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Spreadsheet Import Hub
+            </button>
+          </>
+        )}
         <button
           onClick={() => setActiveTab("conflicts")}
           className={`px-4 py-2.5 text-xs font-mono font-bold uppercase transition-all flex items-center gap-1.5 ${
@@ -342,18 +366,24 @@ export function IngestionDashboard() {
                 </div>
 
                 {c.is_simulated && (
-                  <button
-                    onClick={() => handleSyncTrigger(c.id)}
-                    disabled={syncingId === c.id}
-                    className="w-full mt-2 py-2 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 text-xs font-mono font-bold uppercase rounded-sm flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
-                  >
-                    {syncingId === c.id ? (
-                      <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <RefreshCw className="w-3 h-3" />
-                    )}
-                    Trigger Live Sync
-                  </button>
+                  isAuditor ? (
+                    <div className="w-full mt-2 py-1.5 bg-muted text-muted-foreground text-center text-[10px] font-mono font-bold uppercase rounded-sm border border-border">
+                      Audit Mode (Sync Trigger Disabled)
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleSyncTrigger(c.id)}
+                      disabled={syncingId === c.id}
+                      className="w-full mt-2 py-2 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 text-xs font-mono font-bold uppercase rounded-sm flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+                    >
+                      {syncingId === c.id ? (
+                        <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-3 h-3" />
+                      )}
+                      Trigger Live Sync
+                    </button>
+                  )
                 )}
               </div>
             </div>
@@ -373,27 +403,33 @@ export function IngestionDashboard() {
             </p>
           </div>
 
-          <form onSubmit={handleCsvImport} className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono font-bold uppercase text-foreground block">
-                CSV Payload Data
-              </label>
-              <textarea
-                rows={6}
-                value={csvText}
-                onChange={(e) => setCsvText(e.target.value)}
-                placeholder={"prisoner_name,age,gender,offense,arrest_date,custody_days,jail_location\nSanjay Gupta,35,Male,BNS 303(2),2024-08-10,380,Tihar Jail 4"}
-                className="w-full bg-input border-2 border-border p-3 font-mono text-xs text-foreground rounded-sm focus:outline-none focus:border-primary"
-              />
+          {isAuditor ? (
+            <div className="p-4 bg-muted border border-border rounded-sm text-xs font-mono text-muted-foreground">
+              Statutory Oversight Auditor accounts operate in read-only telemetry mode. Batch CSV ingestion requires administrative clearance.
             </div>
+          ) : (
+            <form onSubmit={handleCsvImport} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-mono font-bold uppercase text-foreground block">
+                  CSV Payload Data
+                </label>
+                <textarea
+                  rows={6}
+                  value={csvText}
+                  onChange={(e) => setCsvText(e.target.value)}
+                  placeholder={"prisoner_name,age,gender,offense,arrest_date,custody_days,jail_location\nSanjay Gupta,35,Male,BNS 303(2),2024-08-10,380,Tihar Jail 4"}
+                  className="w-full bg-input border-2 border-border p-3 font-mono text-xs text-foreground rounded-sm focus:outline-none focus:border-primary"
+                />
+              </div>
 
-            <button
-              type="submit"
-              className="px-5 py-2.5 bg-primary text-primary-foreground font-mono text-xs font-bold uppercase rounded-sm hover:opacity-90 flex items-center gap-2"
-            >
-              <UploadCloud className="w-4 h-4" /> Ingest & Normalize Batch
-            </button>
-          </form>
+              <button
+                type="submit"
+                className="px-5 py-2.5 bg-primary text-primary-foreground font-mono text-xs font-bold uppercase rounded-sm hover:opacity-90 flex items-center gap-2"
+              >
+                <UploadCloud className="w-4 h-4" /> Ingest & Normalize Batch
+              </button>
+            </form>
+          )}
 
           {uploadStatus && (
             <div className="p-3 bg-muted border border-border text-xs font-mono text-foreground rounded-sm">
@@ -402,6 +438,7 @@ export function IngestionDashboard() {
           )}
         </div>
       )}
+
 
       {/* Tab 3: Conflict Resolution Queue */}
       {activeTab === "conflicts" && (
@@ -451,19 +488,28 @@ export function IngestionDashboard() {
                 </div>
 
                 <div className="flex justify-end gap-3 pt-2">
-                  <button
-                    onClick={() => handleResolveConflict(conf.id, "KEPT_CANONICAL")}
-                    className="px-4 py-2 bg-muted hover:bg-muted/80 text-foreground border border-border text-xs font-mono font-bold uppercase rounded-sm flex items-center gap-1.5"
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5" /> Keep Canonical
-                  </button>
-                  <button
-                    onClick={() => handleResolveConflict(conf.id, "ACCEPTED_PROPOSED")}
-                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-mono font-bold uppercase rounded-sm flex items-center gap-1.5"
-                  >
-                    <Check className="w-3.5 h-3.5" /> Accept Proposed Update
-                  </button>
+                  {isAuditor ? (
+                    <span className="text-[11px] font-mono text-muted-foreground uppercase font-bold py-1">
+                      Read-Only Audit Ledger — Conflict Resolution Restricted
+                    </span>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => handleResolveConflict(conf.id, "KEPT_CANONICAL")}
+                        className="px-4 py-2 bg-muted hover:bg-muted/80 text-foreground border border-border text-xs font-mono font-bold uppercase rounded-sm flex items-center gap-1.5"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" /> Keep Canonical
+                      </button>
+                      <button
+                        onClick={() => handleResolveConflict(conf.id, "ACCEPTED_PROPOSED")}
+                        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-mono font-bold uppercase rounded-sm flex items-center gap-1.5"
+                      >
+                        <Check className="w-3.5 h-3.5" /> Accept Proposed Update
+                      </button>
+                    </>
+                  )}
                 </div>
+
               </div>
             ))
           )}
@@ -513,19 +559,28 @@ export function IngestionDashboard() {
                 </div>
 
                 <div className="flex justify-end gap-3 pt-2">
-                  <button
-                    onClick={() => handleResolveIdentityMerge(cand.id, false)}
-                    className="px-4 py-2 bg-muted hover:bg-muted/80 text-foreground border border-border text-xs font-mono font-bold uppercase rounded-sm flex items-center gap-1.5"
-                  >
-                    <X className="w-3.5 h-3.5" /> Keep As Separate Person
-                  </button>
-                  <button
-                    onClick={() => handleResolveIdentityMerge(cand.id, true)}
-                    className="px-4 py-2 bg-primary text-primary-foreground text-xs font-mono font-bold uppercase rounded-sm flex items-center gap-1.5"
-                  >
-                    <Check className="w-3.5 h-3.5" /> Confirm Merge Identity
-                  </button>
+                  {isAuditor ? (
+                    <span className="text-[11px] font-mono text-muted-foreground uppercase font-bold py-1">
+                      Read-Only Audit Ledger — Identity Deduplication Restricted
+                    </span>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => handleResolveIdentityMerge(cand.id, false)}
+                        className="px-4 py-2 bg-muted hover:bg-muted/80 text-foreground border border-border text-xs font-mono font-bold uppercase rounded-sm flex items-center gap-1.5"
+                      >
+                        <X className="w-3.5 h-3.5" /> Keep As Separate Person
+                      </button>
+                      <button
+                        onClick={() => handleResolveIdentityMerge(cand.id, true)}
+                        className="px-4 py-2 bg-primary text-primary-foreground text-xs font-mono font-bold uppercase rounded-sm flex items-center gap-1.5"
+                      >
+                        <Check className="w-3.5 h-3.5" /> Confirm Merge Identity
+                      </button>
+                    </>
+                  )}
                 </div>
+
               </div>
             ))
           )}

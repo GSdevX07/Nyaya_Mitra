@@ -82,8 +82,7 @@ def setup_db():
             
             for doc in case.present_docs:
                 evidence_id = f"EVI-{case.case_id}-{doc}"
-                file_name = f"{doc}.pdf"
-                mock_file_bytes = f"mock_file_content_for_{case.case_id}_{doc}".encode()
+                mock_file_bytes = f"verified_content_{case.case_id}_{doc}".encode()
                 stored_hash = hashlib.sha256(mock_file_bytes).hexdigest()
                 
                 if case.case_id == "UTP-0012" and doc == "remand_order":

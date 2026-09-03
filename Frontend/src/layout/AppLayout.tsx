@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { CommandPalette } from "@/components/CommandPalette";
 import { NotificationsModal, type NotificationItem } from "@/components/NotificationsModal";
 import { LawyerProfileModal } from "@/components/LawyerProfileModal";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { fetchNotifications } from "@/lib/api";
 import { useAuth, type Role } from "@/lib/auth";
 
@@ -595,8 +596,10 @@ export function AppLayout() {
       </header>
 
       {/* Main Content Area (Full screen width) */}
-      <main className="flex-1 w-full">
-        <Outlet />
+      <main className="flex-1 w-full" role="main" aria-label="Main Application Content">
+        <ErrorBoundary fallbackTitle="Workspace Section Error">
+          <Outlet />
+        </ErrorBoundary>
       </main>
 
 

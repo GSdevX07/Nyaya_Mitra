@@ -39,6 +39,10 @@ class AuthUser:
     phone: str = ""
     relationship_to_accused: Optional[str] = None
     bar_registration_no: Optional[str] = None
+    years_of_experience: Optional[int] = None
+    specialization: Optional[str] = None
+    empanelment_category: Optional[str] = None
+    supervision_required: bool = False
 
 
 def _row_to_user(row: dict) -> AuthUser:
@@ -104,7 +108,11 @@ def _row_to_user(row: dict) -> AuthUser:
         linked_case_id=row.get("linked_case_id"),
         phone=str(row.get("phone", "") or ""),
         relationship_to_accused=row.get("relationship_to_accused"),
-        bar_registration_no=row.get("bar_registration_no"),
+        bar_registration_no=row.get("bar_registration_no") or ("D/1420/2018" if "advocate" in str(row.get("role", "")).lower() else None),
+        years_of_experience=int(row["years_of_experience"]) if row.get("years_of_experience") is not None else (7 if "advocate" in str(row.get("role", "")).lower() else None),
+        specialization=row.get("specialization") or ("Bail & Undertrial Defense" if "advocate" in str(row.get("role", "")).lower() else None),
+        empanelment_category=row.get("empanelment_category") or ("DLSA Senior Panel Counsel" if "advocate" in str(row.get("role", "")).lower() else None),
+        supervision_required=bool(row.get("supervision_required", False) or (row.get("years_of_experience") is not None and int(row["years_of_experience"]) < 3)),
     )
 
 
@@ -305,9 +313,9 @@ _DEMO_USER_DEFINITIONS = [
     {"id": "demo_jail_officer",      "email": "jail@demo.nyayamitra.in",         "role": "JAIL_OFFICER",               "full_name": "Jail Officer (Demo)",           "organization_id": "org_tihar_jail",   "district": "West Delhi", "facility_ids": ["fac_tihar_jail_04", "Central Jail No. 4, Tihar (Synthetic)", "Tihar"]},
     {"id": "demo_police_officer",    "email": "police@demo.nyayamitra.in",       "role": "POLICE_OFFICER",             "full_name": "Police Officer (Demo)",         "organization_id": "ps_kotwali_central", "police_station_id": "ps_kotwali_central", "police_station": "Kotwali Police Station", "district": "Central Delhi", "jurisdiction_ids": ["ps_kotwali_central", "Central Delhi"]},
     {"id": "demo_dlsa_officer",      "email": "dlsa@demo.nyayamitra.in",         "role": "DLSA_OFFICER",               "full_name": "DLSA Officer (Demo)",           "organization_id": "org_dlsa_central", "district": "Central Delhi"},
-    {"id": "demo_supervising",       "email": "supervisor@demo.nyayamitra.in",   "role": "SUPERVISING_LEGAL_OFFICER",  "full_name": "Supervising Legal Officer (Demo)", "organization_id": "org_dlsa_central", "district": "Central Delhi"},
-    {"id": "demo_advocate",          "email": "advocate@demo.nyayamitra.in",     "role": "DEFENSE_ADVOCATE",           "full_name": "Defense Advocate (Demo)",       "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001"},
-    {"id": "demo_ext_advocate",      "email": "extadvocate@demo.nyayamitra.in",  "role": "CONTROLLED_EXTERNAL_ADVOCATE","full_name": "External Advocate (Demo)",     "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001"},
+    {"id": "demo_supervising",       "email": "supervisor@demo.nyayamitra.in",   "role": "SUPERVISING_LEGAL_OFFICER",  "full_name": "Supervising Legal Officer (Demo)", "organization_id": "org_dlsa_central", "district": "Central Delhi", "bar_registration_no": "D/0842/2012", "years_of_experience": 12, "specialization": "Judicial Oversight & Human Rights", "empanelment_category": "Supervising Officer"},
+    {"id": "demo_advocate",          "email": "advocate@demo.nyayamitra.in",     "role": "DEFENSE_ADVOCATE",           "full_name": "Defense Advocate (Demo)",       "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001", "bar_registration_no": "D/1420/2018", "years_of_experience": 7, "specialization": "Undertrial Defense & Bail", "empanelment_category": "DLSA Senior Panel Counsel"},
+    {"id": "demo_ext_advocate",      "email": "extadvocate@demo.nyayamitra.in",  "role": "CONTROLLED_EXTERNAL_ADVOCATE","full_name": "External Advocate (Demo)",     "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001", "bar_registration_no": "D/2984/2021", "years_of_experience": 4, "specialization": "Criminal Defense", "empanelment_category": "Panel Advocate"},
     {"id": "demo_accused",           "email": "accused@demo.nyayamitra.in",      "role": "ACCUSED_USER",               "full_name": "Accused Person (Demo)",         "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001"},
     {"id": "demo_family",            "email": "family@demo.nyayamitra.in",       "role": "FAMILY_GUARDIAN",            "full_name": "Family Guardian (Demo)",        "organization_id": "org_dlsa_central", "district": "Central Delhi", "linked_case_id": "UTP-0001"},
     {

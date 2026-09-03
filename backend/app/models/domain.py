@@ -180,6 +180,10 @@ class OrganizationUser(BaseModel):
     role: UserRole
     phone: Optional[str] = None
     bar_registration_no: Optional[str] = None
+    years_of_experience: Optional[int] = None
+    specialization: Optional[str] = None
+    empanelment_category: Optional[str] = None
+    supervision_required: bool = False
     is_active: bool = True
     created_at: str = Field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
     deleted_at: Optional[str] = None

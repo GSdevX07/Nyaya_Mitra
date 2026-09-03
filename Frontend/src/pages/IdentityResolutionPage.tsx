@@ -10,7 +10,8 @@ import {
   ArrowRight,
   Fingerprint,
   Layers,
-  Sparkles
+  Sparkles,
+  Shield,
 } from 'lucide-react';
 
 interface DuplicateCandidate {

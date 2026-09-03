@@ -98,7 +98,9 @@ export interface CaseRecordData {
   relative_phone?: string;
   permanent_address?: string;
   assignment_status?: string;
+  assigned_lawyer?: string;
   assigned_lawyer_id?: string;
+  police_station_id?: string;
   status?: string;
   data_source_status: DataSourceStatus;
   legal_needs?: LegalNeedItem[];

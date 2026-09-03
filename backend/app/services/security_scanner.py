@@ -175,6 +175,54 @@ def scan_file_security(
         if b"/embeddedfiles" in lower_bytes and (b".exe" in lower_bytes or b".bat" in lower_bytes or b".ps1" in lower_bytes):
             threats.append("Dangerous embedded executable payload (/EmbeddedFiles) detected in PDF.")
 
+        # Deep Inspection: Decompress internal FlateDecode object streams via pypdf
+        try:
+            import io
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(file_bytes), strict=False)
+            for page_idx, page in enumerate(reader.pages):
+                # Inspect page annotations for interactive actions
+                if "/Annots" in page:
+                    annots = page["/Annots"]
+                    annots_list = annots.get_object() if hasattr(annots, "get_object") else annots
+                    if isinstance(annots_list, list):
+                        for annot_ref in annots_list:
+                            annot = annot_ref.get_object() if hasattr(annot_ref, "get_object") else annot_ref
+                            if isinstance(annot, dict):
+                                action = annot.get("/A")
+                                if action and hasattr(action, "get_object"):
+                                    action = action.get_object()
+                                if isinstance(action, dict):
+                                    s_type = str(action.get("/S", "")).lower()
+                                    if "javascript" in s_type or "launch" in s_type:
+                                        threats.append(f"Decompressed stream exploit: Page {page_idx+1} annotation contains malicious action {s_type}.")
+
+                # Decompress raw page content streams
+                try:
+                    contents = page.get_contents()
+                    contents_list = [contents] if not isinstance(contents, list) else contents
+                    for obj in contents_list:
+                        if obj is not None:
+                            stream_obj = obj.get_object() if hasattr(obj, "get_object") else obj
+                            if hasattr(stream_obj, "get_data"):
+                                decompressed = stream_obj.get_data().lower()
+                                if b"/javascript" in decompressed or b"/js" in decompressed or b"eval(" in decompressed:
+                                    threats.append(f"Decompressed stream exploit: Page {page_idx+1} stream contains hidden active script.")
+                except Exception:
+                    pass
+
+            # Inspect catalog root for auto-execution scripts
+            trailer = getattr(reader, "trailer", {}) or {}
+            root = trailer.get("/Root", {})
+            if hasattr(root, "get_object"):
+                root = root.get_object()
+            if isinstance(root, dict):
+                catalog_repr = str(root.get("/OpenAction") or root.get("/AA") or root.get("/Names") or "").lower()
+                if "javascript" in catalog_repr or "launch" in catalog_repr:
+                    threats.append("Decompressed catalog exploit: PDF Root dictionary contains auto-executing script.")
+        except Exception:
+            pass
+
     # 3. Web Script Injection in text/image streams
     sample_text = file_bytes[:4096].lower()
     if b"<script" in sample_text or b"javascript:" in sample_text or b"onerror=" in sample_text or b"onload=" in sample_text:

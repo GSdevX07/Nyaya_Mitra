@@ -4,10 +4,10 @@ The backend of Nyaya Mitra is built with FastAPI and runs an agentic AI system f
 
 ## System Architecture
 
-1.  **Primary Cloud Tier:** Groq API (`llama-3.1-8b-instant`) for blazing-fast inference.
+1.  **Primary Cloud Tier:** Groq API (`llama-3.1-8b-instant` / `openai/gpt-oss-120b`) for rapid legal reasoning and drafting.
 2.  **Enterprise Cloud Tier:** IBM Watsonx.ai (`granite-3-8b-instruct`) for enterprise-grade deterministic LLM fallback.
-3.  **Local Edge LLM Tier:** Ollama (`granite4.1:8b`) for when cloud services fail or timeout.
-4.  **Deterministic Pre-computed Safety Fallback:** Hardcoded mock responses ensuring the demo never crashes, even without internet.
+3.  **Local Edge LLM Tier:** Ollama (`granite4.1:8b`) for on-premises/air-gapped prison deployments when cloud services fail or timeout.
+4.  **Operational Human-in-the-Loop Handover:** When all configured AI providers are unavailable, the system transparently issues an operational notice requiring qualified legal counsel review rather than substituting fabricated legal advice.
 
 ## Setup Instructions
 

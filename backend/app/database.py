@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import json
 import sqlite3
+import logging
 import datetime
 import uuid
 from typing import List, Optional, Dict, Any
@@ -44,6 +45,7 @@ else:
     load_dotenv()
 
 DB_PATH = Path(__file__).resolve().parent.parent / "nyaya_mitra.db"
+logger = logging.getLogger("nyaya_mitra.database")
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
@@ -54,7 +56,7 @@ if SUPABASE_URL and SUPABASE_KEY and not SUPABASE_URL.startswith("https://placeh
         from supabase import create_client
         supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
     except Exception as e:
-        print(f"[WARN] Supabase client init failed: {e}. Using local SQLite persistence.")
+        logger.warning(f"Supabase client init failed: {e}. Using local SQLite persistence.")
 
 
 # ── Canonical 6 Hero Synthetic Cases ───────────────────────────────────────────
@@ -671,7 +673,7 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
         if "updated_at" not in cols:
             cursor.execute("ALTER TABLE organization_users ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
     except Exception as e:
-        print(f"[WARN] SQLite organization_users column upgrade error: {e}")
+        logger.warning(f"SQLite organization_users column upgrade error: {e}")
 
     # 3. Accused Persons & Custody Records (Individual Subject Master)
     cursor.execute("""
@@ -721,7 +723,7 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
             if col not in ap_cols:
                 cursor.execute(f"ALTER TABLE accused_persons ADD COLUMN {col} {defn};")
     except Exception as e:
-        print(f"[WARN] accused_persons column upgrade error: {e}")
+        logger.warning(f"accused_persons column upgrade error: {e}")
 
     # 3b. Family Contacts (normalized from accused_persons)
     cursor.execute("""
@@ -1141,7 +1143,7 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
             END;
         """)
     except Exception as e:
-        print(f"[WARN] Failed to create audit immutability triggers: {e}")
+        logger.warning(f"Failed to create audit immutability triggers: {e}")
 
     # 9. Legacy Cases View / Backward Compatibility Table
     cursor.execute("""
@@ -1622,7 +1624,7 @@ def init_db():
             pass
 
     except Exception as e:
-        print(f"[WARN] SQLite init_db failed: {e}")
+        logger.warning(f"SQLite init_db failed: {e}")
 
 
 
@@ -2329,7 +2331,7 @@ def get_family_contacts(accused_id: str) -> list:
             if res:
                 return res
         except Exception as e:
-            print(f"[WARN] Supabase get_family_contacts error: {e}")
+            logger.warning(f"Supabase get_family_contacts error: {e}")
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -2339,7 +2341,7 @@ def get_family_contacts(accused_id: str) -> list:
         conn.close()
         return [dict(zip(cols, r)) for r in rows]
     except Exception as e:
-        print(f"[WARN] get_family_contacts error: {e}")
+        logger.warning(f"get_family_contacts error: {e}")
         return []
 
 
@@ -2362,7 +2364,7 @@ def get_identity_references(accused_id: str) -> dict:
                 "voter_id_masked": row[3],
             }
     except Exception as e:
-        print(f"[WARN] get_identity_references error: {e}")
+        logger.warning(f"get_identity_references error: {e}")
     return {}
 
 
@@ -2375,7 +2377,7 @@ def get_hearings_schedule() -> list:
             if res:
                 return res
         except Exception as e:
-            print(f"[WARN] Supabase get_hearings_schedule error: {e}")
+            logger.warning(f"Supabase get_hearings_schedule error: {e}")
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -2385,7 +2387,7 @@ def get_hearings_schedule() -> list:
         conn.close()
         return [dict(zip(cols, r)) for r in rows]
     except Exception as e:
-        print(f"[WARN] get_hearings_schedule error: {e}")
+        logger.warning(f"get_hearings_schedule error: {e}")
         return []
 
 
@@ -2417,7 +2419,7 @@ def get_audit_events(
                     }
                 return res
         except Exception as e:
-            print(f"[WARN] Supabase get_audit_events error: {e}")
+            logger.warning(f"Supabase get_audit_events error: {e}")
 
     try:
         conn = get_db_connection()
@@ -2475,7 +2477,7 @@ def get_audit_events(
             }
         return events
     except Exception as e:
-        print(f"[WARN] get_audit_events error: {e}")
+        logger.warning(f"get_audit_events error: {e}")
         if return_pagination:
             return {"events": [], "total_count": 0, "returned_count": 0, "offset": offset, "limit": limit}
         return []
@@ -2497,7 +2499,7 @@ def get_identity_merge_candidates(status_filter: Optional[str] = "PENDING_HUMAN_
                                 rec[field] = []
                 return res
         except Exception as e:
-            print(f"[WARN] Supabase get_identity_merge_candidates error: {e}")
+            logger.warning(f"Supabase get_identity_merge_candidates error: {e}")
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -2522,7 +2524,7 @@ def get_identity_merge_candidates(status_filter: Optional[str] = "PENDING_HUMAN_
             results.append(rec)
         return results
     except Exception as e:
-        print(f"[WARN] get_identity_merge_candidates error: {e}")
+        logger.warning(f"get_identity_merge_candidates error: {e}")
         return []
 
 
@@ -2550,7 +2552,7 @@ def resolve_merge_candidate(candidate_id: str, action: str, notes: str, reviewed
                 except Exception:
                     local_rec[field] = []
     except Exception as e:
-        print(f"[WARN] SQLite resolve_merge_candidate error: {e}")
+        logger.warning(f"SQLite resolve_merge_candidate error: {e}")
 
     from app.supabase_adapter import is_supabase_active, supa_resolve_merge_candidate
     if is_supabase_active():
@@ -2559,7 +2561,7 @@ def resolve_merge_candidate(candidate_id: str, action: str, notes: str, reviewed
             if supa_res:
                 return supa_res
         except Exception as e:
-            print(f"[WARN] Supabase resolve_merge_candidate error: {e}")
+            logger.warning(f"Supabase resolve_merge_candidate error: {e}")
 
     return local_rec or {"id": candidate_id, "review_status": action, "reviewed_by": reviewed_by, "reviewed_at": now}
 
@@ -2580,7 +2582,7 @@ def get_all_cases() -> List[CaseRecord]:
                 if results:
                     return results
         except Exception as e:
-            print(f"[WARN] Supabase get_all_cases error: {e}. Falling back to SQLite.")
+            logger.warning(f"Supabase get_all_cases error: {e}. Falling back to SQLite.")
 
     # SQLite fallback
     try:
@@ -2593,7 +2595,7 @@ def get_all_cases() -> List[CaseRecord]:
         if rows:
             return [CaseRecord.model_validate_json(r[0]) for r in rows]
     except Exception as e:
-        print(f"[WARN] SQLite get_all_cases error: {e}")
+        logger.warning(f"SQLite get_all_cases error: {e}")
 
     return list(_MEMORY_CASES.values())
 
@@ -2611,7 +2613,7 @@ def get_case(case_id: str) -> Optional[CaseRecord]:
         if row:
             return CaseRecord.model_validate_json(row[0])
     except Exception as e:
-        print(f"[WARN] SQLite get_case error: {e}")
+        logger.warning(f"SQLite get_case error: {e}")
 
     return _MEMORY_CASES.get(case_id)
 
@@ -2630,7 +2632,7 @@ def update_case_status(case_id: str, new_status: CaseState) -> bool:
         try:
             supa_update_case_status(case_id, new_status.value)
         except Exception as e:
-            print(f"[WARN] Supabase update_case_status error: {e}")
+            logger.warning(f"Supabase update_case_status error: {e}")
 
     # SQLite write (always — local persistence)
     try:
@@ -2643,7 +2645,7 @@ def update_case_status(case_id: str, new_status: CaseState) -> bool:
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[WARN] SQLite update_case_status error: {e}")
+        logger.warning(f"SQLite update_case_status error: {e}")
 
     return True
 
@@ -2688,7 +2690,7 @@ def record_advocate_sign_off(
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[WARN] record_advocate_sign_off failed: {e}")
+        logger.warning(f"record_advocate_sign_off failed: {e}")
 
     # Dual-write to Supabase when active
     try:
@@ -2707,7 +2709,7 @@ def record_advocate_sign_off(
                     "updated_at": now_iso,
                 }).execute()
     except Exception as err:
-        print(f"[WARN] Supabase record_advocate_sign_off error: {err}")
+        logger.warning(f"Supabase record_advocate_sign_off error: {err}")
 
     return {
         "id": app_id,
@@ -2733,7 +2735,7 @@ def get_case_bail_application(case_id: str) -> Optional[dict]:
             return d
         conn.close()
     except Exception as e:
-        print(f"[WARN] get_case_bail_application error: {e}")
+        logger.warning(f"get_case_bail_application error: {e}")
     return None
 
 
@@ -2756,7 +2758,7 @@ def update_case_documents(case_id: str, present_docs: list) -> bool:
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[WARN] SQLite update_case_documents error: {e}")
+        logger.warning(f"SQLite update_case_documents error: {e}")
 
     return True
 
@@ -2780,7 +2782,7 @@ def assign_case_lawyer(case_id: str, lawyer_id: str) -> bool:
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[WARN] SQLite assign_case_lawyer error: {e}")
+        logger.warning(f"SQLite assign_case_lawyer error: {e}")
 
     return True
 
@@ -2803,7 +2805,7 @@ def decline_case_assignment(case_id: str) -> bool:
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[WARN] SQLite decline_case error: {e}")
+        logger.warning(f"SQLite decline_case error: {e}")
 
     return True
 
@@ -2826,7 +2828,7 @@ def append_case_timeline_event(case_id: str, event: TimelineEvent) -> bool:
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[WARN] SQLite append_timeline error: {e}")
+        logger.warning(f"SQLite append_timeline error: {e}")
 
     return True
 
@@ -2859,7 +2861,15 @@ def add_evidence(case_id: str, document_type: str, stored_hash: str) -> str:
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[WARN] SQLite add_evidence error: {e}")
+        logger.error(f"SQLite add_evidence error: {e}", exc_info=True)
+        raise RuntimeError(f"Database write failed for evidence: {e}") from e
+
+    # Dual-sync to Supabase PostgreSQL when available
+    try:
+        from app.supabase_adapter import supa_upsert_evidence
+        supa_upsert_evidence(record)
+    except Exception as e:
+        logger.warning(f"Supabase add_evidence sync warning: {e}")
 
     return evidence_id
 
@@ -2885,7 +2895,7 @@ def get_all_evidence() -> List[dict]:
                 for r in rows
             ]
     except Exception as e:
-        print(f"[WARN] SQLite get_all_evidence error: {e}")
+        logger.warning(f"SQLite get_all_evidence error: {e}")
 
     return _MEMORY_EVIDENCE
 
@@ -2966,7 +2976,18 @@ def store_uploaded_document(
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[WARN] SQLite store_uploaded_document error: {e}")
+        logger.error(f"SQLite store_uploaded_document error: {e}", exc_info=True)
+        raise RuntimeError(f"Database write failed for uploaded document: {e}") from e
+
+    # Dual-sync to Supabase PostgreSQL when available
+    try:
+        from app.supabase_adapter import supa_save_uploaded_document
+        supa_rec = dict(record)
+        supa_rec["is_handwritten"] = bool(is_handwritten)
+        supa_rec["authoritative_source"] = bool(authoritative_source)
+        supa_save_uploaded_document(supa_rec)
+    except Exception as e:
+        logger.warning(f"Supabase store_uploaded_document sync warning: {e}")
 
     return stable_id
 
@@ -2983,7 +3004,7 @@ def get_case_uploaded_documents(case_id: str) -> List[dict]:
         if rows:
             return [dict(zip(cols, r)) for r in rows]
     except Exception as e:
-        print(f"[WARN] SQLite get_case_uploaded_documents error: {e}")
+        logger.warning(f"SQLite get_case_uploaded_documents error: {e}")
 
     return [d for d in _MEMORY_UPLOADED_DOCS if d.get("case_id") == case_id]
 
@@ -3000,7 +3021,7 @@ def get_all_uploaded_documents() -> List[dict]:
         if rows:
             return [dict(zip(cols, r)) for r in rows]
     except Exception as e:
-        print(f"[WARN] SQLite get_all_uploaded_documents error: {e}")
+        logger.warning(f"SQLite get_all_uploaded_documents error: {e}")
 
     return _MEMORY_UPLOADED_DOCS
 
@@ -3048,7 +3069,7 @@ def add_notification(
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[WARN] SQLite add_notification error: {e}")
+        logger.warning(f"SQLite add_notification error: {e}")
 
     # Supabase sync if active
     try:
@@ -3058,7 +3079,7 @@ def add_notification(
             supa_rec["is_read"] = False
             supa_add_notification(supa_rec)
     except Exception as e:
-        print(f"[WARN] Supabase add_notification error: {e}")
+        logger.warning(f"Supabase add_notification error: {e}")
 
     return notif_id
 
@@ -3087,7 +3108,7 @@ def get_all_notifications() -> List[dict]:
                 for r in rows
             ]
     except Exception as e:
-        print(f"[WARN] SQLite get_all_notifications error: {e}")
+        logger.warning(f"SQLite get_all_notifications error: {e}")
 
     return _MEMORY_NOTIFICATIONS
 
@@ -3157,7 +3178,7 @@ def get_notifications_for_user(
 
         return results
     except Exception as e:
-        print(f"[WARN] SQLite get_notifications_for_user error: {e}")
+        logger.warning(f"SQLite get_notifications_for_user error: {e}")
         return []
 
 
@@ -3242,7 +3263,7 @@ def create_legal_escalation(
             "review_status": "PENDING_REVIEW",
         }
     except Exception as e:
-        print(f"[WARN] Failed to create legal escalation: {e}")
+        logger.warning(f"Failed to create legal escalation: {e}")
         return None
 
 
@@ -3259,7 +3280,7 @@ def get_pending_legal_escalations(status: str = "PENDING_REVIEW") -> List[dict]:
         conn.close()
         return [dict(r) for r in rows]
     except Exception as e:
-        print(f"[WARN] Failed to get legal escalations: {e}")
+        logger.warning(f"Failed to get legal escalations: {e}")
         return []
 
 
@@ -3282,7 +3303,7 @@ def resolve_legal_escalation(escalation_id: str, user_id: str, resolution_notes:
         conn.close()
         return True
     except Exception as e:
-        print(f"[WARN] Failed to resolve legal escalation: {e}")
+        logger.warning(f"Failed to resolve legal escalation: {e}")
         return False
 
 
@@ -3330,7 +3351,7 @@ def log_legal_retrieval(
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[WARN] Failed to log legal retrieval: {e}")
+        logger.warning(f"Failed to log legal retrieval: {e}")
 
 
 
@@ -3601,7 +3622,7 @@ def log_document_access(
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[WARN] log_document_access failed: {e}")
+        logger.warning(f"log_document_access failed: {e}")
     return log_id
 
 

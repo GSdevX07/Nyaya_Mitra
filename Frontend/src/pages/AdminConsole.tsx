@@ -181,7 +181,7 @@ export function AdminConsole() {
                 {healthData?.subsystems.api.status || "HEALTHY"}
               </div>
               <div className="text-[10px] font-mono text-muted-foreground mt-1">
-                {healthData?.environment.framework || "FastAPI 0.115"} / Python {healthData?.environment.python_version || "3.14"}
+                {healthData?.subsystems.api.protocol || "HTTP/1.1"} • {healthData?.environment.framework || "FastAPI 0.115"}
               </div>
             </div>
 

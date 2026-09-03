@@ -29,13 +29,15 @@ import { IdentityResolutionPage } from "./pages/IdentityResolutionPage";
 import { PoliceWorkspace } from "./pages/PoliceWorkspace";
 import { DocumentAssessmentPage } from "./pages/DocumentAssessmentPage";
 import { LegalSourcesAdmin } from "./pages/LegalSourcesAdmin";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 function App() {
 
   return (
-    <AuthProvider>
-      <Router>
-        <Routes>
+    <ErrorBoundary fallbackTitle="Nyaya Mitra Legal Operations Portal Error">
+      <AuthProvider>
+        <Router>
+          <Routes>
           {/* Public Unauthenticated Routes */}
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
@@ -408,6 +410,7 @@ function App() {
         </Routes>
       </Router>
     </AuthProvider>
+    </ErrorBoundary>
   );
 }
 

@@ -25,6 +25,7 @@ Design notes:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import warnings
 
 # Suppress verbose oneDNN and TensorFlow informational messages
@@ -44,18 +45,32 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, status, File, UploadFile, Body, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.agents.orchestrator import process_case
 from app.agents.prioritization_agent import prioritize_cases
 from app.agents.eligibility_agent import evaluate_eligibility
-from app.models.schemas import CaseRecord, UrgencyFlags, CaseState, LegalNeedItem, LegalNeedType, PlatformActionRequest
+from app.models.schemas import (
+    CaseRecord, UrgencyFlags, CaseState, LegalNeedItem, LegalNeedType,
+    PlatformActionRequest, DocumentCorrectionRequest, ReprocessDocumentRequest,
+)
 from app.database import (
     init_db, get_all_cases, get_case, update_case_status, update_case_documents,
     add_evidence, get_all_evidence, get_evidence_item, get_all_notifications,
     store_uploaded_document, get_case_uploaded_documents, add_notification,
+    get_uploaded_document_by_id, update_uploaded_document_status,
+    store_document_version, get_document_versions,
+    record_field_correction, get_document_field_corrections, log_document_access,
+    build_evidence_chain,
 )
-from app.document_pipeline import DocumentPipelineError, DocumentPipelineResult, execute_full_document_pipeline, extract_document_text
+from app.document_pipeline import (
+    DocumentPipelineError, DocumentPipelineResult, execute_full_document_pipeline,
+    extract_document_text, extract_metadata_and_spans, classify_document,
+)
+from app.services.security_scanner import (
+    validate_file_signature, scan_file_security, ScanStatus,
+)
 from app.rag.legal_ingestion import LegalIngestionError, ingest_legal_pdf
 from app.rag.vector_store import VectorStoreUnavailable, corpus_status
 
@@ -312,6 +327,17 @@ def _check_police_jurisdiction(case: Any, user: AuthUser) -> bool:
         return True
 
     return False
+
+
+def _check_dlsa_district_match(case, user: AuthUser) -> bool:
+    """Validate that the case belongs to the DLSA user's authorized district."""
+    if not user.district or user.district.lower() == "all":
+        return True
+    user_dist = user.district.strip().lower()
+    case_dist = (getattr(case, "district", None) or "").strip().lower()
+    if not case_dist:
+        return True
+    return user_dist in case_dist or case_dist in user_dist
 
 
 @app.get("/cases", tags=["Cases"])
@@ -1134,6 +1160,17 @@ def get_case_by_id(
             "urgency": res.get("urgency"),
         }
 
+    from app.database import get_case_bail_application
+    bail_app = get_case_bail_application(case_id)
+    if bail_app:
+        res["advocate_signed_off"] = bail_app.get("advocate_signed_off", False)
+        res["signed_off_by"] = bail_app.get("signed_off_by_user_id")
+        res["signed_off_at"] = bail_app.get("signed_off_at")
+        if bail_app.get("petition_draft_text") and res.get("draft"):
+            res["draft"]["drafted_document"] = bail_app.get("petition_draft_text")
+    else:
+        res["advocate_signed_off"] = False
+
     return res
 
 
@@ -1199,6 +1236,77 @@ def decline_case(
         "status": "declined",
         "message": f"Case {case_id} declined by {current_user.id}.",
         "case_id": case_id,
+    }
+
+
+class CaseSignOffPayload(BaseModel):
+    draft_text: Optional[str] = None
+
+
+@app.post("/cases/{case_id}/sign-off", tags=["Cases"])
+def sign_off_case(
+    case_id: str,
+    payload: Optional[CaseSignOffPayload] = None,
+    current_user: AuthUser = Depends(require_role(
+        Role.DEFENSE_ADVOCATE,
+        Role.CONTROLLED_EXTERNAL_ADVOCATE,
+        Role.SUPERVISING_LEGAL_OFFICER,
+    )),
+):
+    """
+    Counsel Legal Sign-Off Gateway.
+    Stamps the petition draft as verified Advocate Work Product.
+    Persists to bail_applications, appends to case timeline, and records ADVOCATE_SIGN_OFF audit event.
+    """
+    from app.database import record_advocate_sign_off, append_case_timeline_event
+    from app.models.schemas import TimelineEvent
+    from app.repositories.audit_repository import append_audit_event
+
+    case = _find_case(case_id)
+    lawyer_name = current_user.full_name or current_user.id
+    draft_content = payload.draft_text if payload else None
+
+    result = record_advocate_sign_off(case_id, current_user.id, lawyer_name, draft_content)
+
+    append_case_timeline_event(
+        case_id,
+        TimelineEvent(
+            id=f"TLE-{case_id}-SIGNOFF-{datetime.datetime.now().strftime('%M%S')}",
+            timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            event_type="DRAFT",
+            title="Counsel Legal Sign-Off Recorded",
+            description=f"Petition draft reviewed and formally stamped as Counsel Work Product by Adv. {lawyer_name} ({current_user.role.value}). Submitted for supervisory review.",
+            actor=lawyer_name,
+            actor_role=current_user.role.value,
+            source="Advocate Briefing Workspace",
+            is_human_verified=True,
+        ),
+    )
+
+    try:
+        append_audit_event({
+            "entity_type": "bail_application",
+            "entity_id": result["id"],
+            "action": "ADVOCATE_SIGN_OFF",
+            "actor_id": current_user.id,
+            "actor_role": current_user.role.value,
+            "severity": "NOTICE",
+            "details": {
+                "case_id": case_id,
+                "advocate_name": lawyer_name,
+                "application_id": result["id"],
+            },
+        })
+    except Exception as e:
+        print(f"[WARN] Failed to log ADVOCATE_SIGN_OFF audit: {e}")
+
+    return {
+        "status": "success",
+        "case_id": case_id,
+        "advocate_signed_off": True,
+        "signed_off_by": lawyer_name,
+        "signed_off_at": result["signed_off_at"],
+        "message": f"Counsel legal sign-off recorded for case {case_id}.",
     }
 
 
@@ -1787,8 +1895,12 @@ def get_documents(
 ):
     """
     Retrieve document status and vault inventory across all active cases.
-    Reads from SQLite reflects any uploads that have been persisted.
+    Reads from SQLite reflects any uploads that have been persisted,
+    including uploader attribution, verification status, and cryptographic hashes.
     """
+    from app.database import get_all_uploaded_documents
+    from app.auth.user_store import get_user_by_id
+
     docs = []
     cases = get_all_cases()
     if current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
@@ -1806,39 +1918,125 @@ def get_documents(
             auth_dists = [d.strip().lower() for d in current_user.authorized_district_ids]
             if "all" not in auth_dists:
                 cases = [c for c in cases if c.district and c.district.strip().lower() in auth_dists]
-        for c in cases:
-            for r_doc in c.required_docs:
-                is_present = r_doc in c.present_docs
-                docs.append({
-                    "id": f"DOC-{c.case_id}-{r_doc}",
-                    "case_id": c.case_id,
-                    "case_reference": f"REF-{c.case_id}",
-                    "document_category": r_doc,
-                    "document_type": r_doc.replace("_", " ").title(),
-                    "source_authority": "COURT_RECORD" if "order" in r_doc else ("POLICE_RECORD" if "fir" in r_doc or "charge" in r_doc else "PRISON_RECORD"),
-                    "status": "VERIFIED" if is_present else "PENDING_INTAKE",
-                    "verification_status": "VERIFIED" if is_present else "PENDING_INTAKE",
-                    "is_present": is_present,
-                    "provenance": c.jail_location,
-                    "district": c.district,
-                    "uploaded_date": c.arrest_date if is_present else None,
-                    "workflow_impact": "UNBLOCKS_FILING" if not is_present else "COMPLIANT",
-                })
-        return docs
 
+    # Index uploaded documents from the persistent database
+    all_uploads = get_all_uploaded_documents()
+    uploads_by_case_and_type = {}
+    for u in all_uploads:
+        c_id = u.get("case_id")
+        d_type = (u.get("document_type") or "").lower().strip().replace(" ", "_")
+        key = (c_id, d_type)
+        if key not in uploads_by_case_and_type:
+            uploads_by_case_and_type[key] = u
+
+    user_name_cache = {}
+    def _format_uploader(uid: Optional[str], auth_role: Optional[str]):
+        if not uid:
+            return "Court Registry (Baseline)" if auth_role == "INSTITUTIONAL" else "Not Recorded"
+        if uid in user_name_cache:
+            return user_name_cache[uid]
+        usr = get_user_by_id(uid)
+        if usr:
+            disp = f"{usr.full_name} ({usr.role.value.replace('_', ' ').title()})"
+            user_name_cache[uid] = disp
+            return disp
+        user_name_cache[uid] = uid
+        return uid
+
+    seen_keys = set()
     for c in cases:
         for r_doc in c.required_docs:
-            is_present = r_doc in c.present_docs
+            norm_doc = r_doc.lower().strip().replace(" ", "_")
+            seen_keys.add((c.case_id, norm_doc))
+            up = uploads_by_case_and_type.get((c.case_id, norm_doc))
+
+            if up:
+                doc_id = up.get("id")
+                status_val = up.get("document_status", "PENDING_VERIFICATION")
+                is_present = (status_val == "VERIFIED") or (r_doc in c.present_docs)
+                uploader = _format_uploader(up.get("uploaded_by"), up.get("source_authority"))
+                uploaded_date = up.get("uploaded_at")
+                file_hash = up.get("file_hash")
+                file_name = up.get("file_name")
+                source_auth = up.get("source_authority", "INSTITUTIONAL")
+            else:
+                is_present = r_doc in c.present_docs
+                status_val = "VERIFIED" if is_present else "MISSING"
+                doc_id = f"DOC-{c.case_id}-{r_doc}"
+                uploader = "Court Registry (Baseline)" if is_present else None
+                uploaded_date = c.arrest_date if is_present else None
+                file_hash = None
+                file_name = None
+                source_auth = "COURT_RECORD" if "order" in r_doc else ("POLICE_RECORD" if "fir" in r_doc or "charge" in r_doc else "PRISON_RECORD")
+
+            if status_val == "VERIFIED":
+                status_display = "Verified & Present"
+            elif status_val == "PENDING_VERIFICATION":
+                status_display = "Pending Verification"
+            else:
+                status_display = "Missing Action Required"
+
             docs.append({
-                "id": f"DOC-{c.case_id}-{r_doc}",
+                "id": doc_id,
+                "actual_doc_id": doc_id,
                 "case_id": c.case_id,
+                "case_reference": f"REF-{c.case_id}",
                 "prisoner_name": c.name,
+                "document_category": r_doc,
                 "document_type": r_doc.replace("_", " ").title(),
-                "status": "Verified & Present" if is_present else "Missing Action Required",
+                "raw_document_type": norm_doc,
+                "source_authority": source_auth,
+                "status": status_display,
+                "verification_status": status_val,
+                "document_status": status_val,
                 "is_present": is_present,
-                "uploaded_date": c.arrest_date if is_present else None,
+                "provenance": c.jail_location,
+                "district": c.district,
+                "uploaded_by": uploader,
+                "uploaded_by_id": up.get("uploaded_by") if up else None,
+                "uploaded_date": uploaded_date,
+                "file_hash": file_hash,
+                "file_name": file_name,
                 "jail_location": c.jail_location,
+                "workflow_impact": "COMPLIANT" if is_present else "UNBLOCKS_FILING",
             })
+
+    # Also add supplemental uploaded documents for accessible cases
+    cases_by_id = {c.case_id: c for c in cases}
+    for (cid, dtype), up in uploads_by_case_and_type.items():
+        if (cid, dtype) not in seen_keys and cid in cases_by_id:
+            c = cases_by_id[cid]
+            status_val = up.get("document_status", "PENDING_VERIFICATION")
+            is_pres = (status_val == "VERIFIED")
+            docs.append({
+                "id": up.get("id"),
+                "actual_doc_id": up.get("id"),
+                "case_id": c.case_id,
+                "case_reference": f"REF-{c.case_id}",
+                "prisoner_name": c.name,
+                "document_category": dtype,
+                "document_type": dtype.replace("_", " ").title(),
+                "raw_document_type": dtype,
+                "source_authority": up.get("source_authority", "SUPPLEMENTAL"),
+                "status": "Verified & Present" if is_pres else "Pending Verification",
+                "verification_status": status_val,
+                "document_status": status_val,
+                "is_present": is_pres,
+                "provenance": c.jail_location,
+                "district": c.district,
+                "uploaded_by": _format_uploader(up.get("uploaded_by"), up.get("source_authority")),
+                "uploaded_by_id": up.get("uploaded_by"),
+                "uploaded_date": up.get("uploaded_at"),
+                "file_hash": up.get("file_hash"),
+                "file_name": up.get("file_name"),
+                "jail_location": c.jail_location,
+                "workflow_impact": "COMPLIANT" if is_pres else "UNBLOCKS_FILING",
+            })
+
+    if current_user.role == Role.READ_ONLY_AUDITOR:
+        for d in docs:
+            d.pop("prisoner_name", None)
+
     return docs
 
 
@@ -1851,7 +2049,7 @@ def get_case_documents(
         Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE,
     ))
 ):
-    """Retrieve document status breakdown for a single case."""
+    """Retrieve document status breakdown for a single case including uploader provenance."""
     case = _find_case(case_id)
 
     if current_user.role == Role.JAIL_OFFICER:
@@ -1879,13 +2077,62 @@ def get_case_documents(
                 detail="Forbidden: Defense advocates may only access documents for assigned cases.",
             )
 
-    missing = [d for d in case.required_docs if d not in case.present_docs]
+    from app.database import get_case_uploaded_documents
+    from app.auth.user_store import get_user_by_id
+    case_uploads = get_case_uploaded_documents(case_id)
+    uploads_by_type = {
+        (u.get("document_type") or "").lower().strip().replace(" ", "_"): u
+        for u in case_uploads
+    }
+
+    doc_details = []
+    missing = []
+    for r_doc in case.required_docs:
+        norm_doc = r_doc.lower().strip().replace(" ", "_")
+        up = uploads_by_type.get(norm_doc)
+        if up:
+            status_val = up.get("document_status", "PENDING_VERIFICATION")
+            is_present = (status_val == "VERIFIED") or (r_doc in case.present_docs)
+            u_user = get_user_by_id(up.get("uploaded_by")) if up.get("uploaded_by") else None
+            uploader_str = f"{u_user.full_name} ({u_user.role.value.replace('_', ' ').title()})" if u_user else (up.get("uploaded_by") or "Institutional Officer")
+            doc_details.append({
+                "id": up.get("id"),
+                "actual_doc_id": up.get("id"),
+                "document_type": norm_doc,
+                "document_title": r_doc.replace("_", " ").title(),
+                "status": "Verified & Present" if is_present else "Pending Verification",
+                "document_status": status_val,
+                "is_present": is_present,
+                "uploaded_by": uploader_str,
+                "uploaded_at": up.get("uploaded_at"),
+                "file_hash": up.get("file_hash"),
+            })
+            if not is_present:
+                missing.append(r_doc)
+        else:
+            is_present = r_doc in case.present_docs
+            doc_details.append({
+                "id": f"DOC-{case.case_id}-{r_doc}",
+                "actual_doc_id": f"DOC-{case.case_id}-{r_doc}",
+                "document_type": norm_doc,
+                "document_title": r_doc.replace("_", " ").title(),
+                "status": "Verified & Present" if is_present else "Missing Action Required",
+                "document_status": "VERIFIED" if is_present else "MISSING",
+                "is_present": is_present,
+                "uploaded_by": "Court Registry (Baseline)" if is_present else None,
+                "uploaded_at": case.arrest_date if is_present else None,
+                "file_hash": None,
+            })
+            if not is_present:
+                missing.append(r_doc)
+
     return {
         "case_id": case_id,
         "required_docs": case.required_docs,
         "present_docs": case.present_docs,
         "missing_docs": missing,
         "is_complete": len(missing) == 0,
+        "documents_detail": doc_details,
     }
 
 
@@ -1898,6 +2145,7 @@ async def upload_document(
     current_user: AuthUser = Depends(require_role(
         Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
         Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE,
     )),
 ):
     """
@@ -1998,6 +2246,19 @@ async def upload_document(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Forbidden: Government administrators may only upload governance-origin records (policy circulars, administrative orders, compliance notices, SLA directives). Primary institutional case records ('{document_type}') must be submitted by originating authorities (Police/Jail/Court/DLSA).",
             )
+    elif current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        user_full = (current_user.full_name or "").lower()
+        is_assigned = (
+            (case.assigned_lawyer_id and case.assigned_lawyer_id == current_user.id)
+            or (current_user.linked_case_id == case.case_id)
+            or (getattr(case, "assigned_lawyer", None) and user_full and user_full in case.assigned_lawyer.lower())
+            or current_user.role == Role.DEFENSE_ADVOCATE
+        )
+        if not is_assigned:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Case '{case_id}' is not assigned to you.",
+            )
 
     # ── 1. Read file bytes if a file was provided ─────────────────────────────
     file_bytes: Optional[bytes] = None
@@ -2009,16 +2270,56 @@ async def upload_document(
         file_name = file.filename
         mime_type = file.content_type or "application/octet-stream"
 
+    # ── 1b. Validate binary file signature (magic bytes) & size limits ────────
+    scan_status_val = "PASSED"
+    scan_details_val = None
+    if file_bytes:
+        is_valid, err_msg, detected_type = validate_file_signature(file_bytes, file_name, mime_type)
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"File validation failed: {err_msg}",
+            )
+        # Run security boundary scan
+        scan_res = scan_file_security(file_bytes, file_name)
+        scan_status_val = scan_res.status.value
+        scan_details_val = scan_res.threat_details
+        if scan_res.status == ScanStatus.QUARANTINED:
+            try:
+                from app.repositories.audit_repository import append_audit_event
+                append_audit_event({
+                    "entity_type": "document_security_alert",
+                    "entity_id": case_id,
+                    "action": "DOCUMENT_SECURITY_QUARANTINED",
+                    "actor_id": current_user.id,
+                    "actor_role": current_user.role.value,
+                    "severity": "CRITICAL",
+                    "details": {
+                        "file_name": file_name,
+                        "threat_details": scan_res.threat_details,
+                    }
+                })
+            except Exception as e:
+                print(f"[WARN] Failed to record security quarantine audit event: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Security screening failed: {scan_res.threat_details}",
+            )
+
     # ── 2. Extract text from file (OCR / pypdf) ───────────────────────────────
     extracted_text = ""
     is_handwritten = False
     ocr_engine = "none"
+    ocr_confidence = 1.0
+    manual_verification_required = False
+    needs_human_verification_reason = None
 
     if file_bytes:
         try:
-            is_handwritten, _conf, ocr_engine, extracted_text = extract_document_text(
-                file_bytes, file_name, None
-            )
+            (
+                is_handwritten, _conf, ocr_engine, extracted_text,
+                ocr_confidence, manual_verification_required, needs_human_verification_reason
+            ) = extract_document_text(file_bytes, file_name, None)
         except DocumentPipelineError as exc:
             # Surface actionable OCR errors to the client
             raise HTTPException(status_code=422, detail=str(exc))
@@ -2032,24 +2333,45 @@ async def upload_document(
             detail="Please upload a file or paste text before submitting.",
         )
 
-    # ── 3. Compute SHA-256 hash for tamper-evident storage ────────────────────
+    # ── 2b. Extract structured facts with verbatim source spans ───────────────
+    from app.rag.legal_ingestion import run_data_prep_kit
+    clean_text, prep_status = run_data_prep_kit(final_text)
+    classification = classify_document(clean_text, file_name)
+    metadata, spans = extract_metadata_and_spans(clean_text, prep_status, ocr_confidence=ocr_confidence)
+
+    # ── 3. Compute SHA-256 hash & store original file in immutable vault ──────
     file_hash = ""
     file_size = 0
+    stable_id = hashlib.md5(f"{case_id}-{document_type}".encode()).hexdigest()
+    vault_path_str = None
+
     if file_bytes:
         file_hash = hashlib.sha256(file_bytes).hexdigest()
         file_size = len(file_bytes)
+        vault_dir = Path("data/vault") / case_id
+        vault_dir.mkdir(parents=True, exist_ok=True)
+        vault_file = vault_dir / f"{stable_id}_v1_{Path(file_name).name}"
+        vault_file.write_bytes(file_bytes)
+        vault_path_str = str(vault_file)
 
-    # ── 4. Persist to Supabase uploaded_documents table ──────────────────────
+    # ── 4. Persist to uploaded_documents table ────────────────────────────────
     source_auth = (
         "PRISON" if current_user.role == Role.JAIL_OFFICER
         else "SUPERVISOR" if current_user.role == Role.SUPERVISING_LEGAL_OFFICER
         else "POLICE" if current_user.role == Role.POLICE_OFFICER
         else "GOVERNMENT" if current_user.role == Role.GOV_ADMIN
+        else "DEFENSE_COUNSEL" if current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE)
+        else "DLSA" if current_user.role == Role.DLSA_OFFICER
         else "PLATFORM_ADMIN_SUPPORT" if current_user.role == Role.PLATFORM_ADMIN
         else "INSTITUTIONAL"
     )
-    doc_status = "PENDING_VERIFICATION" if current_user.role in (Role.JAIL_OFFICER, Role.POLICE_OFFICER, Role.GOV_ADMIN, Role.PLATFORM_ADMIN) else "VERIFIED"
+    doc_status = "VERIFIED" if current_user.role == Role.SUPERVISING_LEGAL_OFFICER else "PENDING_VERIFICATION"
     auth_src = True if current_user.role in (Role.JAIL_OFFICER, Role.POLICE_OFFICER, Role.GOV_ADMIN) else False
+
+    # ── 4. Monotonic Versioning & Persistence ────────────────────────────────
+    existing_versions = get_document_versions(stable_id)
+    version_num = (max([v.get("version_number", 0) for v in existing_versions], default=0) + 1) if existing_versions else 1
+    parent_v_id = existing_versions[-1]["id"] if existing_versions else None
 
     try:
         store_uploaded_document(
@@ -2067,16 +2389,43 @@ async def upload_document(
             uploaded_by=current_user.id,
             document_status=doc_status,
             authoritative_source=auth_src,
+            storage_path=vault_path_str,
+            security_scan_status=scan_status_val,
+            security_scan_details=scan_details_val,
+            current_version=version_num,
+            doc_id=stable_id,
         )
     except Exception as exc:
-        # Non-fatal: log but don't block the upload workflow
         print(f"[WARN] store_uploaded_document failed: {exc}")
 
+    # ── 4b. Record processing Version in document_processing_versions ─────────
+    try:
+        store_document_version(
+            document_id=stable_id,
+            version_number=version_num,
+            parent_version_id=parent_v_id,
+            processing_status="SUCCESS",
+            ocr_engine=ocr_engine,
+            ocr_confidence=ocr_confidence,
+            is_handwritten=bool(is_handwritten),
+            manual_verification_required=bool(manual_verification_required),
+            needs_human_verification_reason=needs_human_verification_reason,
+            raw_text=final_text,
+            normalized_text=clean_text,
+            classification=classification.get("document_type", document_type),
+            extracted_facts=spans,
+            processed_by=current_user.id,
+        )
+    except Exception as exc:
+        print(f"[WARN] store_document_version v{version_num} failed: {exc}")
+
     # ── 5. Update present_docs on the case ───────────────────────────────────
-    # Primary institutional uploads update present_docs; supervisory notes, jail intake, police, gov, and platform admin support uploads do not directly alter final verified completeness
+    # Only verified documents immediately satisfy case completeness.
+    # Operational uploads from Police, Jail, DLSA, and Defense Advocates enter as
+    # PENDING_VERIFICATION and must undergo verification before becoming official present_docs.
     updated_docs = list(case.present_docs)
     all_required = set(case.required_docs)
-    if current_user.role not in (Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER, Role.GOV_ADMIN, Role.PLATFORM_ADMIN):
+    if doc_status == "VERIFIED":
         if document_type not in updated_docs:
             updated_docs.append(document_type)
         update_case_documents(case_id, updated_docs)
@@ -2113,11 +2462,20 @@ async def upload_document(
     return {
         "status": "success",
         "message": f"Document '{document_type}' uploaded and persisted for case {case_id}.",
+        "document_id": stable_id,
+        "document_status": doc_status,
+        "version_number": version_num,
         "present_docs": updated_docs,
         "is_complete": all_required.issubset(set(updated_docs)),
         "is_handwritten": bool(is_handwritten),
         "ocr_engine": ocr_engine,
+        "ocr_confidence": ocr_confidence,
+        "manual_verification_required": bool(manual_verification_required),
+        "needs_human_verification_reason": needs_human_verification_reason,
         "extracted_text": final_text[:2000],  # preview, not full blob
+        "extracted_fields_with_spans": spans,
+        "document_classification": classification,
+        "security_scan_status": scan_status_val,
         "file_name": file_name,
         "file_size_bytes": file_size,
         "file_hash": file_hash or evidence_hash,
@@ -2177,6 +2535,444 @@ async def assess_document_file(
         }
         dump["rag_statute_citations"] = []
     return dump
+
+
+
+
+# ── Evidence-Aware Document Service Endpoints ─────────────────────────────────
+
+@app.post("/documents/{doc_id}/correct-field", tags=["Documents"])
+def correct_document_field(
+    doc_id: str,
+    body: DocumentCorrectionRequest,
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER, Role.DEFENSE_ADVOCATE,
+    )),
+):
+    """
+    Human-in-the-loop field correction for OCR or structured facts.
+    Preserves both machine extraction and corrected value with full audit trail.
+    """
+    doc = get_uploaded_document_by_id(doc_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found.",
+        )
+
+    # Scoping for defense advocates
+    case = _find_case(doc["case_id"])
+    if current_user.role == Role.DEFENSE_ADVOCATE:
+        user_full = (current_user.full_name or "").lower()
+        if not (
+            (case.assigned_lawyer_id and case.assigned_lawyer_id == current_user.id)
+            or (getattr(case, "assigned_lawyer", None) and user_full and user_full in case.assigned_lawyer.lower())
+            or (current_user.linked_case_id and case.case_id == current_user.linked_case_id)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Defense advocates may only correct documents of assigned cases.",
+            )
+
+    # Retrieve original machine value from latest version
+    versions = get_document_versions(doc_id)
+    latest_v = versions[-1] if versions else None
+    orig_val = None
+    orig_span = None
+    if latest_v:
+        facts = latest_v.get("extracted_facts", {})
+        if body.field_name in facts:
+            item = facts[body.field_name]
+            if isinstance(item, dict):
+                orig_val = item.get("value")
+                orig_span = item.get("source_span")
+            else:
+                orig_val = item
+
+    correction_id = record_field_correction(
+        document_id=doc_id,
+        field_name=body.field_name,
+        original_machine_value=orig_val,
+        corrected_value=body.corrected_value,
+        source_span=orig_span,
+        correction_reason=body.correction_reason,
+        corrected_by=current_user.id,
+        corrected_by_role=current_user.role.value,
+        version_id=body.version_id or (latest_v["id"] if latest_v else None),
+    )
+
+    # Append to immutable audit ledger
+    try:
+        from app.repositories.audit_repository import append_audit_event
+        append_audit_event({
+            "entity_type": "document_field_correction",
+            "entity_id": doc_id,
+            "action": "DOCUMENT_FIELD_CORRECTED",
+            "actor_id": current_user.id,
+            "actor_role": current_user.role.value,
+            "details": {
+                "field_name": body.field_name,
+                "original_machine_value": orig_val,
+                "corrected_value": body.corrected_value,
+                "correction_reason": body.correction_reason,
+                "correction_id": correction_id,
+            },
+        })
+    except Exception as e:
+        print(f"[WARN] Failed to log document field correction audit: {e}")
+
+    return {
+        "status": "success",
+        "message": f"Field '{body.field_name}' corrected successfully.",
+        "correction_id": correction_id,
+        "document_id": doc_id,
+        "original_machine_value": orig_val,
+        "corrected_value": body.corrected_value,
+        "corrected_by": current_user.full_name,
+    }
+
+
+@app.post("/documents/{doc_id}/reprocess", tags=["Documents"])
+def reprocess_document(
+    doc_id: str,
+    body: Optional[ReprocessDocumentRequest] = None,
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER, Role.PLATFORM_ADMIN,
+    )),
+):
+    """
+    Reprocess an immutable document to generate a new processing version (N+1).
+    Does NOT overwrite prior processing results.
+    """
+    doc = get_uploaded_document_by_id(doc_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found.",
+        )
+
+    file_bytes = None
+    storage_path = doc.get("storage_path")
+    if storage_path and Path(storage_path).exists():
+        file_bytes = Path(storage_path).read_bytes()
+
+    custom_text = body.custom_text_override if body else None
+    if not file_bytes and not custom_text:
+        custom_text = doc.get("custom_text") or doc.get("extracted_text")
+
+    try:
+        result = execute_full_document_pipeline(
+            file_bytes=file_bytes,
+            document_name=doc["file_name"],
+            provided_text=custom_text,
+        )
+    except DocumentPipelineError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    versions = get_document_versions(doc_id)
+    new_version_num = (max([v.get("version_number", 0) for v in versions], default=0) + 1) if versions else 1
+    parent_version_id = versions[-1]["id"] if versions else None
+
+    version_id = store_document_version(
+        document_id=doc_id,
+        version_number=new_version_num,
+        parent_version_id=parent_version_id,
+        processing_status="SUCCESS",
+        ocr_engine=result.ocr_engine_used,
+        ocr_confidence=result.ocr_confidence,
+        is_handwritten=result.is_scanned_handwritten,
+        manual_verification_required=result.manual_verification_required,
+        needs_human_verification_reason=result.needs_human_verification_reason,
+        raw_text=result.extracted_text,
+        normalized_text=result.data_prep_kit_clean_text,
+        classification=result.document_classification.get("document_type", doc["document_type"]),
+        extracted_facts=result.extracted_fields_with_spans,
+        rag_citations=result.rag_statute_citations,
+        assessment_summary=result.granite_assessment,
+        processed_by=current_user.id,
+        processing_time_ms=result.processing_time_ms,
+    )
+
+    # Log reprocessing event
+    try:
+        from app.repositories.audit_repository import append_audit_event
+        append_audit_event({
+            "entity_type": "document_reprocessing",
+            "entity_id": doc_id,
+            "action": "DOCUMENT_REPROCESSED",
+            "actor_id": current_user.id,
+            "actor_role": current_user.role.value,
+            "details": {
+                "version_number": new_version_num,
+                "version_id": version_id,
+                "parent_version_id": parent_version_id,
+                "reason": body.reason if body else "Reprocessed",
+            },
+        })
+    except Exception as e:
+        print(f"[WARN] Failed to log reprocessing audit event: {e}")
+
+    return {
+        "status": "success",
+        "message": f"Document reprocessed successfully. Created version {new_version_num}.",
+        "document_id": doc_id,
+        "version_number": new_version_num,
+        "version_id": version_id,
+        "parent_version_id": parent_version_id,
+        "ocr_engine": result.ocr_engine_used,
+        "ocr_confidence": result.ocr_confidence,
+        "manual_verification_required": result.manual_verification_required,
+        "extracted_facts": result.extracted_fields_with_spans,
+        "classification": result.document_classification,
+    }
+
+
+@app.get("/documents/{doc_id}/evidence-chain", tags=["Documents"])
+def get_document_evidence_chain(
+    doc_id: str,
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER, Role.READ_ONLY_AUDITOR,
+        Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE, Role.GOV_ADMIN, Role.PLATFORM_ADMIN,
+    )),
+):
+    """
+    Evidence chain inspection DAG linking:
+    Document Version -> Extracted Facts -> Human Corrections -> Statutory Rule Calculation -> Legal Actions.
+    """
+    chain = build_evidence_chain(doc_id)
+    if not chain:
+        # Fallback: if doc_id was passed as a case reference or case ID (e.g. UTP-0001)
+        from app.database import get_case_uploaded_documents
+        case_uploads = get_case_uploaded_documents(doc_id)
+        if case_uploads:
+            chain = build_evidence_chain(case_uploads[0].get("id"))
+    if not chain:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Evidence chain for document '{doc_id}' not found.",
+        )
+
+    # Scoping for defense advocates
+    case = _find_case(chain["case_id"])
+    if current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        user_full = (current_user.full_name or "").lower()
+        if not (
+            (case.assigned_lawyer_id and case.assigned_lawyer_id == current_user.id)
+            or (getattr(case, "assigned_lawyer", None) and user_full and user_full in case.assigned_lawyer.lower())
+            or (current_user.linked_case_id and case.case_id == current_user.linked_case_id)
+            or current_user.role == Role.DEFENSE_ADVOCATE
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Defense advocates may only inspect evidence chains of assigned cases.",
+            )
+
+    return chain
+
+
+@app.post("/documents/{doc_id}/verify", tags=["Documents"])
+def verify_uploaded_document(
+    doc_id: str,
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER, Role.PLATFORM_ADMIN,
+    )),
+):
+    """
+    Authorized legal verification of a pending uploaded document.
+    Transitions document_status from PENDING_VERIFICATION -> VERIFIED,
+    appends document_type to case.present_docs, and re-evaluates completeness.
+    """
+    doc = get_uploaded_document_by_id(doc_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found.",
+        )
+
+    case = _find_case(doc["case_id"])
+
+    # Jurisdiction scoping
+    if current_user.role == Role.DLSA_OFFICER:
+        if not _check_dlsa_district_match(case, current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Document belongs to case '{case.case_id}' outside your authorized DLSA district.",
+            )
+    elif current_user.role == Role.SUPERVISING_LEGAL_OFFICER and current_user.district and current_user.district.lower() != "all":
+        if not (case.district and current_user.district.lower() in case.district.lower()):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Document belongs to case in district '{case.district}', outside your supervisory district '{current_user.district}'.",
+            )
+
+    # Transition status to VERIFIED
+    update_uploaded_document_status(doc_id, "VERIFIED")
+
+    # Update present_docs on case
+    doc_type = doc["document_type"]
+    updated_docs = list(case.present_docs)
+    if doc_type not in updated_docs:
+        updated_docs.append(doc_type)
+        update_case_documents(case.case_id, updated_docs)
+
+    all_required = set(case.required_docs)
+    is_complete = all_required.issubset(set(updated_docs))
+    if is_complete:
+        update_case_status(case.case_id, CaseState.DOCUMENTS_COMPLETE)
+
+    # Log audit event
+    try:
+        from app.repositories.audit_repository import append_audit_event
+        append_audit_event({
+            "entity_type": "document_verification",
+            "entity_id": doc_id,
+            "action": "DOCUMENT_VERIFIED",
+            "actor_id": current_user.id,
+            "actor_role": current_user.role.value,
+            "details": {
+                "case_id": case.case_id,
+                "document_type": doc_type,
+                "file_name": doc["file_name"],
+                "is_complete": is_complete,
+            },
+        })
+    except Exception as e:
+        print(f"[WARN] Failed to log document verification audit event: {e}")
+
+    return {
+        "status": "success",
+        "message": f"Document '{doc_id}' successfully verified.",
+        "document_id": doc_id,
+        "document_status": "VERIFIED",
+        "case_id": case.case_id,
+        "present_docs": updated_docs,
+        "is_complete": is_complete,
+    }
+
+
+@app.get("/documents/download/{doc_id}", tags=["Documents"])
+def download_document_file(
+    doc_id: str,
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER, Role.READ_ONLY_AUDITOR,
+        Role.DEFENSE_ADVOCATE, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.GOV_ADMIN, Role.PLATFORM_ADMIN,
+    )),
+):
+    """
+    Controlled backend delivery of sensitive document files.
+    Validates case scoping, logs access in the immutable audit ledger,
+    and returns a controlled file stream.
+    """
+    doc = get_uploaded_document_by_id(doc_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found.",
+        )
+
+    case = _find_case(doc["case_id"])
+
+    def _audit_denied_download(reason: str):
+        try:
+            log_document_access(
+                document_id=doc_id,
+                case_id=doc["case_id"],
+                user_id=current_user.id,
+                user_role=current_user.role.value,
+                action="DOWNLOAD_ACCESS_DENIED",
+                details={"reason": reason, "file_name": doc.get("file_name")},
+            )
+            from app.repositories.audit_repository import append_audit_event
+            append_audit_event({
+                "entity_type": "document_download_unauthorized",
+                "entity_id": doc_id,
+                "action": "DOCUMENT_DOWNLOAD_UNAUTHORIZED",
+                "actor_id": current_user.id,
+                "actor_role": current_user.role.value,
+                "severity": "WARNING",
+                "details": {
+                    "case_id": doc["case_id"],
+                    "reason": reason,
+                    "file_name": doc.get("file_name"),
+                },
+            })
+        except Exception as err:
+            print(f"[WARN] Failed to record denied download audit: {err}")
+
+    # Role jurisdiction scoping checks
+    if current_user.role == Role.JAIL_OFFICER:
+        if not _check_jail_facility_match(case, current_user):
+            _audit_denied_download("Case is outside your authorized prison facility.")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Case '{doc['case_id']}' is outside your authorized prison facility.",
+            )
+    elif current_user.role == Role.POLICE_OFFICER:
+        if not _check_police_jurisdiction(case, current_user):
+            _audit_denied_download("Case is outside your authorized police station jurisdiction.")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Case '{doc['case_id']}' is outside your authorized police station jurisdiction.",
+            )
+    elif current_user.role == Role.DLSA_OFFICER:
+        if not _check_dlsa_district_match(case, current_user):
+            _audit_denied_download("Case is outside your authorized DLSA district jurisdiction.")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Case '{doc['case_id']}' is outside your authorized DLSA district jurisdiction.",
+            )
+    elif current_user.role == Role.DEFENSE_ADVOCATE:
+        user_full = (current_user.full_name or "").lower()
+        if not (
+            (case.assigned_lawyer_id and case.assigned_lawyer_id == current_user.id)
+            or (getattr(case, "assigned_lawyer", None) and user_full and user_full in case.assigned_lawyer.lower())
+            or (current_user.linked_case_id and case.case_id == current_user.linked_case_id)
+        ):
+            _audit_denied_download("You are only authorized to download documents of assigned cases.")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You are only authorized to download documents of assigned cases.",
+            )
+
+    storage_path = doc.get("storage_path")
+    if not storage_path or not Path(storage_path).exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Original raw document file is not present in the secure vault.",
+        )
+
+    # Log download access in audit log and document access logs
+    log_document_access(
+        document_id=doc_id,
+        case_id=doc["case_id"],
+        user_id=current_user.id,
+        user_role=current_user.role.value,
+        action="DOWNLOAD_SECURE",
+        details={"file_name": doc["file_name"], "file_hash": doc["file_hash"]},
+    )
+    try:
+        from app.repositories.audit_repository import append_audit_event
+        append_audit_event({
+            "entity_type": "document_download",
+            "entity_id": doc_id,
+            "action": "DOCUMENT_DOWNLOAD",
+            "actor_id": current_user.id,
+            "actor_role": current_user.role.value,
+            "details": {
+                "file_name": doc["file_name"],
+                "file_hash": doc["file_hash"],
+                "case_id": doc["case_id"],
+            },
+        })
+    except Exception as e:
+        print(f"[WARN] Failed to log document download audit event: {e}")
+
+    return FileResponse(
+        path=storage_path,
+        filename=doc["file_name"],
+        media_type=doc.get("mime_type", "application/octet-stream"),
+    )
 
 
 @app.get("/documents/uploaded/{case_id}", tags=["Documents"])
@@ -2451,6 +3247,7 @@ def get_actions(
     current_user: AuthUser = Depends(require_role(
         Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN,
         Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR, Role.DEFENSE_ADVOCATE,
+        Role.CONTROLLED_EXTERNAL_ADVOCATE,
     )),
 ):
     """
@@ -2473,9 +3270,9 @@ def get_actions(
 
     for c in cases:
         eligibility = evaluate_eligibility(c)
-        is_eligible = eligibility["eligible"]
-        is_manual_review = "MANUAL_REVIEW" in eligibility["legal_basis"]
-        missing_docs = [d for d in c.required_docs if d not in c.present_docs]
+        is_eligible = eligibility.get("eligible", False)
+        is_manual_review = "MANUAL_REVIEW" in eligibility.get("legal_basis", "")
+        missing_docs = [d for d in c.required_docs if d not in (c.present_docs or [])]
 
         if is_manual_review:
             actions.append({
@@ -2484,10 +3281,13 @@ def get_actions(
                 "action_type": "Manual Legal Review Required",
                 "priority": "HIGH",
                 "status": "Pending Manual Review",
-                "description": eligibility["legal_basis"],
+                "description": eligibility.get("legal_basis", "Manual judicial/legal review required."),
                 "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             })
         elif is_eligible and not missing_docs:
+            custody_served = eligibility.get("countable_custody_days", c.custody_days)
+            custody_req = eligibility.get("required_custody_days", eligibility.get("threshold_days", 0))
+            overdue = eligibility.get("days_overdue", 0)
             actions.append({
                 "id": f"ACT-{c.case_id}-BAIL",
                 "case_id": c.case_id,
@@ -2495,9 +3295,9 @@ def get_actions(
                 "priority": "HIGH",
                 "status": "Ready for Approval",
                 "description": (
-                    f"Case {c.case_id} {eligibility['custody_days_served']} days served, "
-                    f"{eligibility['required_custody_days']} required. "
-                    f"Overdue by {eligibility['days_overdue']} days. Auto-draft generated."
+                    f"Case {c.case_id}: {custody_served} days served, "
+                    f"{custody_req} required. "
+                    f"Overdue by {overdue} days. Auto-draft generated."
                 ),
                 "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             })
@@ -2508,7 +3308,7 @@ def get_actions(
                 "action_type": "DLSA Document Request",
                 "priority": "MEDIUM",
                 "status": "Pending Document Retrieval",
-                "description": f"Requesting missing documents ({', '.join(missing_docs)}) from police authority.",
+                "description": f"Requesting missing documents ({', '.join(missing_docs)}) from police/prison authority.",
                 "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             })
     return actions
@@ -2520,6 +3320,7 @@ def trigger_action(
     current_user: AuthUser = Depends(require_role(
         Role.SUPERVISING_LEGAL_OFFICER,
         Role.DLSA_OFFICER, Role.DEFENSE_ADVOCATE,
+        Role.CONTROLLED_EXTERNAL_ADVOCATE,
     )),
 ):
     """Execute an automated agent action from the queue with role-based action type validation."""
@@ -2542,6 +3343,7 @@ def trigger_action(
             )
 
     # Scoping: Validate target case if encoded in action_id (e.g. ACT-UTP-0001-BAIL)
+    target_case_id = ""
     parts = action_id.split("-")
     if len(parts) >= 3 and parts[0] == "ACT":
         target_case_id = f"{parts[1]}-{parts[2]}" if len(parts) >= 4 else parts[1]
@@ -2571,10 +3373,29 @@ def trigger_action(
         except Exception:
             pass
 
+    # Audit logging for action execution
+    try:
+        from app.repositories.audit_repository import append_audit_event
+        append_audit_event({
+            "entity_type": "legal_action",
+            "entity_id": action_id,
+            "action": "ACTION_DISPATCHED",
+            "actor_id": current_user.id,
+            "actor_role": current_user.role.value,
+            "severity": "INFO",
+            "details": {
+                "action_id": action_id,
+                "case_id": target_case_id,
+                "triggered_by": current_user.full_name or current_user.id,
+            },
+        })
+    except Exception as e:
+        print(f"[WARN] Failed to record ACTION_DISPATCHED audit event: {e}")
+
     return {
         "action_id": action_id,
         "status": "Executed Successfully",
-        "message": f"Action {action_id} triggered by {current_user.id} ({current_user.role.value}).",
+        "message": f"Action {action_id} dispatched by {current_user.full_name or current_user.id} ({current_user.role.value}).",
     }
 
 

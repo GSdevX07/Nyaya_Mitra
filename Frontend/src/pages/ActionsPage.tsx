@@ -20,6 +20,9 @@ export function ActionsPage() {
   const [loading, setLoading] = useState(true);
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
   const [executedIds, setExecutedIds] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState<"ALL" | "HIGH" | "MEDIUM">("ALL");
+  const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
   const isDlsa = user?.role === "DLSA_OFFICER";
   const isSupervisor = user?.role === "SUPERVISING_LEGAL_OFFICER";
@@ -42,7 +45,6 @@ export function ActionsPage() {
 
   // Supervising Legal Officers execute supervisory escalation, compliance review,
   // approval queue, and institutional follow-up actions.
-  // They may NOT execute direct judicial determinations, court filing, or police/jail custody tasks.
   const SUPERVISOR_PERMITTED_ACTION_TYPES = [
     "ESCALATION",
     "REVIEW",
@@ -59,8 +61,7 @@ export function ActionsPage() {
     "INSTITUTIONAL",
   ];
 
-  // Defense advocates may dispatch counsel actions related to their assigned cases:
-  // bail applications, document requests, legal briefs, and petition drafting.
+  // Defense advocates may dispatch counsel actions related to their assigned cases
   const ADVOCATE_PERMITTED_ACTION_TYPES = [
     "BAIL",
     "DOCS",
@@ -70,7 +71,7 @@ export function ActionsPage() {
     "PETITION",
   ];
 
-  const canExecute = hasRole("DLSA_OFFICER", "SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN", "DEFENSE_ADVOCATE");
+  const canExecute = hasRole("DLSA_OFFICER", "SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN", "DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE");
 
   // Allow dispatch for permitted action types per role
   const canDispatchAction = (act: ActionItem): boolean => {
@@ -98,9 +99,15 @@ export function ActionsPage() {
 
   const loadActions = async () => {
     setLoading(true);
-    const data = await fetchActions();
-    setActions(data);
-    setLoading(false);
+    try {
+      const data = await fetchActions();
+      setActions(data || []);
+    } catch (err: any) {
+      console.error(err);
+      setFeedbackMsg({ type: "error", text: "Failed to load dispatch queue: " + (err.message || err) });
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -110,18 +117,37 @@ export function ActionsPage() {
   const handleTrigger = async (id: string) => {
     if (!canExecute) return;
     setTriggeringId(id);
+    setFeedbackMsg(null);
     try {
-      await triggerAction(id);
+      const res = await triggerAction(id);
       setExecutedIds(prev => new Set(prev).add(id));
-    } catch (err) {
-      console.error(err);
+      setFeedbackMsg({
+        type: "success",
+        text: res?.message || `Action ${id} successfully dispatched and recorded in the audit trail.`,
+      });
+    } catch (err: any) {
+      setFeedbackMsg({
+        type: "error",
+        text: `Action dispatch failed: ${err.message || err}`,
+      });
     } finally {
       setTriggeringId(null);
     }
   };
 
+  const filteredActions = actions.filter((act) => {
+    const matchesSearch =
+      !searchQuery.trim() ||
+      act.case_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      act.action_type.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      act.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesPriority =
+      priorityFilter === "ALL" || act.priority.toUpperCase() === priorityFilter;
+    return matchesSearch && matchesPriority;
+  });
+
   return (
-    <div className="p-4 md:p-8 w-full space-y-8 animate-in fade-in duration-300 max-w-7xl mx-auto">
+    <div className="p-4 md:p-8 w-full space-y-6 animate-in fade-in duration-300 max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border pb-6">
         <div>
@@ -140,14 +166,66 @@ export function ActionsPage() {
         </div>
       </div>
 
+      {feedbackMsg && (
+        <div
+          className={`p-4 rounded-xl text-xs flex items-center justify-between font-mono shadow-sm ${
+            feedbackMsg.type === "success"
+              ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-600"
+              : "bg-destructive/10 border border-destructive/30 text-destructive"
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            {feedbackMsg.type === "success" ? <CheckCircle2 className="w-4 h-4" /> : null}
+            {feedbackMsg.text}
+          </span>
+          <button
+            onClick={() => setFeedbackMsg(null)}
+            className="text-muted-foreground hover:text-foreground text-xs"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Filter and Search Bar */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          {(["ALL", "HIGH", "MEDIUM"] as const).map((p) => (
+            <button
+              key={p}
+              onClick={() => setPriorityFilter(p)}
+              className={`px-3 py-1.5 rounded text-xs font-mono font-bold uppercase transition-colors ${
+                priorityFilter === p
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-muted-foreground hover:text-foreground border border-border"
+              }`}
+            >
+              {p} Priority ({p === "ALL" ? actions.length : actions.filter(a => a.priority.toUpperCase() === p).length})
+            </button>
+          ))}
+        </div>
+        <input
+          type="text"
+          placeholder="Filter by case reference or keyword..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full sm:w-72 px-3.5 py-1.5 bg-card border border-border rounded text-xs text-foreground focus:outline-none focus:border-primary"
+        />
+      </div>
+
       {/* Action Cards */}
       {loading ? (
-        <div className="p-16 text-center text-muted-foreground animate-pulse">
+        <div className="p-16 text-center text-muted-foreground animate-pulse font-mono text-xs">
           Fetching automated agent queue from backend...
+        </div>
+      ) : filteredActions.length === 0 ? (
+        <div className="p-16 text-center bg-card border border-border rounded-xl text-muted-foreground font-mono text-xs space-y-2">
+          <p className="text-foreground font-bold text-sm">No Pending Actions Found</p>
+          <p>All eligible case petitions and document requisitions are currently up to date.</p>
         </div>
       ) : (
         <div className="space-y-4">
-          {actions.map(act => (
+          {filteredActions.map(act => (
             <div
               key={act.id}
               className="p-6 rounded bg-card shadow-sm border border-border hover:border-accent/40 transition-all backdrop-blur-md flex flex-col md:flex-row md:items-center justify-between gap-4"

@@ -268,7 +268,21 @@ def supa_append_audit_event(event: Dict) -> bool:
         client.table("audit_events").insert(event).execute()
         return True
     except Exception as e:
-        print(f"[WARN] Supabase audit event write failed: {e}")
+        err_str = str(e)
+        # If remote Supabase schema cache has not yet migrated newly added columns, filter down to legacy columns
+        if any(c in err_str for c in ["event_hash", "previous_event_hash", "hash_algorithm", "sequence_number", "severity", "data_status"]):
+            try:
+                legacy_cols = {
+                    "id", "timestamp", "actor_id", "actor_role", "organization_id",
+                    "action", "entity_type", "entity_id", "ip_address", "details_json", "is_immutable"
+                }
+                fallback_event = {k: v for k, v in event.items() if k in legacy_cols}
+                client.table("audit_events").insert(fallback_event).execute()
+                return True
+            except Exception as inner_e:
+                print(f"[WARN] Supabase audit event write fallback failed: {inner_e}")
+        else:
+            print(f"[WARN] Supabase audit event write failed: {e}")
         return False
 
 
@@ -334,18 +348,19 @@ def supa_get_hearings_schedule() -> List[Dict]:
 
 # ── Identity Merge Candidates Queries ─────────────────────────────────────────
 
-def supa_get_identity_merge_candidates() -> List[Dict]:
+def supa_get_identity_merge_candidates(status_filter: Optional[str] = "PENDING_HUMAN_REVIEW") -> List[Dict]:
     client = get_supabase_client()
     if not client:
         return []
-    res = (
-        client.table("identity_merge_candidates")
-        .select("*")
-        .eq("review_status", "PENDING_HUMAN_REVIEW")
-        .order("match_confidence", desc=True)
-        .execute()
-    )
-    return res.data or []
+    try:
+        q = client.table("identity_merge_candidates").select("*")
+        if status_filter and status_filter.upper() != "ALL":
+            q = q.eq("review_status", status_filter)
+        res = q.order("match_confidence", desc=True).execute()
+        return res.data or []
+    except Exception as e:
+        print(f"[WARN] supa_get_identity_merge_candidates error: {e}")
+        return []
 
 
 def supa_resolve_merge_candidate(candidate_id: str, action: str, notes: str, reviewed_by: str) -> Optional[Dict]:
@@ -397,4 +412,65 @@ def supa_get_case_documents_with_visibility(case_id: str, audience: str = "citiz
         return res.data or []
     except Exception:
         return []
+
+
+def supa_log_document_access(record: Dict) -> bool:
+    """Insert document access log into PostgreSQL."""
+    client = get_supabase_client()
+    if not client:
+        return False
+    try:
+        client.table("document_access_logs").insert(record).execute()
+        return True
+    except Exception as e:
+        # Table might not exist yet if migration has not run
+        return False
+
+
+def supa_record_field_correction(record: Dict) -> bool:
+    """Insert document field correction into PostgreSQL."""
+    client = get_supabase_client()
+    if not client:
+        return False
+    try:
+        client.table("document_field_corrections").insert(record).execute()
+        return True
+    except Exception as e:
+        return False
+
+
+def supa_store_document_version(record: Dict) -> bool:
+    """Insert document processing version into PostgreSQL."""
+    client = get_supabase_client()
+    if not client:
+        return False
+    try:
+        client.table("document_processing_versions").insert(record).execute()
+        return True
+    except Exception as e:
+        return False
+
+
+def supa_add_police_action(record: Dict) -> bool:
+    """Insert police operational action into PostgreSQL."""
+    client = get_supabase_client()
+    if not client:
+        return False
+    try:
+        client.table("police_actions").insert(record).execute()
+        return True
+    except Exception as e:
+        return False
+
+
+def supa_update_police_action(action_id: str, updates: Dict) -> bool:
+    """Update police operational action in PostgreSQL."""
+    client = get_supabase_client()
+    if not client:
+        return False
+    try:
+        client.table("police_actions").update(updates).eq("id", action_id).execute()
+        return True
+    except Exception as e:
+        return False
 

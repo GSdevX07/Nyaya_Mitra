@@ -30,11 +30,13 @@ export function LawyerProfileModal({ isOpen, onClose }: UserProfileModalProps) {
   useEffect(() => {
     if (isOpen) {
       // Fetch live user identity from /auth/me
-      fetchCurrentUserProfile().then((data) => {
-        if (data) {
-          setDbProfile(data);
-        }
-      });
+      fetchCurrentUserProfile()
+        .then((data) => {
+          if (data) {
+            setDbProfile(data);
+          }
+        })
+        .catch((err) => console.warn("fetchCurrentUserProfile error:", err));
 
       fetchCases().then((allCases) => {
         if (Array.isArray(allCases)) {

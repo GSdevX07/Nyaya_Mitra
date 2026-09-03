@@ -676,10 +676,10 @@ def get_citizen_timeline(case_id: str, user: AuthUser) -> List[Dict[str, Any]]:
 
 # ── Duplicate Identity Candidate Governance ───────────────────────────────────
 
-def get_duplicate_candidates(user: AuthUser) -> List[Dict[str, Any]]:
+def get_duplicate_candidates(user: AuthUser, status_filter: Optional[str] = "PENDING_HUMAN_REVIEW") -> List[Dict[str, Any]]:
     """Retrieve candidate duplicate identities from the database."""
     from app.database import get_identity_merge_candidates
-    return get_identity_merge_candidates()
+    return get_identity_merge_candidates(status_filter=status_filter)
 
 
 def resolve_duplicate_candidate(
@@ -696,17 +696,29 @@ def resolve_duplicate_candidate(
     if user.role not in allowed_roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Forbidden: Only designated judicial and legal aid authorities (Supervising Legal Officers or DLSA Officers) may resolve canonical identity records. Platform Administration and Government Oversight are read-only for identity resolution.",
+            detail="Forbidden: You do not have authority to resolve canonical identity records.",
         )
-    action = action.upper().strip()
+    action_raw = action.upper().strip()
+    action_map = {
+        "MERGE": "MERGE_RECORDS",
+        "MERGE_RECORDS": "MERGE_RECORDS",
+        "ALIAS": "MARK_AS_ALIAS",
+        "MARK_AS_ALIAS": "MARK_AS_ALIAS",
+        "LINK_AS_ALIAS": "MARK_AS_ALIAS",
+        "REJECT": "REJECT_MATCH",
+        "REJECT_MATCH": "REJECT_MATCH",
+        "DISTINCT": "REJECT_MATCH",
+        "MARK_AS_DISTINCT": "REJECT_MATCH",
+    }
+    canonical_action = action_map.get(action_raw, action_raw)
     valid_actions = {"MERGE_RECORDS", "REJECT_MATCH", "MARK_AS_ALIAS"}
-    if action not in valid_actions:
+    if canonical_action not in valid_actions:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid resolution action '{action}'. Must be one of {valid_actions}.",
         )
     from app.database import resolve_merge_candidate
-    result = resolve_merge_candidate(candidate_id, action, resolution_notes, user.full_name)
+    result = resolve_merge_candidate(candidate_id, canonical_action, resolution_notes, user.full_name or user.id)
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -885,9 +897,10 @@ def get_citizen_view(user: AuthUser) -> Dict[str, Any]:
             "dlsa_office_contact": "+91 11 2338 5000",
         }
 
-    # Real Available Documents (Filtered by present + verified + citizen shareable)
+    # Available Case Documents (Safe list for accused / family)
     from app.database import get_case_uploaded_documents, get_case
     available_docs = []
+    seen_types = set()
     try:
         uploaded_docs = get_case_uploaded_documents(linked_case_id)
         for doc in uploaded_docs:
@@ -897,7 +910,8 @@ def get_citizen_view(user: AuthUser) -> Dict[str, Any]:
                 "fir", "charge_sheet", "remand_order", "custody_certificate",
                 "bail_application", "court_order", "nominal_roll", "medical_certificate"
             }
-            if d_type in CITIZEN_DOC_TYPES and d_status in ("VERIFIED", "CONFIRMED"):
+            if d_type in CITIZEN_DOC_TYPES and d_status in ("VERIFIED", "CONFIRMED") and d_type not in seen_types:
+                seen_types.add(d_type)
                 title_map = {
                     "fir": "First Information Report (FIR Copy)",
                     "charge_sheet": "Police Charge Sheet",
@@ -912,25 +926,26 @@ def get_citizen_view(user: AuthUser) -> Dict[str, Any]:
                     "id": doc.get("id"),
                     "title": title_map.get(d_type, d_type.replace("_", " ").title()),
                     "document_type": d_type,
-                    "status": "VERIFIED",
+                    "status": "VERIFIED" if d_status in ("VERIFIED", "CONFIRMED") else "PENDING_VERIFICATION",
                     "uploaded_at": doc.get("uploaded_at"),
                 })
     except Exception:
         pass
 
-    # Fallback to case present_docs if no explicit uploads are recorded
-    if not available_docs:
-        c_obj = get_case(linked_case_id)
-        if c_obj and c_obj.present_docs:
-            title_map = {
-                "fir": "First Information Report (FIR Copy)",
-                "charge_sheet": "Police Charge Sheet",
-                "remand_order": "Judicial Remand Order",
-                "custody_certificate": "Prison Custody Certificate",
-                "bail_application": "Bail Application Copy",
-                "court_order": "Court Order / Bail Decision",
-            }
-            for p_doc in c_obj.present_docs:
+    # Also include any case present_docs that are verified on the case record
+    c_obj = get_case(linked_case_id)
+    if c_obj and c_obj.present_docs:
+        title_map = {
+            "fir": "First Information Report (FIR Copy)",
+            "charge_sheet": "Police Charge Sheet",
+            "remand_order": "Judicial Remand Order",
+            "custody_certificate": "Prison Custody Certificate",
+            "bail_application": "Bail Application Copy",
+            "court_order": "Court Order / Bail Decision",
+        }
+        for p_doc in c_obj.present_docs:
+            if p_doc not in seen_types and p_doc in title_map:
+                seen_types.add(p_doc)
                 available_docs.append({
                     "title": title_map.get(p_doc, p_doc.replace("_", " ").title()),
                     "document_type": p_doc,

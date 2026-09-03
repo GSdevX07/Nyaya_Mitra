@@ -10,6 +10,7 @@ import {
   Clock,
   User,
   FileCheck,
+  CheckCheck,
   Send,
   Upload,
   Download,
@@ -23,8 +24,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   fetchCaseById,
   approveCaseInBackend,
+  signOffCase,
   fileCaseInCourt,
   uploadDocumentFile,
+  fetchCaseDocuments,
+  verifyUploadedDocument,
   verifyEvidence,
   type TimelineEvent,
   type LegalNeedItem,
@@ -42,11 +46,13 @@ export function CaseIntelligence() {
   const navigate = useNavigate();
 
   const [caseData, setCaseData] = useState<any>(null);
+  const [caseDocDetails, setCaseDocDetails] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
   const [filing, setFiling] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
+  const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
   const [editableDraft, setEditableDraft] = useState<string>("");
   const [dlsaComment, setDlsaComment] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"dossier" | "draft" | "timeline" | "evidence" | "statutes" | "legalaid">("dossier");
@@ -54,8 +60,10 @@ export function CaseIntelligence() {
   const [verifyingEvidenceId, setVerifyingEvidenceId] = useState<string | null>(null);
   const [evidenceVerificationResult, setEvidenceVerificationResult] = useState<any>(null);
   const [advocateSignedOff, setAdvocateSignedOff] = useState(false);
+  const [signingOff, setSigningOff] = useState(false);
   const [referringDlsa, setReferringDlsa] = useState(false);
   const [referralDone, setReferralDone] = useState(false);
+  const [actionBanner, setActionBanner] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [pendingDocType, setPendingDocType] = useState<string | null>(null);
@@ -65,9 +73,18 @@ export function CaseIntelligence() {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchCaseById(id);
+      const [data, docData] = await Promise.all([
+        fetchCaseById(id),
+        fetchCaseDocuments(id),
+      ]);
       if (!data) throw new Error("Not found");
       setCaseData(data);
+      if (docData && docData.documents_detail) {
+        setCaseDocDetails(docData.documents_detail);
+      }
+      if (data.advocate_signed_off) {
+        setAdvocateSignedOff(true);
+      }
       if (data.draft?.drafted_document) {
         setEditableDraft((data.draft.drafted_document as string).replaceAll("**", ""));
       }
@@ -82,15 +99,64 @@ export function CaseIntelligence() {
     load();
   }, [load]);
 
+  const handleVerifyCaseDoc = async (docId: string) => {
+    setVerifyingDocId(docId);
+    try {
+      await verifyUploadedDocument(docId);
+      await load();
+      setActionBanner({
+        type: "success",
+        text: "Document verified successfully! Case completeness updated.",
+      });
+    } catch (err: any) {
+      setActionBanner({
+        type: "error",
+        text: "Verification failed: " + (err.message || err),
+      });
+    } finally {
+      setVerifyingDocId(null);
+    }
+  };
+
+  const handleSignOff = async () => {
+    if (!id) return;
+    setSigningOff(true);
+    setActionBanner(null);
+    try {
+      await signOffCase(id, editableDraft);
+      setAdvocateSignedOff(true);
+      setActionBanner({
+        type: "success",
+        text: "Counsel legal sign-off recorded. The petition draft is stamped as Advocate Work Product and submitted for supervisory review.",
+      });
+      await load();
+    } catch (err: any) {
+      setActionBanner({
+        type: "error",
+        text: "Counsel sign-off failed: " + (err.message || err),
+      });
+    } finally {
+      setSigningOff(false);
+    }
+  };
+
   const handleApprove = async () => {
     if (!id) return;
     setApproving(true);
+    setActionBanner(null);
     try {
       await approveCaseInBackend(id);
       await load();
       setActiveTab("draft");
+      setActionBanner({
+        type: "success",
+        text: "Supervisory sign-off recorded. Case is approved and marked READY FOR FILING.",
+      });
     } catch (err: any) {
-      alert("Approval error: " + err.message);
+      setActionBanner({
+        type: "error",
+        text: "Approval error: " + (err.message || err),
+      });
     } finally {
       setApproving(false);
     }
@@ -99,11 +165,19 @@ export function CaseIntelligence() {
   const handleFileInCourt = async () => {
     if (!id) return;
     setFiling(true);
+    setActionBanner(null);
     try {
       await fileCaseInCourt(id);
       await load();
+      setActionBanner({
+        type: "success",
+        text: "Procedural court filing recorded in court ledger.",
+      });
     } catch (err: any) {
-      alert("Filing error: " + err.message);
+      setActionBanner({
+        type: "error",
+        text: "Filing error: " + (err.message || err),
+      });
     } finally {
       setFiling(false);
     }
@@ -120,11 +194,19 @@ export function CaseIntelligence() {
     if (!file || !pendingDocType || !id) return;
 
     setUploadingDoc(pendingDocType);
+    setActionBanner(null);
     try {
       await uploadDocumentFile(id, pendingDocType, file);
       await load();
+      setActionBanner({
+        type: "success",
+        text: `Document '${file.name}' uploaded and submitted for verification.`,
+      });
     } catch (err: any) {
-      alert("Upload failed: " + err.message);
+      setActionBanner({
+        type: "error",
+        text: "Upload failed: " + (err.message || err),
+      });
     } finally {
       setUploadingDoc(null);
       setPendingDocType(null);
@@ -1022,33 +1104,82 @@ export function CaseIntelligence() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 {c.required_docs?.map((docType: string) => {
-                  const isPresent = c.present_docs?.includes(docType);
+                  const normDoc = docType.toLowerCase().trim().replace(/ /g, "_");
+                  const detail = caseDocDetails.find(
+                    (d: any) => d.document_type === normDoc || d.id?.includes(normDoc)
+                  );
+                  const isVerified = (detail && detail.document_status === "VERIFIED") || c.present_docs?.includes(docType);
+                  const isPending = detail && detail.document_status === "PENDING_VERIFICATION";
+                  const canVerify = user?.role === "SUPERVISING_LEGAL_OFFICER" || user?.role === "DLSA_OFFICER" || user?.role === "PLATFORM_ADMIN";
+
                   return (
                     <div
                       key={docType}
-                      className={`p-3 rounded border flex items-center justify-between gap-2 ${
-                        isPresent ? "bg-emerald-500/5 border-emerald-500/30" : "bg-amber-500/5 border-amber-500/30"
+                      className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all ${
+                        isVerified
+                          ? "bg-emerald-500/5 border-emerald-500/30"
+                          : isPending
+                          ? "bg-amber-500/10 border-amber-500/40"
+                          : "bg-destructive/5 border-destructive/20"
                       }`}
                     >
-                      <div className="flex items-center gap-2">
-                        {isPresent ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                        ) : (
-                          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-                        )}
-                        <span className="font-medium text-foreground">{docType.replace(/_/g, " ").toUpperCase()}</span>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          {isVerified ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                          ) : isPending ? (
+                            <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+                          ) : (
+                            <AlertTriangle className="w-4 h-4 text-destructive shrink-0" />
+                          )}
+                          <span className="font-bold text-foreground tracking-tight">
+                            {docType.replace(/_/g, " ").toUpperCase()}
+                          </span>
+                          {isPending && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 border border-amber-500/30">
+                              PENDING VERIFICATION
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Uploader Attribution Provenance */}
+                        <div className="text-[11px] text-muted-foreground pl-6">
+                          {isVerified ? (
+                            <span>Origin: <strong className="text-foreground">{detail?.uploaded_by || "Court Registry (Baseline)"}</strong></span>
+                          ) : isPending ? (
+                            <span>Uploaded by: <strong className="text-foreground">{detail?.uploaded_by || "Institutional Officer"}</strong></span>
+                          ) : (
+                            <span className="text-amber-600/90 font-medium">Missing record &mdash; blocks eligibility determination</span>
+                          )}
+                        </div>
                       </div>
 
-                      {!isPresent && (
+                      <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                        {isPending && canVerify && detail?.actual_doc_id && (
+                          <button
+                            onClick={() => handleVerifyCaseDoc(detail.actual_doc_id)}
+                            disabled={verifyingDocId === detail.actual_doc_id}
+                            className="px-2.5 py-1 bg-emerald-600 text-white rounded text-[11px] font-bold uppercase hover:bg-emerald-700 flex items-center gap-1 shadow-sm transition-colors"
+                            title="Verify and authorize document"
+                          >
+                            {verifyingDocId === detail.actual_doc_id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCheck className="w-3 h-3" />}
+                            Verify
+                          </button>
+                        )}
+
                         <button
                           onClick={() => handleUploadDoc(docType)}
                           disabled={uploadingDoc === docType}
-                          className="px-2 py-1 bg-primary text-primary-foreground rounded text-[10px] font-bold uppercase hover:opacity-90 flex items-center gap-1"
+                          className={`px-2.5 py-1 rounded text-[11px] font-bold uppercase flex items-center gap-1 shadow-sm transition-colors ${
+                            isVerified
+                              ? "bg-secondary text-foreground hover:bg-secondary/80 border border-border"
+                              : "bg-primary text-primary-foreground hover:opacity-90"
+                          }`}
                         >
                           {uploadingDoc === docType ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-                          Upload
+                          {isVerified ? "Re-upload" : isPending ? "Replace" : "Upload"}
                         </button>
-                      )}
+                      </div>
                     </div>
                   );
                 })}
@@ -1145,6 +1276,23 @@ export function CaseIntelligence() {
               </div>
             ) : (
               <div className="space-y-3">
+                {actionBanner && (
+                  <div
+                    className={`p-3 rounded text-xs flex items-center justify-between font-mono ${
+                      actionBanner.type === "success"
+                        ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-600"
+                        : "bg-destructive/10 border border-destructive/30 text-destructive"
+                    }`}
+                  >
+                    <span>{actionBanner.text}</span>
+                    <button
+                      onClick={() => setActionBanner(null)}
+                      className="ml-2 text-muted-foreground hover:text-foreground text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-mono font-bold uppercase text-muted-foreground">
                     Editable Petition Text (Reviewed by Defence Counsel):
@@ -1167,19 +1315,20 @@ export function CaseIntelligence() {
                       Counsel Review Status: {advocateSignedOff ? "✓ Legal Sign-Off Recorded (Awaiting Supervisory Sign-Off)" : "Draft Under Active Counsel Review"}
                     </p>
                     <button
-                      onClick={() => {
-                        setAdvocateSignedOff(true);
-                        alert("Counsel legal sign-off recorded. The petition draft is stamped as Advocate Work Product and submitted for supervisory review.");
-                      }}
-                      disabled={advocateSignedOff || !editableDraft.trim()}
+                      onClick={handleSignOff}
+                      disabled={signingOff || advocateSignedOff || !editableDraft.trim()}
                       className={`px-4 py-2 rounded-sm text-xs font-bold font-serif uppercase tracking-wider flex items-center gap-2 ${
                         advocateSignedOff
                           ? "bg-emerald-500/15 text-emerald-600 border border-emerald-500/30 cursor-default"
                           : "bg-primary text-primary-foreground hover:opacity-90"
                       }`}
                     >
-                      <CheckCircle2 className="w-4 h-4" />
-                      {advocateSignedOff ? "Counsel Signed Off" : "Sign Off & Submit for Supervisory Review"}
+                      {signingOff ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4" />
+                      )}
+                      {advocateSignedOff ? "Counsel Signed Off" : signingOff ? "Signing Off..." : "Sign Off & Submit for Supervisory Review"}
                     </button>
                   </div>
                 )}

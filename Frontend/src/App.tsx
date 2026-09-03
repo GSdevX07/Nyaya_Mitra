@@ -240,6 +240,7 @@ function App() {
                       "SUPERVISING_LEGAL_OFFICER",
                       "DLSA_OFFICER",
                       "DEFENSE_ADVOCATE",
+                      "CONTROLLED_EXTERNAL_ADVOCATE",
                       "READ_ONLY_AUDITOR",
                     ]}
                   >

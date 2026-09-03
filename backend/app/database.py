@@ -994,6 +994,77 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
         cursor.execute("ALTER TABLE uploaded_documents ADD COLUMN document_status TEXT DEFAULT 'PENDING_VERIFICATION'")
     if "authoritative_source" not in up_cols:
         cursor.execute("ALTER TABLE uploaded_documents ADD COLUMN authoritative_source INTEGER DEFAULT 0")
+    if "storage_path" not in up_cols:
+        cursor.execute("ALTER TABLE uploaded_documents ADD COLUMN storage_path TEXT")
+    if "security_scan_status" not in up_cols:
+        cursor.execute("ALTER TABLE uploaded_documents ADD COLUMN security_scan_status TEXT DEFAULT 'PASSED'")
+    if "security_scan_details" not in up_cols:
+        cursor.execute("ALTER TABLE uploaded_documents ADD COLUMN security_scan_details TEXT")
+    if "current_version" not in up_cols:
+        cursor.execute("ALTER TABLE uploaded_documents ADD COLUMN current_version INTEGER DEFAULT 1")
+    if "citizen_visible" not in up_cols:
+        cursor.execute("ALTER TABLE uploaded_documents ADD COLUMN citizen_visible INTEGER DEFAULT 1")
+    if "family_visible" not in up_cols:
+        cursor.execute("ALTER TABLE uploaded_documents ADD COLUMN family_visible INTEGER DEFAULT 1")
+
+    # Document Processing Versions (Immutable Processing Snapshots)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS document_processing_versions (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            version_number INTEGER NOT NULL,
+            parent_version_id TEXT,
+            processing_status TEXT DEFAULT 'SUCCESS',
+            ocr_engine TEXT,
+            ocr_confidence REAL DEFAULT 1.0,
+            is_handwritten INTEGER DEFAULT 0,
+            manual_verification_required INTEGER DEFAULT 0,
+            needs_human_verification_reason TEXT,
+            raw_text TEXT,
+            normalized_text TEXT,
+            classification TEXT,
+            extracted_facts_json TEXT,
+            rag_citations_json TEXT,
+            assessment_summary_json TEXT,
+            processed_by TEXT,
+            processing_time_ms REAL DEFAULT 0.0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (document_id) REFERENCES uploaded_documents(id)
+        )
+    """)
+
+    # Human-in-the-loop Document Field Corrections
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS document_field_corrections (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            version_id TEXT,
+            field_name TEXT NOT NULL,
+            original_machine_value TEXT,
+            corrected_value TEXT NOT NULL,
+            source_span TEXT,
+            correction_reason TEXT NOT NULL,
+            corrected_by TEXT NOT NULL,
+            corrected_by_role TEXT NOT NULL,
+            corrected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (document_id) REFERENCES uploaded_documents(id)
+        )
+    """)
+
+    # Secure Document Access and Download Logging
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS document_access_logs (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            case_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            user_role TEXT NOT NULL,
+            ip_address TEXT,
+            details_json TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     # 8. Notifications & Immutable Audit Log
     cursor.execute("""
@@ -2410,27 +2481,39 @@ def get_audit_events(
         return []
 
 
-def get_identity_merge_candidates() -> list:
-    """Retrieve pending identity merge candidates from Supabase with SQLite fallback."""
+def get_identity_merge_candidates(status_filter: Optional[str] = "PENDING_HUMAN_REVIEW") -> list:
+    """Retrieve identity merge candidates from Supabase with SQLite fallback."""
     from app.supabase_adapter import is_supabase_active, supa_get_identity_merge_candidates
     if is_supabase_active():
         try:
-            res = supa_get_identity_merge_candidates()
-            if res:
+            res = supa_get_identity_merge_candidates(status_filter=status_filter)
+            if res is not None and len(res) > 0:
+                for rec in res:
+                    for field in ("shared_traits", "conflicting_traits"):
+                        if isinstance(rec.get(field), str):
+                            try:
+                                rec[field] = json.loads(rec[field])
+                            except Exception:
+                                rec[field] = []
                 return res
         except Exception as e:
             print(f"[WARN] Supabase get_identity_merge_candidates error: {e}")
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM identity_merge_candidates WHERE review_status = 'PENDING_HUMAN_REVIEW' ORDER BY match_confidence DESC")
+        if status_filter and status_filter.upper() != "ALL":
+            cursor.execute(
+                "SELECT * FROM identity_merge_candidates WHERE review_status = ? ORDER BY match_confidence DESC",
+                (status_filter,),
+            )
+        else:
+            cursor.execute("SELECT * FROM identity_merge_candidates ORDER BY match_confidence DESC")
         cols = [col[0] for col in cursor.description]
         rows = cursor.fetchall()
         conn.close()
         results = []
         for r in rows:
             rec = dict(zip(cols, r))
-            # Deserialize JSON arrays
             for field in ("shared_traits", "conflicting_traits"):
                 try:
                     rec[field] = json.loads(rec[field]) if rec.get(field) else []
@@ -2444,16 +2527,9 @@ def get_identity_merge_candidates() -> list:
 
 
 def resolve_merge_candidate(candidate_id: str, action: str, notes: str, reviewed_by: str) -> dict:
-    """Update a merge candidate resolution in Supabase (if active) and SQLite."""
+    """Update a merge candidate resolution in BOTH Supabase (if active) and SQLite."""
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    from app.supabase_adapter import is_supabase_active, supa_resolve_merge_candidate
-    if is_supabase_active():
-        try:
-            supa_res = supa_resolve_merge_candidate(candidate_id, action, notes, reviewed_by)
-            if supa_res:
-                return supa_res
-        except Exception as e:
-            print(f"[WARN] Supabase resolve_merge_candidate error: {e}")
+    local_rec = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -2467,16 +2543,25 @@ def resolve_merge_candidate(candidate_id: str, action: str, notes: str, reviewed
         row = cursor.fetchone()
         conn.close()
         if row:
-            rec = dict(zip(cols, row))
+            local_rec = dict(zip(cols, row))
             for field in ("shared_traits", "conflicting_traits"):
                 try:
-                    rec[field] = json.loads(rec[field]) if rec.get(field) else []
+                    local_rec[field] = json.loads(local_rec[field]) if local_rec.get(field) else []
                 except Exception:
-                    rec[field] = []
-            return rec
+                    local_rec[field] = []
     except Exception as e:
-        print(f"[WARN] resolve_merge_candidate error: {e}")
-    return {"id": candidate_id, "review_status": action, "reviewed_by": reviewed_by, "reviewed_at": now}
+        print(f"[WARN] SQLite resolve_merge_candidate error: {e}")
+
+    from app.supabase_adapter import is_supabase_active, supa_resolve_merge_candidate
+    if is_supabase_active():
+        try:
+            supa_res = supa_resolve_merge_candidate(candidate_id, action, notes, reviewed_by)
+            if supa_res:
+                return supa_res
+        except Exception as e:
+            print(f"[WARN] Supabase resolve_merge_candidate error: {e}")
+
+    return local_rec or {"id": candidate_id, "review_status": action, "reviewed_by": reviewed_by, "reviewed_at": now}
 
 
 def get_all_cases() -> List[CaseRecord]:
@@ -2561,6 +2646,95 @@ def update_case_status(case_id: str, new_status: CaseState) -> bool:
         print(f"[WARN] SQLite update_case_status error: {e}")
 
     return True
+
+
+def record_advocate_sign_off(
+    case_id: str,
+    user_id: str,
+    user_name: str,
+    draft_text: Optional[str] = None,
+) -> dict:
+    """Record advocate counsel sign-off on the bail petition draft."""
+    app_id = f"bail_{uuid.uuid4().hex[:12]}"
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM bail_applications WHERE case_id = ?", (case_id,))
+        row = cursor.fetchone()
+        if row:
+            app_id = row[0]
+            cursor.execute(
+                """
+                UPDATE bail_applications
+                SET advocate_signed_off = 1,
+                    signed_off_by_user_id = ?,
+                    signed_off_at = ?,
+                    petition_draft_text = COALESCE(?, petition_draft_text),
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (user_id, now_iso, draft_text, now_iso, app_id),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO bail_applications
+                (id, case_id, statutory_section, petition_draft_text, advocate_signed_off, signed_off_by_user_id, signed_off_at, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 1, ?, ?, 'COUNSEL_SIGNED_OFF', ?, ?)
+                """,
+                (app_id, case_id, "Section 479 BNSS, 2023", draft_text or "", user_id, now_iso, now_iso, now_iso),
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[WARN] record_advocate_sign_off failed: {e}")
+
+    # Dual-write to Supabase when active
+    try:
+        from app.supabase_adapter import get_supabase_client, is_supabase_active
+        if is_supabase_active():
+            client = get_supabase_client()
+            if client:
+                client.table("bail_applications").upsert({
+                    "id": app_id,
+                    "case_id": case_id,
+                    "advocate_signed_off": True,
+                    "signed_off_by_user_id": user_id,
+                    "signed_off_at": now_iso,
+                    "petition_draft_text": draft_text or "",
+                    "status": "COUNSEL_SIGNED_OFF",
+                    "updated_at": now_iso,
+                }).execute()
+    except Exception as err:
+        print(f"[WARN] Supabase record_advocate_sign_off error: {err}")
+
+    return {
+        "id": app_id,
+        "case_id": case_id,
+        "advocate_signed_off": True,
+        "signed_off_by": user_name,
+        "signed_off_at": now_iso,
+    }
+
+
+def get_case_bail_application(case_id: str) -> Optional[dict]:
+    """Retrieve bail application record for a case."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM bail_applications WHERE case_id = ? ORDER BY updated_at DESC LIMIT 1", (case_id,))
+        row = cursor.fetchone()
+        if row:
+            cols = [c[0] for c in cursor.description]
+            d = dict(zip(cols, row))
+            d["advocate_signed_off"] = bool(d.get("advocate_signed_off"))
+            conn.close()
+            return d
+        conn.close()
+    except Exception as e:
+        print(f"[WARN] get_case_bail_application error: {e}")
+    return None
 
 
 
@@ -2740,10 +2914,15 @@ def store_uploaded_document(
     uploaded_by: Optional[str] = None,
     document_status: str = "PENDING_VERIFICATION",
     authoritative_source: bool = False,
+    storage_path: Optional[str] = None,
+    security_scan_status: str = "PASSED",
+    security_scan_details: Optional[str] = None,
+    current_version: int = 1,
+    doc_id: Optional[str] = None,
 ) -> str:
     """Persist uploaded document metadata and extracted text."""
     import hashlib
-    stable_id = hashlib.md5(f"{case_id}-{document_type}".encode()).hexdigest()
+    stable_id = doc_id or hashlib.md5(f"{case_id}-{document_type}".encode()).hexdigest()
     created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     record = {
@@ -2762,6 +2941,10 @@ def store_uploaded_document(
         "uploaded_by": uploaded_by,
         "document_status": document_status,
         "authoritative_source": int(authoritative_source),
+        "storage_path": storage_path,
+        "security_scan_status": security_scan_status,
+        "security_scan_details": security_scan_details,
+        "current_version": current_version,
         "uploaded_at": created_at,
     }
     _MEMORY_UPLOADED_DOCS.append(record)
@@ -2771,12 +2954,13 @@ def store_uploaded_document(
         cursor = conn.cursor()
         cursor.execute(
             """INSERT OR REPLACE INTO uploaded_documents 
-               (id, case_id, document_type, file_name, extracted_text, custom_text, is_handwritten, ocr_engine, file_hash, file_size_bytes, mime_type, source_authority, uploaded_by, document_status, authoritative_source, uploaded_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, case_id, document_type, file_name, extracted_text, custom_text, is_handwritten, ocr_engine, file_hash, file_size_bytes, mime_type, source_authority, uploaded_by, document_status, authoritative_source, storage_path, security_scan_status, security_scan_details, current_version, uploaded_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 stable_id, case_id, document_type, file_name, extracted_text, custom_text,
                 int(is_handwritten), ocr_engine, file_hash, file_size_bytes, mime_type,
-                source_authority, uploaded_by, document_status, int(authoritative_source), created_at,
+                source_authority, uploaded_by, document_status, int(authoritative_source),
+                storage_path, security_scan_status, security_scan_details, current_version, created_at,
             ),
         )
         conn.commit()
@@ -2802,6 +2986,23 @@ def get_case_uploaded_documents(case_id: str) -> List[dict]:
         print(f"[WARN] SQLite get_case_uploaded_documents error: {e}")
 
     return [d for d in _MEMORY_UPLOADED_DOCS if d.get("case_id") == case_id]
+
+
+def get_all_uploaded_documents() -> List[dict]:
+    """Retrieve all uploaded documents from SQLite with memory fallback."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM uploaded_documents ORDER BY uploaded_at DESC")
+        cols = [col[0] for col in cursor.description]
+        rows = cursor.fetchall()
+        conn.close()
+        if rows:
+            return [dict(zip(cols, r)) for r in rows]
+    except Exception as e:
+        print(f"[WARN] SQLite get_all_uploaded_documents error: {e}")
+
+    return _MEMORY_UPLOADED_DOCS
 
 
 # ── Notifications ─────────────────────────────────────────────────────────────
@@ -3179,6 +3380,383 @@ def complete_police_action(action_id: str, document_id: str, user_id: str, notes
     conn.commit()
     conn.close()
     return cnt > 0
+
+
+
+# ── Secure Evidence Document Repository Helpers ──────────────────────────────
+
+def get_uploaded_document_by_id(doc_id: str) -> Optional[dict]:
+    """Retrieve an uploaded document record by primary ID."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM uploaded_documents WHERE id = ?", (doc_id,))
+    cols = [c[0] for c in cursor.description]
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return dict(zip(cols, row))
+    return None
+
+
+def update_uploaded_document_status(document_id: str, new_status: str) -> bool:
+    """Update document_status of an uploaded document (e.g. PENDING_VERIFICATION -> VERIFIED)."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE uploaded_documents SET document_status = ? WHERE id = ?",
+        (new_status, document_id),
+    )
+    affected = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return affected
+
+
+def store_document_version(
+    document_id: str,
+    version_number: int,
+    parent_version_id: Optional[str] = None,
+    processing_status: str = "SUCCESS",
+    ocr_engine: str = "none",
+    ocr_confidence: float = 1.0,
+    is_handwritten: bool = False,
+    manual_verification_required: bool = False,
+    needs_human_verification_reason: Optional[str] = None,
+    raw_text: str = "",
+    normalized_text: str = "",
+    classification: str = "UNKNOWN",
+    extracted_facts: Optional[dict] = None,
+    rag_citations: Optional[list] = None,
+    assessment_summary: Optional[dict] = None,
+    processed_by: str = "system",
+    processing_time_ms: float = 0.0,
+) -> str:
+    """Store an immutable processing snapshot version for a document."""
+    version_id = f"dpv_{uuid.uuid4().hex[:12]}"
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO document_processing_versions
+        (id, document_id, version_number, parent_version_id, processing_status,
+         ocr_engine, ocr_confidence, is_handwritten, manual_verification_required,
+         needs_human_verification_reason, raw_text, normalized_text, classification,
+         extracted_facts_json, rag_citations_json, assessment_summary_json,
+         processed_by, processing_time_ms, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            version_id,
+            document_id,
+            version_number,
+            parent_version_id,
+            processing_status,
+            ocr_engine,
+            ocr_confidence,
+            1 if is_handwritten else 0,
+            1 if manual_verification_required else 0,
+            needs_human_verification_reason,
+            raw_text,
+            normalized_text,
+            classification,
+            json.dumps(extracted_facts or {}),
+            json.dumps(rag_citations or []),
+            json.dumps(assessment_summary or {}),
+            processed_by,
+            processing_time_ms,
+            datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        ),
+    )
+    # Also update current_version on the parent uploaded_documents record
+    cursor.execute(
+        "UPDATE uploaded_documents SET current_version = ? WHERE id = ?",
+        (version_number, document_id),
+    )
+    conn.commit()
+    conn.close()
+    return version_id
+
+
+def get_document_versions(document_id: str) -> List[dict]:
+    """Retrieve all processing versions for a document, ordered chronologically."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM document_processing_versions WHERE document_id = ? ORDER BY version_number ASC",
+        (document_id,),
+    )
+    cols = [c[0] for c in cursor.description]
+    rows = cursor.fetchall()
+    conn.close()
+    results = []
+    for r in rows:
+        d = dict(zip(cols, r))
+        try:
+            d["extracted_facts"] = json.loads(d.get("extracted_facts_json") or "{}")
+        except Exception:
+            d["extracted_facts"] = {}
+        try:
+            d["rag_citations"] = json.loads(d.get("rag_citations_json") or "[]")
+        except Exception:
+            d["rag_citations"] = []
+        try:
+            d["assessment_summary"] = json.loads(d.get("assessment_summary_json") or "{}")
+        except Exception:
+            d["assessment_summary"] = {}
+        d["is_handwritten"] = bool(d.get("is_handwritten", 0))
+        d["manual_verification_required"] = bool(d.get("manual_verification_required", 0))
+        results.append(d)
+    return results
+
+
+def record_field_correction(
+    document_id: str,
+    field_name: str,
+    original_machine_value: Any,
+    corrected_value: Any,
+    source_span: Optional[str],
+    correction_reason: str,
+    corrected_by: str,
+    corrected_by_role: str,
+    version_id: Optional[str] = None,
+) -> str:
+    """Record a human-in-the-loop correction for an extracted fact."""
+    correction_id = f"cor_{uuid.uuid4().hex[:12]}"
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO document_field_corrections
+        (id, document_id, version_id, field_name, original_machine_value,
+         corrected_value, source_span, correction_reason, corrected_by,
+         corrected_by_role, corrected_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            correction_id,
+            document_id,
+            version_id,
+            field_name,
+            str(original_machine_value) if original_machine_value is not None else "",
+            str(corrected_value),
+            source_span or "",
+            correction_reason,
+            corrected_by,
+            corrected_by_role,
+            datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return correction_id
+
+
+def get_document_field_corrections(document_id: str) -> List[dict]:
+    """Retrieve all human corrections made to extracted fields of a document."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM document_field_corrections WHERE document_id = ? ORDER BY corrected_at DESC",
+        (document_id,),
+    )
+    cols = [c[0] for c in cursor.description]
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def log_document_access(
+    document_id: str,
+    case_id: str,
+    user_id: str,
+    user_role: str,
+    action: str,
+    ip_address: Optional[str] = None,
+    details: Optional[dict] = None,
+) -> str:
+    """Log a document access, download, or inspection event."""
+    log_id = f"dal_{uuid.uuid4().hex[:12]}"
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO document_access_logs
+            (id, document_id, case_id, action, user_id, user_role, ip_address, details_json, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                log_id,
+                document_id,
+                case_id,
+                action,
+                user_id,
+                user_role,
+                ip_address or "127.0.0.1",
+                json.dumps(details or {}),
+                now_iso,
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[WARN] log_document_access failed: {e}")
+    return log_id
+
+
+def build_evidence_chain(document_id: str) -> Optional[dict]:
+    """
+    Construct the end-to-end provenance graph linking:
+    Document Version (SHA-256)
+      -> Extracted Facts (with verbatim source spans)
+      -> Human Field Corrections
+      -> Statutory Rule Calculations (BNSS 479)
+      -> Generated AI Assessment / Output
+      -> Downstream Human & Institutional Actions
+    """
+    doc = get_uploaded_document_by_id(document_id)
+    if not doc:
+        return None
+
+    case_id = doc.get("case_id")
+    versions = get_document_versions(document_id)
+    corrections = get_document_field_corrections(document_id)
+
+    # Latest version details
+    latest_version = versions[-1] if versions else None
+    extracted_facts = latest_version.get("extracted_facts", {}) if latest_version else {}
+
+    # Map corrections by field name
+    corrections_by_field = {c["field_name"]: c for c in corrections}
+
+    # Build enriched facts list with original machine values, source spans, and active corrections
+    enriched_facts = []
+    if isinstance(extracted_facts, dict):
+        for field, item in extracted_facts.items():
+            if isinstance(item, dict):
+                machine_val = item.get("value")
+                span = item.get("source_span", "")
+                conf = item.get("confidence", 1.0)
+                char_start = item.get("char_start", 0)
+                char_end = item.get("char_end", 0)
+                needs_review = item.get("needs_human_review", False)
+            else:
+                machine_val = item
+                span = ""
+                conf = 1.0
+                char_start = 0
+                char_end = 0
+                needs_review = False
+
+            has_corr = field in corrections_by_field
+            effective_val = corrections_by_field[field]["corrected_value"] if has_corr else machine_val
+
+            enriched_facts.append({
+                "field_name": field,
+                "machine_value": machine_val,
+                "effective_value": effective_val,
+                "confidence": conf,
+                "source_span": span,
+                "char_range": [char_start, char_end],
+                "is_corrected": has_corr,
+                "correction_details": corrections_by_field.get(field),
+                "needs_human_review": needs_review,
+            })
+
+    # Find downstream rule evaluation for case
+    from app.database import get_case
+    from app.agents.eligibility_agent import evaluate_eligibility
+    case_obj = get_case(case_id)
+    rule_eval = None
+    if case_obj:
+        try:
+            rule_eval = evaluate_eligibility(case_obj)
+        except Exception:
+            rule_eval = None
+
+    # Find related audit actions on this case/document
+    try:
+        from app.repositories.audit_repository import audit_repo
+        raw_audit_objs = audit_repo.get_entity_audit_trail("court_case", case_id) if case_id else []
+        raw_audit = [a.model_dump() if hasattr(a, "model_dump") else (a if isinstance(a, dict) else a.__dict__) for a in raw_audit_objs]
+    except Exception:
+        raw_audit = []
+    relevant_actions = []
+    for a in raw_audit[:8]:
+        action_name = a.get("action")
+        if action_name in (
+            "CASE_APPROVED_FOR_FILING", "CASE_FILED_IN_COURT",
+            "POLICE_DOCUMENT_SUBMITTED", "EVIDENCE_VERIFIED",
+            "DOCUMENT_FIELD_CORRECTED", "DOCUMENT_REPROCESSED"
+        ):
+            relevant_actions.append({
+                "action": action_name,
+                "actor_id": a.get("actor_id"),
+                "actor_role": a.get("actor_role"),
+                "timestamp": a.get("timestamp"),
+            })
+
+    return {
+        "document_id": doc["id"],
+        "case_id": case_id,
+        "file_name": doc["file_name"],
+        "document_type": doc.get("document_type"),
+        "document_status": doc.get("document_status", "PENDING_VERIFICATION"),
+        "file_hash_sha256": doc["file_hash"],
+        "file_size_bytes": doc.get("file_size_bytes", 0),
+        "mime_type": doc.get("mime_type", "application/pdf"),
+        "source_authority": doc.get("source_authority", "INSTITUTIONAL"),
+        "uploaded_by": doc.get("uploaded_by"),
+        "uploaded_at": doc.get("uploaded_at"),
+        "security_screening": {
+            "status": doc.get("security_scan_status", "PASSED"),
+            "details": doc.get("security_scan_details"),
+            "engine": "NyayaMitra-SafeBoundaryScanner-v1.0",
+        },
+        "version_history": [
+            {
+                "version_id": v["id"],
+                "version_number": v["version_number"],
+                "parent_version_id": v.get("parent_version_id"),
+                "ocr_engine": v.get("ocr_engine"),
+                "ocr_confidence": v.get("ocr_confidence"),
+                "is_handwritten": v.get("is_handwritten"),
+                "manual_verification_required": v.get("manual_verification_required"),
+                "needs_human_verification_reason": v.get("needs_human_verification_reason"),
+                "processing_time_ms": v.get("processing_time_ms"),
+                "processed_by": v.get("processed_by"),
+                "created_at": v.get("created_at"),
+            }
+            for v in versions
+        ],
+        "current_version_number": doc.get("current_version", 1),
+        "evidence_chain": {
+            "origin_raw_file": {
+                "file_name": doc["file_name"],
+                "sha256": doc["file_hash"],
+                "immutable": True,
+                "storage_vault": "VAULT_PROTECTED",
+            },
+            "processing_extraction": {
+                "version_id": latest_version["id"] if latest_version else None,
+                "version_number": latest_version["version_number"] if latest_version else 1,
+                "ocr_engine": latest_version.get("ocr_engine") if latest_version else doc.get("ocr_engine"),
+                "ocr_confidence": latest_version.get("ocr_confidence") if latest_version else 1.0,
+                "manual_verification_required": latest_version.get("manual_verification_required") if latest_version else False,
+            },
+            "extracted_facts_with_spans": enriched_facts,
+            "statutory_rule_grounding": {
+                "statute": "Section 479 Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023",
+                "eligibility_outcome": rule_eval.get("eligible") if rule_eval else False,
+                "threshold_fraction": 0.5,
+                "calculated_served_days": rule_eval.get("custody_days_served") if rule_eval else None,
+                "statutory_required_days": rule_eval.get("required_custody_days") if rule_eval else None,
+            },
+            "ai_generated_assessment": latest_version.get("assessment_summary") if latest_version else None,
+            "institutional_actions": relevant_actions,
+        },
+    }
 
 
 # ── Domain Service & Repository Instances ──────────────────────────────────────

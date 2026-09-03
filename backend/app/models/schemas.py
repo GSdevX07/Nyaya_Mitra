@@ -251,3 +251,15 @@ class PlatformActionRequest(BaseModel):
     target: Optional[str] = Field(default=None, description="Optional target resource or service.")
     parameters: Optional[Dict[str, Any]] = Field(default=None, description="Optional parameters for action execution.")
 
+
+class DocumentCorrectionRequest(BaseModel):
+    field_name: str = Field(..., description="Name of the extracted field, e.g. 'custody_days', 'legal_sections'.")
+    corrected_value: Any = Field(..., description="Corrected value provided by authorized reviewer.")
+    correction_reason: str = Field(..., description="Justification and explanation for the correction.")
+    version_id: Optional[str] = Field(default=None, description="Optional version ID to link the correction to.")
+
+
+class ReprocessDocumentRequest(BaseModel):
+    reason: Optional[str] = Field(default="Reprocessing requested for updated extraction", description="Reason for reprocessing.")
+    custom_text_override: Optional[str] = Field(default=None, description="Optional revised text content.")
+

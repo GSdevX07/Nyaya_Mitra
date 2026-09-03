@@ -34,13 +34,14 @@ class DuplicateResolutionRequest(BaseModel):
 
 @accused_router.get("/duplicates/candidates", response_model=List[Dict[str, Any]])
 async def list_duplicate_candidates(
+    status: Optional[str] = Query("PENDING_HUMAN_REVIEW"),
     current_user: AuthUser = Depends(get_current_user),
 ):
     """
     Retrieve candidate duplicate identities detected across facilities/records
     for human-in-the-loop legal review.
     """
-    return get_duplicate_candidates(current_user)
+    return get_duplicate_candidates(current_user, status_filter=status)
 
 
 @accused_router.post("/duplicates/resolve")

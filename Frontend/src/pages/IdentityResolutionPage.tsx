@@ -31,6 +31,9 @@ interface DuplicateCandidate {
   match_explanation: string;
   review_status: string;
   created_at: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  resolution_notes?: string;
 }
 
 export const IdentityResolutionPage: React.FC = () => {
@@ -43,21 +46,27 @@ export const IdentityResolutionPage: React.FC = () => {
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+  const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
+  const [viewTab, setViewTab] = useState<'PENDING' | 'ALL'>('PENDING');
 
   useEffect(() => {
-    fetchCandidates();
-  }, [token]);
+    fetchCandidates(viewTab);
+  }, [token, viewTab]);
 
-  const fetchCandidates = async () => {
+  const fetchCandidates = async (tab: 'PENDING' | 'ALL' = viewTab) => {
     setLoading(true);
+    setActionErrorMessage(null);
     try {
-      const data = await fetchDuplicateCandidates();
+      const data = await fetchDuplicateCandidates(tab === 'PENDING' ? 'PENDING_HUMAN_REVIEW' : 'ALL');
       setCandidates(data);
       if (data.length > 0) {
         setSelectedCandidate(data[0]);
+      } else {
+        setSelectedCandidate(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching duplicate candidates:', err);
+      setActionErrorMessage(err?.message || 'Failed to fetch duplicate candidate records');
     } finally {
       setLoading(false);
     }
@@ -66,20 +75,37 @@ export const IdentityResolutionPage: React.FC = () => {
   const handleResolve = async () => {
     if (!selectedCandidate || !resolutionAction) return;
     setSubmitting(true);
+    setActionErrorMessage(null);
     try {
+      const candidateIdToResolve = selectedCandidate.id;
       const result = await resolveDuplicateCandidate({
-        candidate_id: selectedCandidate.id,
+        candidate_id: candidateIdToResolve,
         action: resolutionAction,
-        resolution_notes: notes || `Resolved as ${resolutionAction} by ${user?.full_name || 'Legal Officer'}`,
+        resolution_notes: notes || `Resolved as ${resolutionAction} by ${user?.full_name || user?.role || 'Legal Officer'}`,
       });
 
-      setActionSuccessMessage(result.message);
+      setActionSuccessMessage(result.message || `Candidate record ${candidateIdToResolve} resolved successfully.`);
       setResolutionAction(null);
       setNotes('');
-      // Refresh list
-      fetchCandidates();
-    } catch (err) {
+      setConfirmMerge(false);
+
+      // Optimistically update candidate list
+      if (viewTab === 'PENDING') {
+        setCandidates(prev => {
+          const remaining = prev.filter(c => c.id !== candidateIdToResolve);
+          if (remaining.length > 0) {
+            setSelectedCandidate(remaining[0]);
+          } else {
+            setSelectedCandidate(null);
+          }
+          return remaining;
+        });
+      }
+      // Re-fetch in background
+      await fetchCandidates(viewTab);
+    } catch (err: any) {
       console.error('Resolution submission failed:', err);
+      setActionErrorMessage(err?.message || 'Resolution submission failed. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -94,7 +120,7 @@ export const IdentityResolutionPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-8 pb-16 max-w-7xl mx-auto text-base">
+    <div className="space-y-6 pb-16 max-w-7xl mx-auto text-base">
       {/* Header — Enlarged & Zoomed In */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border pb-6">
         <div>
@@ -106,9 +132,28 @@ export const IdentityResolutionPage: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm px-4 py-2 rounded-full font-bold bg-amber-500/10 text-amber-600 border border-amber-500/30 flex items-center gap-2 shadow-sm">
-            <AlertTriangle className="h-4 w-4" /> {candidates.length} Cases Awaiting Human Decision
-          </span>
+          <div className="flex items-center bg-secondary p-1 rounded-xl border border-border">
+            <button
+              onClick={() => setViewTab('PENDING')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                viewTab === 'PENDING'
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Pending Decisions ({viewTab === 'PENDING' ? candidates.length : '...'})
+            </button>
+            <button
+              onClick={() => setViewTab('ALL')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                viewTab === 'ALL'
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              All Records ({viewTab === 'ALL' ? candidates.length : '...'})
+            </button>
+          </div>
         </div>
       </div>
 
@@ -118,6 +163,17 @@ export const IdentityResolutionPage: React.FC = () => {
             <CheckCircle2 className="h-5 w-5 text-emerald-600" /> {actionSuccessMessage}
           </span>
           <button onClick={() => setActionSuccessMessage(null)} className="text-emerald-700 font-bold hover:underline text-sm">
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {actionErrorMessage && (
+        <div className="p-5 bg-destructive/10 border-2 border-destructive/30 rounded-xl text-sm text-destructive font-semibold flex items-center justify-between shadow-sm">
+          <span className="flex items-center gap-2.5">
+            <AlertTriangle className="h-5 w-5 text-destructive" /> {actionErrorMessage}
+          </span>
+          <button onClick={() => setActionErrorMessage(null)} className="text-destructive font-bold hover:underline text-sm">
             Dismiss
           </button>
         </div>
@@ -277,15 +333,30 @@ export const IdentityResolutionPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Human Decision Control Box — Read-Only for GOV_ADMIN */}
-              {user?.role === 'GOV_ADMIN' ? (
+              {/* Human Decision Control Box */}
+              {selectedCandidate.review_status && selectedCandidate.review_status !== 'PENDING_HUMAN_REVIEW' ? (
                 <div className="bg-card border-2 border-border rounded-xl p-6 space-y-3 shadow-md">
-                  <div className="flex items-center gap-2 text-primary font-bold text-sm">
-                    <ShieldCheck className="h-5 w-5" />
-                    <span>State Administrator Oversight Mode (Read-Only)</span>
+                  <div className="flex items-center gap-2 text-emerald-600 font-bold text-sm">
+                    <CheckCircle2 className="h-5 w-5" />
+                    <span>Decision Recorded: {selectedCandidate.review_status.replace(/_/g, " ")}</span>
                   </div>
                   <p className="text-xs text-muted-foreground leading-relaxed">
-                    State Legal Services Authority administrators monitor identity collision rates, match explanations, and resolution audits. Operational merge and alias mutation actions are reserved for Supervising Legal Officers and DLSA Authorities.
+                    This candidate record was reviewed and resolved by <span className="font-semibold text-foreground">{selectedCandidate.reviewed_by || "Legal Officer"}</span> on {selectedCandidate.reviewed_at ? new Date(selectedCandidate.reviewed_at).toLocaleString() : "record"}.
+                  </p>
+                  {selectedCandidate.resolution_notes && (
+                    <div className="p-3 bg-secondary/60 rounded-lg text-xs font-mono text-muted-foreground">
+                      <span className="font-bold text-foreground">Officer Notes: </span> {selectedCandidate.resolution_notes}
+                    </div>
+                  )}
+                </div>
+              ) : !(user?.role === "SUPERVISING_LEGAL_OFFICER" || user?.role === "DLSA_OFFICER") ? (
+                <div className="bg-card border-2 border-border rounded-xl p-6 space-y-3 shadow-md">
+                  <div className="flex items-center gap-2 text-foreground font-bold text-sm">
+                    <Shield className="h-5 w-5 text-primary" />
+                    <span>Judicial Authority Required for Identity Mutations</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Under BNSS Section 479 statutory governance and segregation of duties, resolving de-duplication candidates (Merge Under Canonical ID, Link as Alias Profile, or Mark as Distinct Persons) must be formally recorded by an authorized judicial officer (DLSA Officer or Supervising Legal Officer). As a <span className="font-semibold text-foreground">{user?.role?.replace(/_/g, " ")}</span>, you have supervisory inspection and audit visibility over this queue.
                   </p>
                 </div>
               ) : (

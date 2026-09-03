@@ -377,6 +377,17 @@ export function AppLayout() {
           );
         }
       })
+      .catch((err) => {
+        console.warn("Could not load backend notifications, falling back to role defaults:", err);
+        if (!isMounted) return;
+        const readIds = getReadIdsFromStorage();
+        setNotifications(
+          getDefaultNotificationsForRole(user?.role).map((n) => ({
+            ...n,
+            read: readIds.includes(n.id),
+          }))
+        );
+      })
       .finally(() => {
         if (isMounted) setNotifLoading(false);
       });

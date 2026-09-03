@@ -26,7 +26,9 @@ export function CommandPalette({ isOpen: externalIsOpen, onClose }: CommandPalet
 
   useEffect(() => {
     if (isPaletteOpen) {
-      fetchCases().then((data) => setCases(data || []));
+      fetchCases()
+        .then((data) => setCases(data || []))
+        .catch(() => setCases([]));
     }
   }, [isPaletteOpen]);
 

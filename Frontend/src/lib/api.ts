@@ -335,6 +335,24 @@ export async function declineCase(caseId: string) {
   }
 }
 
+export async function signOffCase(caseId: string, draftText?: string) {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/sign-off`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ draft_text: draftText }),
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.detail || "Counsel sign-off failed");
+    }
+    return await res.json();
+  } catch (err) {
+    console.error("Error signing off case:", err);
+    throw err;
+  }
+}
+
 export async function approveCaseInBackend(caseId: string) {
   try {
     const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/approve`, {
@@ -413,6 +431,17 @@ export async function fetchDocuments() {
   } catch (err) {
     console.warn("Backend API documents unavailable:", err);
     return [];
+  }
+}
+
+export async function fetchCaseDocuments(caseId: string) {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/cases/${caseId}/documents`);
+    if (!res.ok) throw new Error("Failed to fetch case documents");
+    return await res.json();
+  } catch (err) {
+    console.warn(`Backend API case documents unavailable for ${caseId}:`, err);
+    return null;
   }
 }
 
@@ -622,8 +651,8 @@ export async function fetchAccusedTimeline(accusedId: string) {
   return await res.json();
 }
 
-export async function fetchDuplicateCandidates() {
-  const res = await authFetch(`${API_BASE_URL}/accused/duplicates/candidates`);
+export async function fetchDuplicateCandidates(status = "PENDING_HUMAN_REVIEW") {
+  const res = await authFetch(`${API_BASE_URL}/accused/duplicates/candidates?status=${encodeURIComponent(status)}`);
   if (!res.ok) {
     throw new Error(`Failed to fetch duplicate candidates: HTTP ${res.status}`);
   }
@@ -963,6 +992,75 @@ export async function triggerPlatformAction(actionType: string, target?: string,
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `Action failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchEvidenceChain(docId: string): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/documents/${encodeURIComponent(docId)}/evidence-chain`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch evidence chain: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function correctDocumentField(
+  docId: string,
+  payload: {
+    field_name: string;
+    corrected_value: any;
+    correction_reason: string;
+    version_id?: string;
+  }
+) {
+  const res = await authFetch(`${API_BASE_URL}/documents/${encodeURIComponent(docId)}/correct-field`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Field correction failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function reprocessDocument(
+  docId: string,
+  payload?: {
+    reason?: string;
+    custom_text_override?: string;
+  }
+) {
+  const res = await authFetch(`${API_BASE_URL}/documents/${encodeURIComponent(docId)}/reprocess`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Reprocessing failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function downloadSecureDocument(docId: string): Promise<Blob> {
+  const res = await authFetch(`${API_BASE_URL}/documents/download/${encodeURIComponent(docId)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Download failed: HTTP ${res.status}`);
+  }
+  return await res.blob();
+}
+
+export async function verifyUploadedDocument(docId: string) {
+  const res = await authFetch(`${API_BASE_URL}/documents/${encodeURIComponent(docId)}/verify`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Document verification failed: HTTP ${res.status}`);
   }
   return await res.json();
 }

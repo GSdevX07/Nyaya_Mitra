@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { BarChart3, TrendingUp, Users, Shield, Clock, Award, PieChart } from "lucide-react";
+import { BarChart3, TrendingUp, Users, Shield, Clock, Award, PieChart, Loader2 } from "lucide-react";
 import { fetchReports } from "@/lib/api";
 
 interface ReportsData {
@@ -82,8 +82,9 @@ export function ReportsPage() {
 
   if (loading || !data) {
     return (
-      <div className="p-16 text-center text-muted-foreground animate-pulse">
-        Compiling legal analytics report from Nyaya Mitra pipeline...
+      <div className="p-20 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <span className="text-sm font-mono">Compiling legal analytics report from Nyaya Mitra pipeline...</span>
       </div>
     );
   }

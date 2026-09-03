@@ -7,6 +7,15 @@
 
 ---
 
+> [!IMPORTANT]
+> **INSTITUTIONAL NOTICE & PROPOSED SPECIFICATION DISCLAIMER**
+> 
+> 1. **Current Operational Status**: Nyaya Mitra currently operates in a **sandboxed, deterministic environment** with local SQLite and Supabase PostgreSQL persistence. Neither this repository nor the engineering team claims live production credentials, direct network access, or approved clearance to internal ICJS, e-Prisons, or CIS intranet gateways.
+> 2. **Sourced Standards vs. Proposed Specifications**:
+>    - **Authentic Standards**: The 16-character Case Number Record (CNR) structure, CIS 3.2 data dictionaries, e-Filing 3.0 registry scrutiny stages, and Section 479 BNSS formulas are sourced from public documentation and published guidelines of the e-Committee, Supreme Court of India.
+>    - **Proposed Architectural Blueprints**: The specific REST endpoint paths (e.g., `/api/v2/icjs/exchange/undertrial-query`), mTLS header conventions, and JSON payload schemas in Section 3 are **illustrative proposed technical contracts** drafted as an engineering blueprint for future bilateral integration under a formal Memorandum of Agreement (MoA) with the National Informatics Centre (NIC) and National Crime Records Bureau (NCRB).
+>    - **No Unauthorized Scraping**: In compliance with the Supreme Court e-Committee policies and IT Act provisions, this platform does not perform unauthorized scraping of protected judicial intranets.
+
 ## 1. Executive Summary
 
 A critical operational prerequisite for scaling **Nyaya Mitra** across India's 1,300+ prison facilities and 672 District Legal Services Authorities (DLSAs) is programmatic inter-operation with the **National Judicial Data Grid (NJDG)**, **e-Courts Case Information System (CIS 3.2)**, **e-Filing 3.0**, and the **Inter-operable Criminal Justice System (ICJS)**.
@@ -57,7 +66,7 @@ The National Crime Records Bureau (NCRB) operates the ICJS bus linking:
 - **CIS** (Courts - Remand Orders, Bail Applications, Disposition Orders)
 - **e-Prosecution** & **e-Forensics**
 
-#### ICJS REST Gateway Interface:
+#### Proposed ICJS REST Gateway Interface (Illustrative Technical Blueprint):
 ```http
 POST /api/v2/icjs/exchange/undertrial-query
 Authorization: Bearer <mTLS_JWT_TOKEN>
@@ -72,7 +81,7 @@ Content-Type: application/json
 }
 ```
 
-### 3.2 Channel 2: e-Courts e-Filing 3.0 API
+### 3.2 Channel 2: e-Courts e-Filing 3.0 (Proposed Integration Workflow)
 The e-Committee of the Supreme Court offers **e-Filing 3.0** enabling panel advocates to electronically submit bail applications directly into court registries:
 
 1. **Authentication:** Aadhaar e-Sign or DSC (Class 3 Digital Signature Certificate) with Bar Council Enrollment verification.

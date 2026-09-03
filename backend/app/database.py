@@ -1547,6 +1547,9 @@ def init_db():
                 evi_id = f"EVI-{c.case_id}-{doc}"
                 import hashlib
                 doc_hash = hashlib.sha256(f"verified_content_{c.case_id}_{doc}".encode()).hexdigest()
+                # Intentional corruption on UTP-0012 remand order for cryptographic tamper-detection demo
+                if c.case_id == "UTP-0012" and doc == "remand_order":
+                    doc_hash = "deadbeef" + doc_hash[8:]
                 now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 cursor.execute(
                     "INSERT OR REPLACE INTO evidence (evidence_id, case_id, document_type, file_name, stored_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",

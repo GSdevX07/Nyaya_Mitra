@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Shield, AlertTriangle, CheckCircle2, Clock, MapPin, Building2, BarChart3, FileText } from "lucide-react";
+import { Shield, AlertTriangle, CheckCircle2, Clock, MapPin, Building2, BarChart3, FileText, Loader2 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import {
   fetchGovOverview,
@@ -184,8 +184,11 @@ export function GovAdminOverview() {
               <tbody className="divide-y divide-border">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="py-6 text-center text-muted-foreground">
-                      Loading district metrics from database...
+                    <td colSpan={7} className="py-10 text-center text-muted-foreground">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                        <span className="text-xs font-mono">Loading district metrics from database...</span>
+                      </div>
                     </td>
                   </tr>
                 ) : districts.length === 0 ? (
@@ -346,8 +349,9 @@ export function GovAdminOverview() {
           </h2>
           <div className="space-y-3 text-xs font-mono">
             {(reports?.court_jurisdiction_breakdown || []).length === 0 ? (
-              <div className="p-3 bg-secondary/20 rounded border border-border text-center text-muted-foreground">
-                Facility distribution data loading from database...
+              <div className="p-4 bg-secondary/20 rounded border border-border flex items-center justify-center gap-2 text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span>Facility distribution data loading from database...</span>
               </div>
             ) : (
               (reports?.court_jurisdiction_breakdown || []).map((item: any, idx: number) => (

@@ -20,8 +20,8 @@ interface EvidenceItem {
 
 export function EvidencePage() {
   const { hasRole } = useAuth();
-  // DLSA officers, Supervisors, Platform Admins, Gov Admins, and Jail Officers can trigger cryptographic hash re-verification.
-  const canVerify = hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "PLATFORM_ADMIN", "GOV_ADMIN", "JAIL_OFFICER");
+  // Evidence verification requires active institutional authority (DLSA, Supervisor, or Jail Custody desk)
+  const canVerify = hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER");
 
   const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
   const [loading, setLoading] = useState(true);

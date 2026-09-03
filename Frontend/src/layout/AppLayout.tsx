@@ -484,6 +484,8 @@ export function AppLayout() {
 
             <nav
               ref={navRef}
+              role="navigation"
+              aria-label="Institutional Workspace Navigation"
               onScroll={checkScroll}
               onWheel={handleNavWheel}
               className="flex items-center gap-1 md:gap-1.5 flex-1 overflow-x-auto no-scrollbar py-1 scroll-smooth px-1"

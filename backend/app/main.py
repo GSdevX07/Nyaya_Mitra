@@ -41,7 +41,10 @@ if hasattr(sys.stderr, "reconfigure"):
 import hashlib
 import json
 import datetime
+import logging
 from typing import Optional
+
+logger = logging.getLogger("nyaya_mitra.api")
 
 from fastapi import FastAPI, HTTPException, status, File, UploadFile, Body, Form, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -1298,7 +1301,7 @@ def sign_off_case(
             },
         })
     except Exception as e:
-        print(f"[WARN] Failed to log ADVOCATE_SIGN_OFF audit: {e}")
+        logger.warning(f"Failed to log ADVOCATE_SIGN_OFF audit: {e}")
 
     return {
         "status": "success",
@@ -1947,15 +1950,52 @@ def get_platform_health(
     is_tls = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
     protocol_str = f"HTTP/{http_ver} (TLS 1.3)" if is_tls else f"HTTP/{http_ver} (Local Plaintext)"
 
-    # 4. Connectors status with dynamically derived latencies
+    # 4. Institutional Gateway Connectors (Honest status per Stage 14 Playbook: Sandbox vs Live Gateway)
+    icjs_url = os.environ.get("ICJS_GATEWAY_URL")
+    eprisons_url = os.environ.get("EPRISONS_GATEWAY_URL")
+    cis_url = os.environ.get("CIS_GATEWAY_URL")
+
     connectors = [
-        {"id": "icjs_police", "name": "ICJS Police Records Gateway", "status": "ONLINE", "type": "REST_STREAM", "latency_ms": max(3.0, round(db_latency_ms * 1.2, 1)), "health": "HEALTHY"},
-        {"id": "eprisons_jail", "name": "e-Prisons Custody Sync Gateway", "status": "ONLINE", "type": "SFTP_BATCH", "latency_ms": max(4.0, round(db_latency_ms * 1.5, 1)), "health": "HEALTHY"},
-        {"id": "cis_court", "name": "CIS eCourts Registry Filing Gateway", "status": "ONLINE", "type": "SOAP_TLS", "latency_ms": max(5.0, round(db_latency_ms * 1.8, 1)), "health": "HEALTHY"},
-        {"id": "dlsa_portal", "name": "DLSA Legal Aid Allocation Service", "status": "ONLINE", "type": "INTERNAL_MQ", "latency_ms": max(2.0, round(db_latency_ms * 0.9, 1)), "health": "HEALTHY"},
+        {
+            "id": "icjs_police",
+            "name": "ICJS Police Records Gateway",
+            "status": "CONNECTED" if icjs_url else "SANDBOX_SIMULATED",
+            "type": "REST_STREAM",
+            "latency_ms": db_latency_ms if icjs_url else 0.0,
+            "health": "LIVE_UPSTREAM" if icjs_url else "STANDBY (Awaiting MoA & Production Gateway Key)",
+            "operational_mode": "LIVE_INTEGRATION" if icjs_url else "LOCAL_EMULATED_DATASTORE",
+        },
+        {
+            "id": "eprisons_jail",
+            "name": "e-Prisons Custody Sync Gateway",
+            "status": "CONNECTED" if eprisons_url else "SANDBOX_SIMULATED",
+            "type": "SFTP_BATCH",
+            "latency_ms": db_latency_ms if eprisons_url else 0.0,
+            "health": "LIVE_UPSTREAM" if eprisons_url else "STANDBY (Awaiting Prison Dept MoA & SSH Tunnel)",
+            "operational_mode": "LIVE_INTEGRATION" if eprisons_url else "LOCAL_EMULATED_DATASTORE",
+        },
+        {
+            "id": "cis_court",
+            "name": "CIS eCourts Registry Gateway",
+            "status": "CONNECTED" if cis_url else "SANDBOX_SIMULATED",
+            "type": "SOAP_TLS",
+            "latency_ms": db_latency_ms if cis_url else 0.0,
+            "health": "LIVE_UPSTREAM" if cis_url else "STANDBY (Awaiting e-Committee CIS 3.2 Endpoint)",
+            "operational_mode": "LIVE_INTEGRATION" if cis_url else "LOCAL_EMULATED_DATASTORE",
+        },
+        {
+            "id": "dlsa_portal",
+            "name": "DLSA Legal Aid Allocation Desk",
+            "status": "ONLINE",
+            "type": "INTERNAL_REGISTRY",
+            "latency_ms": db_latency_ms,
+            "health": "HEALTHY",
+            "operational_mode": "ACTIVE_LOCAL_SERVICE",
+        },
     ]
 
     corpus_stats = get_corpus_statistics()
+    rate_limiting_status = "ACTIVE (Production Enforcement)" if APP_ENV == "production" else "DEVELOPMENT_SANDBOX (Permissive Local Mode)"
 
     return {
         "status": "HEALTHY" if db_status == "HEALTHY" else "DEGRADED",
@@ -1966,7 +2006,7 @@ def get_platform_health(
             "framework": "FastAPI 0.115",
         },
         "subsystems": {
-            "api": {"status": "HEALTHY", "protocol": protocol_str, "rate_limiting": "ACTIVE (Security Lockout Enabled)"},
+            "api": {"status": "HEALTHY", "protocol": protocol_str, "rate_limiting": rate_limiting_status},
             "database": {"status": db_status, "mode": db_mode, "active_records": record_count, "storage_path": str(DB_PATH), "query_latency_ms": db_latency_ms},
             "auth": {"status": "HEALTHY", "algorithm": "HS256", "session_revocation": "ACTIVE", "brute_force_protection": "ACTIVE"},
             "audit_ledger": {
@@ -2406,7 +2446,7 @@ async def upload_document(
                     }
                 })
             except Exception as e:
-                print(f"[WARN] Failed to record security quarantine audit event: {e}")
+                logger.warning(f"Failed to record security quarantine audit event: {e}")
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Security screening failed: {scan_res.threat_details}",
@@ -2531,7 +2571,7 @@ async def upload_document(
             processed_by=current_user.id,
         )
     except Exception as exc:
-        print(f"[WARN] store_document_version v{version_num} failed: {exc}")
+        logger.warning(f"store_document_version v{version_num} failed: {exc}")
 
     # ── 5. Update present_docs on the case ───────────────────────────────────
     # Only verified documents immediately satisfy case completeness.
@@ -2571,7 +2611,7 @@ async def upload_document(
                 }
             })
         except Exception as e:
-            print(f"[WARN] Failed to append police audit event: {e}")
+            logger.warning(f"Failed to append police audit event: {e}")
 
     return {
         "status": "success",
@@ -2733,7 +2773,7 @@ def correct_document_field(
             },
         })
     except Exception as e:
-        print(f"[WARN] Failed to log document field correction audit: {e}")
+        logger.warning(f"Failed to log document field correction audit: {e}")
 
     return {
         "status": "success",
@@ -2824,7 +2864,7 @@ def reprocess_document(
             },
         })
     except Exception as e:
-        print(f"[WARN] Failed to log reprocessing audit event: {e}")
+        logger.warning(f"Failed to log reprocessing audit event: {e}")
 
     return {
         "status": "success",
@@ -2951,7 +2991,7 @@ def verify_uploaded_document(
             },
         })
     except Exception as e:
-        print(f"[WARN] Failed to log document verification audit event: {e}")
+        logger.warning(f"Failed to log document verification audit event: {e}")
 
     return {
         "status": "success",
@@ -3012,7 +3052,7 @@ def download_document_file(
                 },
             })
         except Exception as err:
-            print(f"[WARN] Failed to record denied download audit: {err}")
+            logger.warning(f"Failed to record denied download audit: {err}")
 
     # Role jurisdiction scoping checks
     if current_user.role == Role.JAIL_OFFICER:
@@ -3080,7 +3120,7 @@ def download_document_file(
             },
         })
     except Exception as e:
-        print(f"[WARN] Failed to log document download audit event: {e}")
+        logger.warning(f"Failed to log document download audit event: {e}")
 
     return FileResponse(
         path=storage_path,
@@ -3520,7 +3560,7 @@ def trigger_action(
             },
         })
     except Exception as e:
-        print(f"[WARN] Failed to record ACTION_DISPATCHED audit event: {e}")
+        logger.warning(f"Failed to record ACTION_DISPATCHED audit event: {e}")
 
     return {
         "action_id": action_id,
@@ -3566,18 +3606,47 @@ def execute_platform_action(
         }
     elif act == "CACHE_REFRESH":
         import gc
+        import psutil
+        import os
+        from app.auth.user_store import get_user_by_id
+
+        # Real in-memory cache purge
+        cleared_caches = 0
+        for fn in [get_user_by_id]:
+            if hasattr(fn, "cache_clear"):
+                fn.cache_clear()
+                cleared_caches += 1
+
+        # Real process RSS memory measurement before & after gc
+        try:
+            proc = psutil.Process(os.getpid())
+            mem_before = proc.memory_info().rss
+        except Exception:
+            mem_before = 0
+
         collected = gc.collect()
+
+        try:
+            mem_after = proc.memory_info().rss
+            mem_freed_kb = max(0.0, round((mem_before - mem_after) / 1024, 2))
+        except Exception:
+            mem_freed_kb = 0.0
+
         result_detail = {
-            "cache_entries_cleared": max(collected, 48),
-            "memory_freed_kb": round((collected * 64) / 1024, 2) + 128.0,
+            "gc_objects_collected": collected,
+            "in_memory_caches_cleared": cleared_caches,
+            "memory_freed_kb": mem_freed_kb,
             "status": "CACHE_PURGED",
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
     elif act == "REINDEX_LEGAL_CORPUS":
-        from app.rag.vector_store import get_corpus_statistics
+        from app.rag.vector_store import reindex_all_statutory_corpus, get_corpus_statistics
+        reindex_result = reindex_all_statutory_corpus()
         stats = get_corpus_statistics()
         result_detail = {
             "corpus": "BNSS_2023_BNS_2023_IPC_CRPC",
+            "documents_reindexed": reindex_result["documents_reindexed"],
+            "chunks_reindexed": reindex_result["chunks_reindexed"],
             "documents_indexed": stats["documents_indexed"],
             "chunks_indexed": stats["chunks_indexed"],
             "vector_store": stats["vector_store"],
@@ -4034,7 +4103,7 @@ def export_audit_events_endpoint(
             artifact_hash=artifact_hash,
         )
     except Exception as e:
-        print(f"[WARN] Failed to log audit export: {e}")
+        logger.warning(f"Failed to log audit export: {e}")
 
     return {
         "status": "SUCCESS",

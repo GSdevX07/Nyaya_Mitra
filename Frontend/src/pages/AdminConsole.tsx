@@ -233,35 +233,46 @@ export function AdminConsole() {
             </div>
 
             <div className="divide-y divide-border">
-              {(healthData?.connectors || [
-                { id: "icjs_police", name: "ICJS Police Records Gateway", status: "ONLINE", type: "REST_STREAM", latency_ms: 14, health: "HEALTHY" },
-                { id: "eprisons_jail", name: "e-Prisons Custody Sync Gateway", status: "ONLINE", type: "SFTP_BATCH", latency_ms: 18, health: "HEALTHY" },
-                { id: "cis_court", name: "CIS eCourts Registry Filing Gateway", status: "ONLINE", type: "SOAP_TLS", latency_ms: 22, health: "HEALTHY" },
-                { id: "dlsa_portal", name: "DLSA Legal Aid Allocation Service", status: "ONLINE", type: "INTERNAL_MQ", latency_ms: 6, health: "HEALTHY" },
-              ]).map((conn) => (
-                <div key={conn.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-secondary/15 transition-colors">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      <h4 className="font-serif font-bold text-sm text-foreground">{conn.name}</h4>
-                      <span className="text-[10px] font-mono px-2 py-0.5 bg-muted rounded border border-border text-muted-foreground">
-                        {conn.type}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground font-mono">
-                      Endpoint ID: {conn.id} • Latency: {conn.latency_ms}ms • Status: {conn.status}
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={() => handleAction("CONNECTOR_RETRY", conn.id)}
-                    disabled={actionLoading === "CONNECTOR_RETRY"}
-                    className="px-2.5 py-1 border border-border rounded text-xs font-mono hover:bg-secondary text-foreground shrink-0"
-                  >
-                    Test Ping
-                  </button>
+              {(!healthData?.connectors || healthData.connectors.length === 0) ? (
+                <div className="p-6 text-center text-xs font-mono text-muted-foreground">
+                  {loading ? "Polling subsystem gateways..." : "No connectors configured in platform profile."}
                 </div>
-              ))}
+              ) : (
+                healthData.connectors.map((conn) => {
+                  const isSimulated = conn.status === "SANDBOX_SIMULATED" || (conn.health && conn.health.includes("STANDBY"));
+                  return (
+                    <div key={conn.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-secondary/15 transition-colors">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${isSimulated ? "bg-amber-500" : "bg-emerald-500 animate-pulse"}`} />
+                          <h4 className="font-serif font-bold text-sm text-foreground">{conn.name}</h4>
+                          <span className="text-[10px] font-mono px-2 py-0.5 bg-muted rounded border border-border text-muted-foreground">
+                            {conn.type}
+                          </span>
+                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                            isSimulated
+                              ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                              : "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                          }`}>
+                            {conn.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground font-mono">
+                          Endpoint ID: {conn.id} • {conn.latency_ms > 0 ? `Latency: ${conn.latency_ms}ms` : "Simulated Local Bridge"} • Health: {conn.health || "OK"}
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => handleAction("CONNECTOR_RETRY", conn.id)}
+                        disabled={actionLoading === "CONNECTOR_RETRY"}
+                        className="px-2.5 py-1 border border-border rounded text-xs font-mono hover:bg-secondary text-foreground shrink-0"
+                      >
+                        Test Ping
+                      </button>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 

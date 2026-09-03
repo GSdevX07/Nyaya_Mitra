@@ -68,6 +68,9 @@ export function CommandPalette({ isOpen: externalIsOpen, onClose }: CommandPalet
       onClick={handleClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Universal Case Search Command Palette"
         className="w-full max-w-2xl bg-primary border border-border rounded shadow-2xl overflow-hidden shadow-primary/5"
         onClick={(e) => e.stopPropagation()}
       >
@@ -76,6 +79,7 @@ export function CommandPalette({ isOpen: externalIsOpen, onClose }: CommandPalet
           <input
             autoFocus
             type="text"
+            aria-label="Search cases by ID, name, or legal section"
             placeholder="Search cases by ID, name, section (e.g., UTP-0007, IPC 379)..."
             className="flex-1 bg-transparent text-primary focus:outline-none placeholder:text-muted-foreground text-sm"
             value={query}

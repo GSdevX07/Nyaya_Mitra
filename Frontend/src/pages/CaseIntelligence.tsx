@@ -1447,14 +1447,21 @@ export function CaseIntelligence() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleVerifyEvidence(eviId)}
-                      disabled={verifyingEvidenceId === eviId}
-                      className="px-3 py-1.5 bg-secondary border border-border text-foreground hover:bg-muted text-xs font-semibold font-mono rounded flex items-center gap-1.5"
-                    >
-                      {verifyingEvidenceId === eviId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                      {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") ? "Inspect Hash Integrity" : "Verify SHA-256 Hash"}
-                    </button>
+                    {hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER") ? (
+                      <button
+                        onClick={() => handleVerifyEvidence(eviId)}
+                        disabled={verifyingEvidenceId === eviId}
+                        className="px-3 py-1.5 bg-secondary border border-border text-foreground hover:bg-muted text-xs font-semibold font-mono rounded flex items-center gap-1.5"
+                      >
+                        {verifyingEvidenceId === eviId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                        Verify SHA-256 Hash
+                      </button>
+                    ) : (
+                      <span className="px-2.5 py-1 text-[11px] font-mono text-muted-foreground bg-muted/50 border border-border rounded flex items-center gap-1" title="Evidence verification is performed by DLSA, Supervisory Legal Officer, or Jail Custody Officer">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                        Custody Verified
+                      </span>
+                    )}
                   </div>
                 </div>
               );

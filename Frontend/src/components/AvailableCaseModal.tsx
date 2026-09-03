@@ -82,6 +82,9 @@ export function AvailableCaseModal({
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 15 }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="available-case-dialog-title"
           className="relative w-full max-w-3xl bg-card border border-border rounded shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         >
           {/* Header */}
@@ -95,7 +98,7 @@ export function AvailableCaseModal({
                   Available Pro Bono Case
                 </span>
               </div>
-              <h2 className="text-xl font-bold text-primary flex items-center gap-2">
+              <h2 id="available-case-dialog-title" className="text-xl font-bold text-primary flex items-center gap-2">
                 Undertrial Case Review
               </h2>
             </div>

@@ -161,6 +161,9 @@ export function LawyerProfileModal({ isOpen, onClose }: UserProfileModalProps) {
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 12 }}
           transition={{ type: "spring", stiffness: 380, damping: 28 }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="lawyer-profile-dialog-title"
           className="relative w-full max-w-2xl bg-card border-2 border-border rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         >
           {/* Header */}
@@ -173,7 +176,7 @@ export function LawyerProfileModal({ isOpen, onClose }: UserProfileModalProps) {
 
               <div>
                 <div className="flex items-center gap-2.5 flex-wrap">
-                  <h2 className="text-xl font-bold text-foreground tracking-tight">
+                  <h2 id="lawyer-profile-dialog-title" className="text-xl font-bold text-foreground tracking-tight">
                     {profile.full_name}
                   </h2>
                   <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${roleInfo.color}`}>

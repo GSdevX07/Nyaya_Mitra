@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Search, Filter, Clock, ArrowLeft, ArrowUpRight, ShieldAlert, CheckCircle, FileText } from "lucide-react";
+import { Search, Filter, Clock, ArrowLeft, ArrowUpRight, ShieldAlert, CheckCircle, FileText, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { fetchCases, type BackendCaseSummary } from "@/lib/api";
 type TimeframeWindow = "Today" | "7 days" | "30 days" | "90 days";
@@ -189,8 +189,9 @@ export function EligibilityRadar() {
         </div>
 
         {loading ? (
-          <div className="p-12 text-center text-muted-foreground animate-pulse">
-            Loading eligibility radar pipeline...
+          <div className="p-16 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <span className="text-sm font-mono">Scanning detention registries & evaluating Section 479 eligibility...</span>
           </div>
         ) : (
           <div className="space-y-12">

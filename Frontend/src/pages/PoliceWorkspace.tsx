@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   ShieldAlert, AlertTriangle, CheckCircle2,
   Search, Plus, ChevronRight, FileText, UserCheck, Check,
-  Clock, Send, X, Inbox
+  Clock, Send, X, Inbox, Loader2
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
@@ -251,8 +251,9 @@ export function PoliceWorkspace() {
           </div>
 
           {loading ? (
-            <div className="p-8 text-center text-xs font-mono text-muted-foreground">
-              Loading police reference docket...
+            <div className="p-12 text-center text-xs font-mono text-muted-foreground flex flex-col items-center justify-center gap-3">
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              <span>Loading police reference docket...</span>
             </div>
           ) : filteredCases.length === 0 ? (
             <div className="p-8 text-center text-xs font-mono text-muted-foreground">
@@ -346,7 +347,12 @@ export function PoliceWorkspace() {
             </p>
           </div>
 
-          {actions.length === 0 ? (
+          {loading ? (
+            <div className="p-12 text-center text-xs font-mono text-muted-foreground flex flex-col items-center justify-center gap-3">
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              <span>Loading institutional requests and compliance tasks...</span>
+            </div>
+          ) : actions.length === 0 ? (
             <div className="p-8 text-center text-xs font-mono text-muted-foreground">
               No outstanding document requests or court production tasks for this station.
             </div>

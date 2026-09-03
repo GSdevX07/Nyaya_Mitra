@@ -51,13 +51,16 @@ export function NotificationsModal({
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="notifications-dialog-title"
         className="w-full max-w-md bg-background/95 border border-border rounded shadow-2xl overflow-hidden backdrop-blur-xl flex flex-col max-h-[80vh]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-4 border-b border-border flex items-center justify-between bg-card shadow-sm">
           <div className="flex items-center gap-2">
             <Bell className="w-5 h-5 text-accent" />
-            <h3 className="font-semibold text-primary tracking-tight">
+            <h3 id="notifications-dialog-title" className="font-semibold text-primary tracking-tight">
               System Alerts & Notifications
             </h3>
             {unreadCount > 0 && (

@@ -95,16 +95,43 @@ def corpus_status() -> dict[str, int]:
     return {"chunks": collection.count()}
 
 
+def reindex_all_statutory_corpus() -> dict[str, Any]:
+    """Index all statutory sections from _STATUTORY_CORPUS into the vector collection."""
+    from app.agents.retrieval_agent import _STATUTORY_CORPUS
+    indexed_docs = 0
+    indexed_chunks = 0
+    for doc_id, doc_meta in _STATUTORY_CORPUS.items():
+        title = doc_meta.get("title", doc_id)
+        text = doc_meta.get("text", "")
+        if text:
+            chunks = index_legal_text(
+                document_id=doc_id,
+                source_name=f"{doc_meta.get('statute', '')} - {doc_meta.get('section', '')}: {title}",
+                text=text,
+                source_url=doc_meta.get("effective_date", ""),
+            )
+            indexed_docs += 1
+            indexed_chunks += chunks
+    return {
+        "documents_reindexed": indexed_docs,
+        "chunks_reindexed": indexed_chunks,
+        "vector_store": "ChromaDB (Persistent Collection)",
+    }
+
+
 def get_corpus_statistics() -> dict[str, Any]:
     """Return dynamic document and chunk count from the persistent vector store or statutory corpus."""
     try:
         col = _collection()
         chunk_count = col.count()
+        if chunk_count == 0:
+            reindex_all_statutory_corpus()
+            chunk_count = col.count()
         res = col.get(include=["metadatas"])
         doc_ids = set(m.get("document_id") for m in (res.get("metadatas") or []) if m)
         return {
-            "documents_indexed": max(len(doc_ids), 12),
-            "chunks_indexed": max(chunk_count, 148),
+            "documents_indexed": len(doc_ids),
+            "chunks_indexed": chunk_count,
             "vector_store": "ChromaDB (Persistent Collection)",
             "collection_name": col.name,
         }

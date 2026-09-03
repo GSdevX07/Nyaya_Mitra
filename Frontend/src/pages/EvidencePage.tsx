@@ -22,7 +22,7 @@ export function EvidencePage() {
   const { hasRole, user } = useAuth();
   const isPlatformAdmin = user?.role === "PLATFORM_ADMIN";
   // Evidence verification requires active institutional authority (DLSA, Supervisor, or Jail Custody desk)
-  const canVerify = hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER", "PLATFORM_ADMIN");
+  const canVerify = hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER");
 
   const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,7 +79,7 @@ export function EvidencePage() {
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-primary">Evidence & Record Integrity</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Tamper-evident verification of remand orders, arrest logs, and legal documentation. Confirms court records are sealed and uncorrupted under BSA Sec 63 where applicable.
+            Electronic-record handling references BSA Section 63 where applicable; cryptographic integrity is verified separately using SHA-256.
           </p>
         </div>
 
@@ -122,7 +122,7 @@ export function EvidencePage() {
                   ) : (
                     <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
                   )}
-                  {item.authenticity_score > 85 ? "Digital Seal Verified" : "Integrity Flagged"}
+                  {item.authenticity_score > 85 ? "Integrity Verified" : "Integrity Flagged"}
                 </span>
               </div>
 

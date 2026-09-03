@@ -1447,7 +1447,7 @@ export function CaseIntelligence() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER", "PLATFORM_ADMIN") ? (
+                    {hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER") ? (
                       <button
                         onClick={() => handleVerifyEvidence(eviId)}
                         disabled={verifyingEvidenceId === eviId}

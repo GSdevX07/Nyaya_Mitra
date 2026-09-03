@@ -33,6 +33,7 @@ import {
   type TimelineEvent,
   type LegalNeedItem,
   referJailCaseToDlsa,
+  submitCaseComment,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { jsPDF } from "jspdf";
@@ -55,6 +56,7 @@ export function CaseIntelligence() {
   const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
   const [editableDraft, setEditableDraft] = useState<string>("");
   const [dlsaComment, setDlsaComment] = useState<string>("");
+  const [submittingComment, setSubmittingComment] = useState(false);
   const [activeTab, setActiveTab] = useState<"dossier" | "draft" | "timeline" | "evidence" | "statutes" | "legalaid">("dossier");
 
   const [verifyingEvidenceId, setVerifyingEvidenceId] = useState<string | null>(null);
@@ -542,6 +544,27 @@ export function CaseIntelligence() {
       alert(`Referral failed: ${err.message}`);
     } finally {
       setReferringDlsa(false);
+    }
+  };
+
+  const handleSubmitComment = async () => {
+    if (!dlsaComment.trim() || !id) return;
+    setSubmittingComment(true);
+    try {
+      await submitCaseComment(id, dlsaComment.trim());
+      setActionBanner({
+        type: "success",
+        text: "Institutional review note successfully recorded on case timeline and dispatched to counsel.",
+      });
+      setDlsaComment("");
+      await load();
+    } catch (err: any) {
+      setActionBanner({
+        type: "error",
+        text: err.message || "Failed to submit review note.",
+      });
+    } finally {
+      setSubmittingComment(false);
     }
   };
 
@@ -1262,15 +1285,16 @@ export function CaseIntelligence() {
                     className="w-full p-4 font-mono text-xs bg-background border border-border rounded-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed resize-y"
                   />
                   <button
-                    disabled={!dlsaComment.trim()}
+                    disabled={!dlsaComment.trim() || submittingComment}
                     className={`px-4 py-2 rounded-sm text-xs font-semibold flex items-center gap-2 ${
-                      dlsaComment.trim()
+                      dlsaComment.trim() && !submittingComment
                         ? "bg-primary text-primary-foreground hover:opacity-90"
                         : "bg-muted text-muted-foreground cursor-not-allowed border border-border"
                     }`}
-                    onClick={() => alert("DLSA comment submitted for advocate review. (Backend integration pending.)")}
+                    onClick={handleSubmitComment}
                   >
-                    <Send className="w-3.5 h-3.5" /> Submit for Advocate / Supervisor Review
+                    {submittingComment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    {submittingComment ? "Submitting Comment..." : "Submit for Advocate / Supervisor Review"}
                   </button>
                 </div>
               </div>

@@ -337,6 +337,19 @@ export async function declineCase(caseId: string) {
   }
 }
 
+export async function submitCaseComment(caseId: string, comment: string, targetRole?: string): Promise<{ status: string; message: string }> {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/comments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment, target_role: targetRole || "DEFENSE_ADVOCATE" }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to submit comment");
+  }
+  return await res.json();
+}
+
 export async function signOffCase(caseId: string, draftText?: string) {
   try {
     const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/sign-off`, {

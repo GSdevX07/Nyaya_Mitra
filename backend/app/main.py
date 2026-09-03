@@ -1363,6 +1363,61 @@ def approve_case(
     }
 
 
+class CaseCommentRequest(BaseModel):
+    comment: str
+    target_role: Optional[str] = "DEFENSE_ADVOCATE"
+
+
+@app.post("/cases/{case_id}/comments", tags=["Cases"])
+def add_case_comment(
+    case_id: str,
+    body: CaseCommentRequest,
+    current_user: AuthUser = Depends(require_role(
+        Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER, Role.DEFENSE_ADVOCATE, Role.PLATFORM_ADMIN,
+    )),
+):
+    """
+    Attach an institutional review note or correction request to a case.
+    Appends an immutable timeline event and dispatches a notification.
+    """
+    from app.database import append_case_timeline_event, add_notification
+    from app.models.schemas import TimelineEvent
+
+    case = _find_case(case_id)
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    actor_name = current_user.full_name or current_user.id
+
+    append_case_timeline_event(
+        case_id,
+        TimelineEvent(
+            id=f"TLE-{case_id}-COMM-{datetime.datetime.now().strftime('%M%S')}",
+            timestamp=now_iso,
+            event_type="LEGAL_AID",
+            title=f"Review Feedback — {current_user.role.value.replace('_', ' ').title()}",
+            description=body.comment,
+            actor=actor_name,
+            actor_role=current_user.role.value,
+            source="Institutional Review Desk",
+            is_human_verified=True,
+        ),
+    )
+
+    add_notification(
+        case_id=case_id,
+        title=f"Review Note on Case {case_id}",
+        message=f"{actor_name} ({current_user.role.value}): {body.comment[:120]}",
+        type="info",
+        target_role=body.target_role,
+    )
+
+    return {
+        "status": "SUCCESS",
+        "case_id": case_id,
+        "message": "Review comment recorded on case timeline and dispatched.",
+        "timestamp": now_iso,
+    }
+
+
 @app.post("/cases/{case_id}/file", tags=["Cases"])
 def file_case_in_court(
     case_id: str,

@@ -125,6 +125,10 @@ from app.routes.accused_routes import accused_router, citizen_router
 app.include_router(accused_router)
 app.include_router(citizen_router)
 
+# ── Deterministic Legal Rules Engine Router ──────────────────────────────────
+from app.routes.rule_engine_routes import router as rule_engine_router
+app.include_router(rule_engine_router)
+
 # ── Mock database ─────────────────────────────────────────────────────────────
 # 5 hero cases engineered to hit distinct agent decision branches.
 # All data is synthetic see Nyaya_Mitra_Master_Roadmap_v2.md §8, Step 1.1.

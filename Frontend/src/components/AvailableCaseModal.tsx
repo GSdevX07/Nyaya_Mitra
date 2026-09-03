@@ -69,7 +69,7 @@ export function AvailableCaseModal({
 
   const c = item.case;
   const isEligible = item.eligibility ? item.eligibility.is_eligible : item.days_overdue > 0;
-  const threshold = item.eligibility?.threshold_days ?? (c.urgency_flags?.repeat_offender ? Math.ceil(c.max_sentence_days_for_offense / 2) : Math.ceil(c.max_sentence_days_for_offense / 3));
+  const threshold = item.eligibility?.threshold_days ?? 0;
   const relativeName = c.relative_name || "Ramesh Kumar";
   const relativeRelation = c.relative_relation || "Father / Guardian";
   const relativePhone = c.relative_phone || "+91 98765 11001";

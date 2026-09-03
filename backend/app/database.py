@@ -1283,6 +1283,72 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
         )
     """)
 
+    # ── Stage 8: Deterministic Legal Rules Engine Tables ─────────────────────
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS legal_rules (
+            id TEXT PRIMARY KEY,
+            rule_version TEXT NOT NULL,
+            title TEXT NOT NULL,
+            jurisdiction TEXT NOT NULL DEFAULT 'India / National',
+            category TEXT NOT NULL,
+            statutory_source TEXT NOT NULL,
+            effective_date TEXT NOT NULL,
+            lifecycle_state TEXT NOT NULL DEFAULT 'ACTIVE',
+            applicability_conditions TEXT NOT NULL DEFAULT '{}',
+            required_inputs TEXT NOT NULL DEFAULT '[]',
+            calculation_method TEXT NOT NULL,
+            exclusions_and_provisos TEXT NOT NULL DEFAULT '[]',
+            output_statuses TEXT NOT NULL DEFAULT '[]',
+            explanation_template TEXT NOT NULL,
+            legal_review_metadata TEXT DEFAULT '{}',
+            approval_metadata TEXT DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS legal_rule_versions (
+            id TEXT PRIMARY KEY,
+            rule_id TEXT NOT NULL,
+            version_tag TEXT NOT NULL,
+            rule_snapshot TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by TEXT,
+            FOREIGN KEY (rule_id) REFERENCES legal_rules(id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS legal_rule_executions (
+            id TEXT PRIMARY KEY,
+            rule_id TEXT NOT NULL,
+            rule_version TEXT NOT NULL,
+            case_id TEXT NOT NULL,
+            input_snapshot TEXT NOT NULL,
+            input_provenance TEXT DEFAULT '{}',
+            machine_status TEXT NOT NULL,
+            explanation_json TEXT NOT NULL,
+            executed_by TEXT,
+            executed_role TEXT,
+            execution_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS legal_rule_audit_trail (
+            id TEXT PRIMARY KEY,
+            rule_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            from_state TEXT,
+            to_state TEXT,
+            actor_id TEXT NOT NULL,
+            actor_role TEXT NOT NULL,
+            notes TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # Performance Indices for Foreign Keys and Lookups
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_court_cases_accused ON court_cases(accused_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_court_cases_status ON court_cases(current_status)")
@@ -1298,6 +1364,11 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_chunks_section ON legal_chunks(section_number)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_escalations_status ON legal_human_review_tasks(review_status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_escalations_hash ON legal_human_review_tasks(statement_hash)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_rules_category ON legal_rules(category)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_rules_state ON legal_rules(lifecycle_state)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_rule_versions_rule ON legal_rule_versions(rule_id, version_tag)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_rule_executions_case ON legal_rule_executions(case_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_rule_audit_rule ON legal_rule_audit_trail(rule_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_retrieval_actor ON legal_retrieval_logs(actor_id)")
 
     conn.commit()

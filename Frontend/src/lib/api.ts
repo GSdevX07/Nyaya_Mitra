@@ -112,22 +112,69 @@ export interface CaseRecordData {
 
 export type CaseRecord = CaseRecordData;
 
+export interface RuleExplanationData {
+  rule_id: string;
+  rule_version: string;
+  jurisdiction: string;
+  legal_source: string;
+  effective_date: string;
+  input_facts_used: Record<string, any>;
+  input_provenance?: Record<string, any>;
+  calculation_performed: Record<string, any>;
+  conditions_evaluated: Array<{
+    condition_name: string;
+    satisfied?: boolean | null;
+    reason: string;
+    facts_used?: Record<string, any>;
+    statutory_reference?: string;
+  }>;
+  exclusions_provisos_evaluated: Array<{
+    proviso_name: string;
+    applies: boolean;
+    statutory_text?: string;
+    facts_used?: Record<string, any>;
+  }>;
+  missing_or_conflicting_inputs?: Array<{
+    type: string;
+    field: string;
+    reason?: string;
+    source_a?: string;
+    source_b?: string;
+    details?: string;
+  }>;
+  machine_status: "THRESHOLD_REACHED" | "THRESHOLD_NOT_REACHED" | "POTENTIALLY_APPLICABLE" | "INSUFFICIENT_DATA" | "EXCLUDED" | "MANUAL_REVIEW";
+  explanation_text: string;
+  manual_review_reason?: string;
+  disclaimer: string;
+}
+
+export interface StatutoryEligibilityData {
+  is_eligible: boolean;
+  eligible?: boolean;
+  statutory_threshold_fraction: string;
+  threshold_fraction?: number;
+  threshold_days: number;
+  countable_custody_days: number;
+  total_elapsed_calendar_days?: number;
+  excluded_delay_days?: number;
+  days_overdue: number;
+  machine_status?: "THRESHOLD_REACHED" | "THRESHOLD_NOT_REACHED" | "POTENTIALLY_APPLICABLE" | "INSUFFICIENT_DATA" | "EXCLUDED" | "MANUAL_REVIEW";
+  legal_rule_version?: string;
+  rule_version?: string;
+  reasons?: string[];
+  statutory_conditions?: string[];
+  requires_human_legal_review?: boolean;
+  human_review_required?: boolean;
+  review_warning?: string;
+  explanation?: RuleExplanationData;
+  execution_id?: string;
+}
+
 export interface BackendCaseSummary {
   case: CaseRecordData;
   days_overdue: number;
   urgency_score: number;
-  eligibility?: {
-    is_eligible: boolean;
-    statutory_threshold_fraction: string;
-    threshold_days: number;
-    countable_custody_days: number;
-    days_overdue: number;
-    legal_rule_version: string;
-    reasons: string[];
-    statutory_conditions: string[];
-    requires_human_legal_review: boolean;
-    review_warning?: string;
-  };
+  eligibility?: StatutoryEligibilityData;
 }
 
 export interface StakeholdersOverview {
@@ -1080,5 +1127,44 @@ export async function verifyUploadedDocument(docId: string) {
   return await res.json();
 }
 
+export async function fetchLegalRules() {
+  const res = await authFetch(`${API_BASE_URL}/rules`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch legal rules: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
 
+export async function fetchRuleDetails(ruleId: string) {
+  const res = await authFetch(`${API_BASE_URL}/rules/${encodeURIComponent(ruleId)}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch rule details: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
 
+export async function evaluateRuleAdhoc(ruleId: string, payload: Record<string, any>) {
+  const res = await authFetch(`${API_BASE_URL}/rules/${encodeURIComponent(ruleId)}/evaluate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Rule evaluation failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function transitionRuleLifecycle(ruleId: string, targetState: string, notes: string = "") {
+  const res = await authFetch(`${API_BASE_URL}/rules/${encodeURIComponent(ruleId)}/lifecycle`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target_state: targetState, notes }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Lifecycle transition failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}

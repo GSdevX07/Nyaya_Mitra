@@ -1038,12 +1038,14 @@ export function CaseIntelligence() {
                 </div>
                 <span
                   className={`px-3 py-1 text-xs font-mono font-bold uppercase rounded ${
-                    eligibility.eligible
+                    eligibility.machine_status === "THRESHOLD_REACHED" || eligibility.eligible
                       ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                      : eligibility.machine_status === "EXCLUDED"
+                      ? "bg-destructive/15 text-destructive border border-destructive/30"
                       : "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30"
                   }`}
                 >
-                  {eligibility.eligible ? "THRESHOLD SATISFIED" : "REVIEW REQUIRED"}
+                  {eligibility.machine_status ? eligibility.machine_status.replace(/_/g, " ") : (eligibility.eligible ? "THRESHOLD SATISFIED" : "REVIEW REQUIRED")}
                 </span>
               </div>
 
@@ -1070,7 +1072,7 @@ export function CaseIntelligence() {
                 <div className="p-3 rounded bg-secondary/50 border border-border">
                   <span className="text-[10px] font-mono text-muted-foreground uppercase block">Required Threshold</span>
                   <span className="text-lg font-bold font-mono text-foreground">
-                    {eligibility.required_custody_days || "—"}d
+                    {eligibility.required_custody_days || eligibility.threshold_days || "—"}d
                   </span>
                 </div>
               </div>
@@ -1099,7 +1101,7 @@ export function CaseIntelligence() {
                   </div>
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>Offender Category: <strong>{c.urgency_flags?.repeat_offender ? "General (1/2 Threshold)" : "First-Time (1/3 Proviso)"}</strong></span>
+                    <span>Offender Category: <strong>{eligibility.category_label || (c.urgency_flags?.repeat_offender ? "General (1/2 Threshold)" : "First-Time (1/3 Proviso)")}</strong></span>
                   </div>
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />

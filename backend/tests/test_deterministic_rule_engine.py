@@ -326,15 +326,52 @@ def test_platform_admin_barred_from_approving_legal_rules():
 # ── Test 21: Governance RBAC - Supervising Legal Officer Authorized to Approve ─
 def test_supervising_legal_officer_authorized_for_lifecycle():
     """Supervising Legal Officer has institutional authority for rule lifecycle transitions."""
-    # Move active rule to retired
+    import uuid
+    from app.rules.models import LegalRuleDefinition, RuleCategory, RuleLifecycleState
+
+    # 1. Register a test rule in DRAFT state
+    rule_id = f"RULE-TEST-{uuid.uuid4().hex[:6].upper()}"
+    draft_rule = LegalRuleDefinition(
+        rule_id=rule_id,
+        rule_version=f"TEST_VERSION_{uuid.uuid4().hex[:4].upper()}",
+        title="Test Operational Statutory Rule",
+        category=RuleCategory.LEGAL_AID_OPERATIONAL_DEADLINES,
+        statutory_source="NALSA SOP 2024",
+        effective_date="2024-07-01",
+        lifecycle_state=RuleLifecycleState.DRAFT,
+        calculation_method="direct",
+        explanation_template="Test rule template",
+    )
+    rule_service.registry.register_rule(draft_rule, persist=True)
+
     headers = _token(Role.SUPERVISING_LEGAL_OFFICER, user_id="demo_supervisor")
-    resp = client.post(
-        "/rules/RULE-CRPC-436A-THRESHOLD-V1/lifecycle",
-        json={"target_state": "RETIRED", "notes": "Retired historic statute"},
+
+    # 2. Transition DRAFT -> LEGAL_REVIEW
+    resp_review = client.post(
+        f"/rules/{rule_id}/lifecycle",
+        json={"target_state": "LEGAL_REVIEW", "notes": "Under formal legal review"},
         headers=headers,
     )
-    assert resp.status_code == 200
-    assert resp.json()["rule"]["lifecycle_state"] == "RETIRED"
+    assert resp_review.status_code == 200
+    assert resp_review.json()["rule"]["lifecycle_state"] == "LEGAL_REVIEW"
+
+    # 3. Transition LEGAL_REVIEW -> APPROVED
+    resp_app = client.post(
+        f"/rules/{rule_id}/lifecycle",
+        json={"target_state": "APPROVED", "notes": "Approved by supervising legal officer"},
+        headers=headers,
+    )
+    assert resp_app.status_code == 200
+    assert resp_app.json()["rule"]["lifecycle_state"] == "APPROVED"
+
+    # 4. Transition APPROVED -> ACTIVE
+    resp_act = client.post(
+        f"/rules/{rule_id}/lifecycle",
+        json={"target_state": "ACTIVE", "notes": "Enacted as active rule"},
+        headers=headers,
+    )
+    assert resp_act.status_code == 200
+    assert resp_act.json()["rule"]["lifecycle_state"] == "ACTIVE"
 
 
 # ── Test 22: Backward Compatibility of evaluate_eligibility() ─────────────────
@@ -352,3 +389,77 @@ def test_evaluate_eligibility_backward_compatibility():
     assert "countable_custody_days" in res
     assert "explanation" in res
     assert res["eligible"] is True
+
+
+# ── Test 23: Fail-Closed Invalid Rule ID (No Silent Fallback) ─────────────────
+def test_invalid_rule_id_returns_404_no_silent_fallback():
+    """An invalid rule ID must return 404 / raise KeyError, never silently fall back to V1."""
+    # 1. Registry level
+    with pytest.raises(KeyError) as exc_info:
+        rule_service.registry.get_rule("RULE-BNSS-479-THRESHOLD-V99")
+    assert "not found" in str(exc_info.value).lower()
+
+    # 2. Service level get_rule
+    assert rule_service.get_rule("RULE-BNSS-479-THRESHOLD-V99") is None
+
+    # 3. API level evaluate endpoint
+    headers = _token(Role.DEFENSE_ADVOCATE)
+    payload = {
+        "case_id": "ADHOC-FAIL",
+        "custody_days": 135,
+        "max_sentence_days": 365,
+    }
+    resp = client.post("/rules/RULE-BNSS-479-THRESHOLD-V99/evaluate", json=payload, headers=headers)
+    assert resp.status_code == 404
+    assert "not found" in resp.json()["detail"].lower()
+
+
+# ── Test 24: Persistent DB Reconstruction Across Cache Clear (Simulated Restart)
+def test_persistent_db_reconstruction_across_server_restart():
+    """Verify historical assessment reconstruction loads from database after cache is cleared."""
+    from app.rules.service import _RULE_EXECUTIONS
+    case = MockCase(case_id="UTP-PERSIST-TEST", custody_days=130, max_sentence_days=360)
+    res = rule_service.evaluate_case(case)
+    exec_id = res.execution_id
+
+    # Verify present in memory
+    assert exec_id in _RULE_EXECUTIONS
+
+    # Simulate server restart by wiping in-memory execution cache
+    _RULE_EXECUTIONS.clear()
+    assert exec_id not in _RULE_EXECUTIONS
+
+    # Now call reconstruct_assessment - must query persistent database table
+    reconstructed = rule_service.reconstruct_assessment(exec_id)
+    assert reconstructed is not None
+    assert reconstructed["execution_id"] == exec_id
+    assert reconstructed["case_id"] == "UTP-PERSIST-TEST"
+    assert reconstructed["machine_status"] == RuleMachineStatus.THRESHOLD_REACHED.value
+    assert reconstructed["input_snapshot"]["custody_days"] == 130
+
+
+# ── Test 25: Truthful Baseline Labeling (No Fabricated Approvals) ─────────────
+def test_demo_baseline_truthful_labeling_no_fabricated_approvals():
+    """Verify canonical baseline rule is labeled as DEMO_BASELINE without fake approvals."""
+    rule = rule_service.get_rule("RULE-BNSS-479-THRESHOLD-V1")
+    assert rule is not None
+    # Verify truthful demo labeling
+    review_status = rule["legal_review_metadata"].get("status", "")
+    assert "DEMO_BASELINE" in review_status
+    assert "LEGAL VALIDATION REQUIRED" in review_status
+    # Verify no fabricated individual approval
+    assert rule["approval_metadata"].get("approved_by") is None
+
+
+# ── Test 26: Unified Registry Compatibility Endpoint ──────────────────────────
+def test_unified_registry_endpoint_no_duplicate_registries():
+    """GET /rules/registry must project from the unified Stage 8 legal rules registry."""
+    headers = _token(Role.SUPERVISING_LEGAL_OFFICER, user_id="demo_supervisor")
+    res = client.get("/rules/registry", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert "active_version" in data
+    assert "rules" in data
+    assert len(data["rules"]) >= 2
+    rule_versions = [r["version_id"] for r in data["rules"]]
+    assert "BNSS_479_RULESET_V1_2023" in rule_versions

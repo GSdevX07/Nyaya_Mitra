@@ -43,11 +43,26 @@ def list_rules(current_user: AuthUser = Depends(get_current_user)):
 
 @router.get("/registry", summary="Get rule registry listing")
 def get_rule_registry_listing(current_user: AuthUser = Depends(get_current_user)):
-    """Legacy registry listing with active version and rules."""
-    from app.agents.eligibility_agent import RULE_REGISTRY as legacy_reg
+    """Compatibility registry listing projecting from the unified Stage 8 Legal Rule Registry."""
+    rules = rule_service.list_rules()
+    legacy_projected = []
+    for r in rules:
+        legacy_projected.append({
+            "version_id": r.get("rule_version"),
+            "statute_name": r.get("statutory_source", ""),
+            "section": "Section 479" if "479" in r.get("rule_id", "") else "Section 436A",
+            "effective_date": r.get("effective_date", ""),
+            "description": r.get("title", ""),
+            "first_time_offender_fraction": 1.0 / 3.0 if "479" in r.get("rule_id", "") else 0.5,
+            "general_undertrial_fraction": 0.5,
+            "excludes_capital_or_life": True,
+            "excludes_multiple_proceedings": True,
+            "rounding_rule": "math.ceil",
+            "is_active": r.get("lifecycle_state") == "ACTIVE",
+        })
     return {
-        "active_version": legacy_reg._active_version,
-        "rules": legacy_reg.list_rules(),
+        "active_version": "BNSS_479_RULESET_V1_2023",
+        "rules": legacy_projected,
     }
 
 
@@ -138,12 +153,18 @@ def evaluate_rule_against_facts(
             self.missing_docs = []
 
     proxy = ProxyCase(req)
-    result = rule_service.evaluate_case(
-        case=proxy,
-        rule_id=rule_id,
-        actor=current_user,
-    )
-    return result.dict()
+    try:
+        result = rule_service.evaluate_case(
+            case=proxy,
+            rule_id=rule_id,
+            actor=current_user,
+        )
+        return result.dict()
+    except KeyError as ke:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Legal rule '{rule_id}' not found in registry.",
+        )
 
 
 @router.get("/reconstruct/{execution_id}", summary="Reconstruct past assessment")

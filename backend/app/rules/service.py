@@ -2,13 +2,16 @@
 service.py - High-Level Deterministic Legal Rules Service.
 ==========================================================
 Executes versioned rules against case facts, captures structured explanations,
-persists execution audit logs, and supports past assessment reconstruction.
+persists execution audit logs to the database, and supports historical assessment
+reconstruction across server restarts.
 Provides backward-compatible evaluate_eligibility() interface.
 """
 
 from __future__ import annotations
+import json
 import uuid
 import datetime
+import logging
 from typing import Dict, Any, Optional, List
 
 from app.rules.models import (
@@ -23,7 +26,9 @@ from app.rules.bnss_479_engine import evaluate_bnss_479_detention
 from app.auth.roles import Role
 from app.auth.dependencies import AuthUser
 
-# In-memory execution store for high-speed audit and reconstruction
+logger = logging.getLogger(__name__)
+
+# In-memory execution store for fast lookups (backed by DB)
 _RULE_EXECUTIONS: Dict[str, Dict[str, Any]] = {}
 _RULE_AUDIT_TRAIL: List[Dict[str, Any]] = []
 
@@ -44,7 +49,7 @@ class RuleEngineService:
         conflicting_records: Optional[List[Dict[str, Any]]] = None,
     ) -> RuleExecutionResult:
         """
-        Execute deterministic evaluation for a case and record execution audit trail.
+        Execute deterministic evaluation for a case and record execution audit trail persistently.
         """
         rule = self.registry.get_rule(rule_id or rule_version)
         result = evaluate_bnss_479_detention(
@@ -54,7 +59,7 @@ class RuleEngineService:
             conflicting_records=conflicting_records,
         )
 
-        # Record execution audit log
+        # Build execution audit log entry
         audit_entry = {
             "execution_id": result.execution_id,
             "rule_id": result.rule_id,
@@ -71,24 +76,116 @@ class RuleEngineService:
         _RULE_EXECUTIONS[result.execution_id] = audit_entry
         result.audit_record_id = result.execution_id
 
+        # ── Persist Execution Record to Database ─────────────────────────────
+        self._persist_execution_to_db(audit_entry)
+
         return result
+
+    def _persist_execution_to_db(self, entry: Dict[str, Any]):
+        """Persist execution record to legal_rule_executions table."""
+        try:
+            from app.database import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO legal_rule_executions (
+                    id, rule_id, rule_version, case_id, input_snapshot,
+                    input_provenance, machine_status, explanation_json,
+                    executed_by, executed_role, execution_timestamp
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry["execution_id"],
+                    entry["rule_id"],
+                    entry["rule_version"],
+                    entry["case_id"],
+                    json.dumps(entry["input_snapshot"]),
+                    json.dumps(entry["input_provenance"]),
+                    entry["machine_status"],
+                    json.dumps(entry["explanation_json"]),
+                    entry["executed_by"],
+                    entry["executed_role"],
+                    entry["execution_timestamp"],
+                )
+            )
+            conn.commit()
+            conn.close()
+        except Exception as ex:
+            logger.warning(f"Failed to persist legal rule execution to DB: {ex}")
 
     def reconstruct_assessment(self, execution_id: str) -> Optional[Dict[str, Any]]:
         """
         Reconstruct a past assessment exactly as evaluated historically using the
         input fact snapshot, rule version, provenance, and explanation.
+        PERSISTENT: Fetches from DB if memory cache is cold or after server restart.
         """
-        return _RULE_EXECUTIONS.get(execution_id)
+        # 1. Fast path: check memory cache
+        if execution_id in _RULE_EXECUTIONS:
+            return _RULE_EXECUTIONS[execution_id]
+
+        # 2. Persistent path: query database table
+        try:
+            from app.database import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, rule_id, rule_version, case_id, input_snapshot,
+                       input_provenance, machine_status, explanation_json,
+                       executed_by, executed_role, execution_timestamp
+                FROM legal_rule_executions
+                WHERE id = ?
+                """,
+                (execution_id,)
+            )
+            row = cursor.fetchone()
+            conn.close()
+
+            if row:
+                def _get(key, idx):
+                    if isinstance(row, dict) or hasattr(row, "keys"):
+                        return row[key]
+                    return row[idx]
+
+                input_snap = _get("input_snapshot", 4)
+                input_prov = _get("input_provenance", 5)
+                expl_raw = _get("explanation_json", 7)
+
+                rec = {
+                    "execution_id": _get("id", 0),
+                    "rule_id": _get("rule_id", 1),
+                    "rule_version": _get("rule_version", 2),
+                    "case_id": _get("case_id", 3),
+                    "input_snapshot": json.loads(input_snap) if isinstance(input_snap, str) else input_snap,
+                    "input_provenance": json.loads(input_prov) if isinstance(input_prov, str) else input_prov,
+                    "machine_status": _get("machine_status", 6),
+                    "explanation_json": json.loads(expl_raw) if isinstance(expl_raw, str) else expl_raw,
+                    "executed_by": _get("executed_by", 8),
+                    "executed_role": _get("executed_role", 9),
+                    "execution_timestamp": _get("execution_timestamp", 10),
+                }
+                # Populate cache
+                _RULE_EXECUTIONS[execution_id] = rec
+                return rec
+        except Exception as ex:
+            logger.warning(f"Database lookup failed for execution {execution_id}: {ex}")
+
+        return None
 
     def list_rules(self) -> List[Dict[str, Any]]:
         return self.registry.list_rules()
 
     def get_rule(self, rule_id: str) -> Optional[Dict[str, Any]]:
-        rule = self.registry.get_rule(rule_id)
-        if not rule:
+        try:
+            rule = self.registry.get_rule(rule_id)
+        except KeyError:
             return None
         res = rule.dict()
-        res["historical_versions"] = self.registry.get_rule_versions(rule_id)
+        try:
+            res["historical_versions"] = self.registry.get_rule_versions(rule_id)
+        except KeyError:
+            res["historical_versions"] = []
         return res
 
     def transition_rule_lifecycle(
@@ -103,6 +200,7 @@ class RuleEngineService:
             "id": f"AUDIT-RULE-{uuid.uuid4().hex[:8].upper()}",
             "rule_id": rule_id,
             "action": f"TRANSITION_TO_{target_state.value}",
+            "from_state": rule.lifecycle_state.value,
             "to_state": target_state.value,
             "actor_id": actor.id,
             "actor_role": actor.role.value,
@@ -110,6 +208,35 @@ class RuleEngineService:
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         _RULE_AUDIT_TRAIL.append(audit_item)
+
+        # Persist audit trail to DB
+        try:
+            from app.database import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO legal_rule_audit_trail (
+                    id, rule_id, action, from_state, to_state, actor_id, actor_role, notes, timestamp
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    audit_item["id"],
+                    audit_item["rule_id"],
+                    audit_item["action"],
+                    audit_item["from_state"],
+                    audit_item["to_state"],
+                    audit_item["actor_id"],
+                    audit_item["actor_role"],
+                    audit_item["notes"],
+                    audit_item["timestamp"],
+                )
+            )
+            conn.commit()
+            conn.close()
+        except Exception as ex:
+            logger.warning(f"Failed to persist rule audit trail to DB: {ex}")
+
         return rule
 
 

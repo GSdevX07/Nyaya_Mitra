@@ -44,70 +44,51 @@ class StatutoryRuleConfig:
 
 
 class StatutoryRuleRegistry:
-    """Versioned registry for statutory bail eligibility rules."""
+    """Compatibility adapter delegating to the unified Stage 8 LegalRuleRegistry."""
 
     def __init__(self):
-        self._rules: Dict[str, StatutoryRuleConfig] = {}
         self._active_version: str = "BNSS_479_RULESET_V1_2023"
-        self._register_default_rules()
-
-    def _register_default_rules(self):
-        self.register_rule(StatutoryRuleConfig(
-            version_id="BNSS_479_RULESET_V1_2023",
-            statute_name="Bharatiya Nagarik Suraksha Sanhita, 2023",
-            section="Section 479",
-            effective_date="2024-07-01",
-            description="First-time undertrials eligible at 1/3 maximum imprisonment; others at 1/2 maximum imprisonment.",
-            first_time_offender_fraction=1 / 3,
-            general_undertrial_fraction=1 / 2,
-            excludes_capital_or_life=True,
-            excludes_multiple_proceedings=True,
-            rounding_rule="math.ceil",
-            is_active=True,
-        ))
-        self.register_rule(StatutoryRuleConfig(
-            version_id="CRPC_436A_RULESET_V1_1973",
-            statute_name="Code of Criminal Procedure, 1973",
-            section="Section 436A",
-            effective_date="2005-06-23",
-            description="Historic regime: Undertrials eligible at 1/2 maximum imprisonment without 1/3 first-time offender proviso.",
-            first_time_offender_fraction=1 / 2,
-            general_undertrial_fraction=1 / 2,
-            excludes_capital_or_life=True,
-            excludes_multiple_proceedings=False,
-            rounding_rule="math.ceil",
-            is_active=False,
-        ))
-
-    def register_rule(self, config: StatutoryRuleConfig):
-        self._rules[config.version_id] = config
 
     def get_rule(self, version_id: Optional[str] = None) -> StatutoryRuleConfig:
+        from app.rules.registry import RULE_REGISTRY as rreg
         vid = version_id or self._active_version
-        if vid not in self._rules:
-            # Fallback to active version if unknown
-            return self._rules.get(self._active_version) or list(self._rules.values())[0]
-        return self._rules[vid]
+        r = rreg.get_rule(vid)
+        return StatutoryRuleConfig(
+            version_id=r.rule_version,
+            statute_name=r.statutory_source,
+            section="Section 479" if "479" in r.rule_id else "Section 436A",
+            effective_date=r.effective_date,
+            description=r.title,
+            first_time_offender_fraction=1.0 / 3.0 if "479" in r.rule_id else 0.5,
+            general_undertrial_fraction=0.5,
+            rounding_rule="math.ceil",
+            is_active=(r.lifecycle_state.value == "ACTIVE" if hasattr(r.lifecycle_state, "value") else r.lifecycle_state == "ACTIVE"),
+        )
 
     def list_rules(self) -> List[Dict[str, Any]]:
+        from app.rules.registry import RULE_REGISTRY as rreg
+        rules = rreg.list_rules()
         return [
             {
-                "version_id": r.version_id,
-                "statute_name": r.statute_name,
-                "section": r.section,
-                "effective_date": r.effective_date,
-                "description": r.description,
-                "first_time_offender_fraction": r.first_time_offender_fraction,
-                "general_undertrial_fraction": r.general_undertrial_fraction,
-                "rounding_rule": r.rounding_rule,
-                "is_active": (r.version_id == self._active_version),
+                "version_id": r["rule_version"],
+                "statute_name": r.get("statutory_source", ""),
+                "section": "Section 479" if "479" in r.get("rule_id", "") else "Section 436A",
+                "effective_date": r.get("effective_date", ""),
+                "description": r.get("title", ""),
+                "first_time_offender_fraction": 1.0 / 3.0 if "479" in r.get("rule_id", "") else 0.5,
+                "general_undertrial_fraction": 0.5,
+                "rounding_rule": "math.ceil",
+                "is_active": r.get("lifecycle_state") == "ACTIVE",
             }
-            for r in self._rules.values()
+            for r in rules
         ]
 
+    def register_rule(self, config: StatutoryRuleConfig):
+        pass
+
     def set_active_version(self, version_id: str):
-        if version_id not in self._rules:
-            raise KeyError(f"Cannot activate unregistered rule version: {version_id}")
+        from app.rules.registry import RULE_REGISTRY as rreg
+        rreg.get_rule(version_id)
         self._active_version = version_id
 
 

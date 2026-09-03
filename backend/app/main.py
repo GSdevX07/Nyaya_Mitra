@@ -278,6 +278,7 @@ def _check_jail_facility_match(case: Any, user: AuthUser) -> bool:
     """
     Verify whether a case/inmate belongs to the Jail Officer's authorized facility.
     Strictly fail-closed: officers without assigned facility_ids have NO facility access.
+    Respects sub-facility / jail unit boundaries (e.g. Jail No. 4 vs Jail No. 2 in Tihar).
     """
     if user.role != Role.JAIL_OFFICER:
         return True
@@ -290,18 +291,41 @@ def _check_jail_facility_match(case: Any, user: AuthUser) -> bool:
     if not user_facilities:
         return False  # Fail-closed: no facility scope = no facility access
 
+    # Check for specific jail unit numbers in Tihar (e.g., Jail No. 4 vs Jail No. 2)
+    user_has_tihar_4 = any("04" in f or "no. 4" in f or "jail 4" in f or "jail no. 4" in f for f in user_facilities)
+    user_has_tihar_2 = any("02" in f or "no. 2" in f or "jail 2" in f or "jail no. 2" in f for f in user_facilities)
+
+    if user_has_tihar_4 and not user_has_tihar_2:
+        # Officer is specifically assigned to Tihar Jail No. 4
+        if "tihar" in case_loc and ("2" in case_loc or "no. 2" in case_loc or "jail 2" in case_loc):
+            return False
+        if "tihar" in case_loc and ("4" in case_loc or "no. 4" in case_loc or "jail 4" in case_loc or "fac_tihar_jail_04" in case_loc):
+            return True
+
+    if user_has_tihar_2 and not user_has_tihar_4:
+        # Officer is specifically assigned to Tihar Jail No. 2
+        if "tihar" in case_loc and ("4" in case_loc or "no. 4" in case_loc or "jail 4" in case_loc):
+            return False
+        if "tihar" in case_loc and ("2" in case_loc or "no. 2" in case_loc or "jail 2" in case_loc):
+            return True
+
     for fac in user_facilities:
+        # Skip generic "tihar" keyword if case is in a numbered jail
+        if fac == "tihar":
+            continue
         if fac in case_loc or case_loc in fac:
             return True
-        if "fac_tihar_jail_04" in fac or "tihar" in fac:
-            if "tihar" in case_loc and ("4" in case_loc or "no. 4" in case_loc or "central jail" in case_loc):
-                return True
         if "rohini" in fac and "rohini" in case_loc:
             return True
         if "lucknow" in fac and "lucknow" in case_loc:
             return True
         if "mandoli" in fac and "mandoli" in case_loc:
             return True
+
+    # If only generic "tihar" was provided without specific jail restrictions
+    if "tihar" in user_facilities and "tihar" in case_loc:
+        return True
+
     return False
 
 

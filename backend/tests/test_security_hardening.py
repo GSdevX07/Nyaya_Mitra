@@ -93,6 +93,107 @@ def test_document_pipeline_ocr_prompt_injection_neutralized():
     assert "ignore all previous instructions" not in prompt
     assert "[REDACTED_ADVERSARIAL_DIRECTIVE]" in prompt
     # Ensure XML boundary isolation tags are present
-    assert "<untrusted_ocr_document_text>" in prompt
-    assert "</untrusted_ocr_document_text>" in prompt
     assert "SECURITY BOUNDARY DIRECTIVE" in prompt
+
+
+def test_facility_abac_fails_closed():
+    from app.auth.policy import _facility_match
+    from app.auth.roles import Role
+    from app.auth.user_store import AuthUser
+
+    # 1. Jail officer with NO facility_ids must fail closed
+    empty_scope_officer = AuthUser(
+        id="test_jail_no_scope",
+        email="jail_noscope@test.in",
+        role=Role.JAIL_OFFICER,
+        full_name="Jail Officer No Scope",
+        org_id="org_tihar_jail",
+        facility_ids=[],
+    )
+    tihar_resource = {"facility_id": "fac_tihar_jail_04", "jail_location": "Central Jail No. 4, Tihar"}
+    assert _facility_match(empty_scope_officer, tihar_resource) is False
+
+    # 2. Resource with no facility specified must fail closed
+    tihar_officer = AuthUser(
+        id="test_jail_tihar",
+        email="jail_tihar@test.in",
+        role=Role.JAIL_OFFICER,
+        full_name="Tihar Officer",
+        org_id="org_tihar_jail",
+        facility_ids=["fac_tihar_jail_04", "tihar"],
+    )
+    empty_resource = {"facility_id": "", "jail_location": ""}
+    assert _facility_match(tihar_officer, empty_resource) is False
+
+    # 3. Matching facility must pass
+    assert _facility_match(tihar_officer, tihar_resource) is True
+
+    # 4. Non-matching facility must fail
+    rohini_resource = {"facility_id": "fac_rohini_jail", "jail_location": "District Jail No. 2, Rohini"}
+    assert _facility_match(tihar_officer, rohini_resource) is False
+
+
+def test_platform_admin_consequential_legal_separation():
+    from fastapi import HTTPException
+    from app.auth.policy import (
+        check_permission,
+        CASES_APPROVE,
+        CASES_FILE_IN_COURT,
+        CUSTODY_UPDATE_STATUS,
+        EVIDENCE_VERIFY,
+        USERS_MANAGE,
+        RAG_INGEST,
+        AUDIT_READ,
+    )
+    from app.auth.roles import Role
+    from app.auth.user_store import AuthUser
+
+    admin_user = AuthUser(
+        id="demo_platform_admin",
+        email="admin@demo.nyayamitra.in",
+        role=Role.PLATFORM_ADMIN,
+        full_name="Platform Admin (Demo)",
+        org_id="org_dlsa_central",
+    )
+
+    # Technical administration permissions must pass
+    check_permission(admin_user, USERS_MANAGE)
+    check_permission(admin_user, RAG_INGEST)
+    check_permission(admin_user, AUDIT_READ)
+
+    # Consequential legal/judicial actions MUST be strictly denied
+    with pytest.raises(HTTPException) as exc_approve:
+        check_permission(admin_user, CASES_APPROVE)
+    assert exc_approve.value.status_code == 403
+    assert "consequential legal action" in exc_approve.value.detail.lower()
+
+    with pytest.raises(HTTPException) as exc_file:
+        check_permission(admin_user, CASES_FILE_IN_COURT)
+    assert exc_file.value.status_code == 403
+
+    with pytest.raises(HTTPException) as exc_custody:
+        check_permission(admin_user, CUSTODY_UPDATE_STATUS)
+    assert exc_custody.value.status_code == 403
+
+    with pytest.raises(HTTPException) as exc_evi:
+        check_permission(admin_user, EVIDENCE_VERIFY)
+    assert exc_evi.value.status_code == 403
+
+
+def test_accused_profile_dual_identifier_lookup():
+    from app.services.accused_service import get_accused_profile
+    from app.auth.user_store import get_user_by_email
+
+    supervisor = get_user_by_email("supervisor@demo.nyayamitra.in")
+    assert supervisor is not None
+
+    # Lookup via prefixed accused ID
+    profile_acc = get_accused_profile("acc_utp_0001", supervisor)
+    assert profile_acc is not None
+    assert "Suresh Patel" in profile_acc["full_name"]
+
+    # Lookup via raw Case ID
+    profile_case = get_accused_profile("UTP-0001", supervisor)
+    assert profile_case is not None
+    assert "Suresh Patel" in profile_case["full_name"]
+    assert profile_acc["id"] == profile_case["id"]

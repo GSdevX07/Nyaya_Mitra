@@ -30,13 +30,20 @@ def _load_accused_from_db(accused_id: str) -> Optional[Dict[str, Any]]:
     from app.supabase_adapter import is_supabase_active, supa_get_accused_person, assert_production_db_available
     assert_production_db_available()
 
+    # Generate candidate lookup keys to support both acc_utp_0001 and UTP-0001 formats
+    clean_id = accused_id.strip()
+    raw_case = clean_id.replace("acc_", "").replace("_", "-")
+    acc_format = "acc_" + raw_case.lower().replace("-", "_")
+    candidates = list(dict.fromkeys([clean_id, raw_case, raw_case.upper(), raw_case.lower(), acc_format]))
+
     if is_supabase_active():
-        try:
-            supa_rec = supa_get_accused_person(accused_id)
-            if supa_rec:
-                return supa_rec
-        except Exception as e:
-            print(f"[WARN] Supabase accused person load failed: {e}")
+        for cand in candidates:
+            try:
+                supa_rec = supa_get_accused_person(cand)
+                if supa_rec:
+                    return supa_rec
+            except Exception:
+                pass
 
     # Development / local SQLite query
     from app.database import get_db_connection
@@ -44,11 +51,16 @@ def _load_accused_from_db(accused_id: str) -> Optional[Dict[str, Any]]:
         conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM accused_persons WHERE id = ?", (accused_id,))
-        raw = cursor.fetchone()
+        for cand in candidates:
+            cursor.execute(
+                "SELECT * FROM accused_persons WHERE id = ? OR source_record_id = ? OR LOWER(id) = LOWER(?)",
+                (cand, cand, cand),
+            )
+            raw = cursor.fetchone()
+            if raw:
+                conn.close()
+                return dict(raw)
         conn.close()
-        if raw:
-            return dict(raw)
     except Exception as e:
         print(f"[WARN] _load_accused_from_db error: {e}")
     return None
@@ -264,7 +276,8 @@ def get_accused_profile(accused_id: str, user: AuthUser) -> Dict[str, Any]:
                 "fir_number": c.fir_number,
                 "police_station": c.police_station,
                 "current_status": c.status.value if hasattr(c.status, "value") else str(c.status),
-                "assigned_lawyer": c.assigned_lawyer_id or "Unassigned",
+                "assigned_lawyer": getattr(c, "assigned_lawyer", None) or c.assigned_lawyer_id or "Unassigned",
+                "assigned_lawyer_id": c.assigned_lawyer_id,
                 "days_in_custody": getattr(c, "custody_days", 0),
                 "max_sentence_days": getattr(c, "max_sentence_days_for_offense", 365),
                 "eligible_under_479": getattr(c, "eligible_under_479", True),
@@ -290,15 +303,26 @@ def get_accused_profile(accused_id: str, user: AuthUser) -> Dict[str, Any]:
             )
     elif user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
         user_full = (user.full_name or "").lower()
+        user_id = (user.id or "").lower()
         is_assigned = any(
-            c["case_id"] == user.linked_case_id
-            or (c.get("assigned_lawyer") and (c["assigned_lawyer"] == user.id or (user_full and user_full in c["assigned_lawyer"].lower())))
+            (user.linked_case_id and c["case_id"].lower() == user.linked_case_id.lower())
+            or (c.get("assigned_lawyer_id") and (c["assigned_lawyer_id"].lower() == user_id or user_id in c["assigned_lawyer_id"].lower()))
+            or (c.get("assigned_lawyer") and (user_id in c["assigned_lawyer"].lower() or (user_full and user_full in c["assigned_lawyer"].lower())))
             for c in connected_cases
         )
         if not is_assigned:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Forbidden: Defense advocates may only access explicitly assigned accused profiles.",
+            )
+    elif user.role == Role.JAIL_OFFICER:
+        case_objs = [c for c in all_cases if c.case_id.lower() in connected_case_ids]
+        from app.main import _check_jail_facility_match
+        has_facility = any(_check_jail_facility_match(c, user) for c in case_objs)
+        if not has_facility:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Accused person '{accused_id}' is detained outside your authorized facility jurisdiction.",
             )
     elif user.role == Role.POLICE_OFFICER:
         case_objs = [c for c in all_cases if c.case_id.lower() in connected_case_ids]

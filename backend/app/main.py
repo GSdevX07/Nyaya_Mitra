@@ -1,25 +1,24 @@
 """
-main.py FastAPI application entry point for Nyaya Mitra.
+main.py — FastAPI Core Application & API Gateway for Nyaya Mitra.
 
-Run locally:
-    uvicorn app.main:app --reload --port 8000
-
-Swagger docs available at:
-    http://localhost:8000/docs
-
-Design notes:
-  - MOCK_DB is a module-level list of CaseRecord objects that acts as the
-    in-memory database for the hackathon build. It contains 5 distinct hero
-    cases covering every agent decision branch:
-        UTP-0001  eligible first-time offender, all docs present   (HIGH priority)
-        UTP-0007  eligible first-time, senior + health flag        (HIGHEST priority)
-        UTP-0012  not yet eligible repeat offender                 (STANDARD)
-        UTP-0015  eligible but missing a document                  (HIGH docs gap)
-        UTP-0021  eligible first-time, young + healthy             (STANDARD)
-  - The human-approval gate (POST /cases/{id}/approve) is a real UI button,
-    not a slide claim matching the project ground rule from the roadmap.
-  - process_case() is intentionally called only on individual case detail
-    (GET /cases/{id}) so the queue endpoint remains fast even with many cases.
+Production Architecture:
+  - Enterprise Legal Aid & Undertrial Workflow System complying with Section 479 BNSS (2023).
+  - RBAC & ABAC Security Perimeter guarding 11 institutional roles:
+      * Platform & Government Administrators (Governance & Technical Monitoring)
+      * Supervising Legal Officers & DLSA Officers (Legal Approval, Assignment & Filing)
+      * Defense Advocates & External Counsel (Docket Review, Drafting & Legal Sign-off)
+      * Jail Officers & Police Officers (Custody Records, Evidence Stamping & Docket Intake)
+      * Accused Citizens & Family Guardians (Plain-Language Status & Rights Helpline)
+      * Statutory Read-Only Auditors (Cryptographic Audit Ledger & Exception Tracking)
+  - Dual-Engine Persistence:
+      * Canonical Production: Supabase PostgreSQL (ACID relational schemas, RLS, triggers)
+      * Local Developmental Sandbox: SQLite zero-dependency store
+  - Deterministic Statutory Rule Engine:
+      * Precise mathematical evaluation of countable vs excluded delay days under Section 479 BNSS.
+  - Multi-Agent Operations & Ingestion:
+      * IBM Granite 3.2 8B Instruct / Groq LLaMA 3.3 for grounded legal synthesis.
+      * DataPrepKit clean text pipelines with verifiable verbatim source spans.
+      * SHA-256 tamper-evident evidence chains and monotonic document versioning.
 """
 
 from __future__ import annotations
@@ -274,22 +273,24 @@ def root():
 def _check_jail_facility_match(case: Any, user: AuthUser) -> bool:
     """
     Verify whether a case/inmate belongs to the Jail Officer's authorized facility.
-    Officers are authorized for their specific detention facility (e.g. Tihar Central Jail No. 4).
+    Strictly fail-closed: officers without assigned facility_ids have NO facility access.
     """
+    if user.role != Role.JAIL_OFFICER:
+        return True
+
     case_loc = (getattr(case, "jail_location", None) or "").lower().strip()
     if not case_loc:
         return False
 
     user_facilities = [str(f).lower().strip() for f in (user.facility_ids or [])]
     if not user_facilities:
-        # Default demo jail officer facility assignment: Tihar Central Jail No. 4
-        return "tihar" in case_loc and ("4" in case_loc or "no. 4" in case_loc)
+        return False  # Fail-closed: no facility scope = no facility access
 
     for fac in user_facilities:
-        if fac in case_loc:
+        if fac in case_loc or case_loc in fac:
             return True
         if "fac_tihar_jail_04" in fac or "tihar" in fac:
-            if "tihar" in case_loc and ("4" in case_loc or "no. 4" in case_loc):
+            if "tihar" in case_loc and ("4" in case_loc or "no. 4" in case_loc or "central jail" in case_loc):
                 return True
         if "rohini" in fac and "rohini" in case_loc:
             return True
@@ -535,7 +536,7 @@ def get_jail_inmates(
 @app.post("/jail/refer-legal-aid", tags=["Jail Operations"])
 def refer_case_to_dlsa(
     payload: JailReferralPayload,
-    current_user: AuthUser = Depends(require_role(Role.JAIL_OFFICER, Role.PLATFORM_ADMIN)),
+    current_user: AuthUser = Depends(require_role(Role.JAIL_OFFICER)),
 ):
     """
     Jail Superintendent referral of an undertrial prisoner to DLSA for legal aid counsel assignment.
@@ -956,6 +957,58 @@ def get_case_by_id(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Forbidden: Inmate '{case.case_id}' is detained at '{case.jail_location}', outside your authorized facility jurisdiction.",
             )
+        elig = evaluate_eligibility(case)
+        missing = [d for d in case.required_docs if d not in (case.present_docs or [])]
+        return {
+            "case": {
+                "case_id": case.case_id,
+                "name": case.name,
+                "fir_number": getattr(case, "fir_number", None) or f"FIR-2024-{case.case_id}",
+                "police_station": getattr(case, "police_station", None) or "Kotwali PS",
+                "court_name": case.court_name,
+                "district": case.district,
+                "state": case.state,
+                "arrest_date": case.arrest_date,
+                "custody_days": case.custody_days,
+                "excluded_delay_days": case.excluded_delay_days,
+                "countable_custody_days": case.custody_days - (case.excluded_delay_days or 0),
+                "max_sentence_days_for_offense": case.max_sentence_days_for_offense,
+                "offense_sections": case.offense_sections,
+                "legal_code": case.legal_code,
+                "status": case.status,
+                "required_docs": case.required_docs,
+                "present_docs": case.present_docs,
+                "jail_location": case.jail_location,
+                "assignment_status": case.assignment_status,
+                "assigned_lawyer": getattr(case, "assigned_lawyer", None),
+                "assigned_lawyer_id": case.assigned_lawyer_id,
+                "relative_name": case.relative_name,
+                "relative_relation": case.relative_relation,
+                "relative_phone": case.relative_phone,
+                "permanent_address": case.permanent_address,
+                "timeline": getattr(case, "timeline", []),
+                "urgency_flags": case.urgency_flags,
+            },
+            "jail_authorized_view": True,
+            "status_record": None,
+            "completeness": {
+                "complete": len(missing) == 0,
+                "missing_docs": missing,
+                "present_docs": case.present_docs,
+            },
+            "eligibility": {
+                "eligible": elig.get("eligible", False),
+                "threshold_days": elig.get("threshold_days", 0),
+                "countable_custody_days": case.custody_days - (case.excluded_delay_days or 0),
+                "disclaimer": "Informational calculation. Legal representation determination handled by DLSA and defense counsel.",
+            },
+            # Strictly redact advocate strategy, draft petition, legal statutes, and RAG retrieval
+            "draft": None,
+            "statutes": [],
+            "retrieval": {},
+            "agent_activity_log": [],
+            "urgency": None,
+        }
     elif current_user.role == Role.SUPERVISING_LEGAL_OFFICER:
         if current_user.district and current_user.district.lower() != "all":
             dist = current_user.district.lower()
@@ -1109,59 +1162,6 @@ def get_case_by_id(
         }
 
     res = process_case(case)
-
-    # Scoped Redactions for Jail Officers (Custody and Legal-Aid view; no legal petition drafting)
-    if current_user.role == Role.JAIL_OFFICER:
-        return {
-            "case": {
-                "case_id": case.case_id,
-                "name": case.name,
-                "fir_number": getattr(case, "fir_number", None) or f"FIR-2024-{case.case_id}",
-                "police_station": getattr(case, "police_station", None) or "Kotwali PS",
-                "court_name": case.court_name,
-                "district": case.district,
-                "state": case.state,
-                "arrest_date": case.arrest_date,
-                "custody_days": case.custody_days,
-                "excluded_delay_days": case.excluded_delay_days,
-                "countable_custody_days": case.custody_days - (case.excluded_delay_days or 0),
-                "max_sentence_days_for_offense": case.max_sentence_days_for_offense,
-                "offense_sections": case.offense_sections,
-                "legal_code": case.legal_code,
-                "status": case.status,
-                "required_docs": case.required_docs,
-                "present_docs": case.present_docs,
-                "jail_location": case.jail_location,
-                "assignment_status": case.assignment_status,
-                "assigned_lawyer": getattr(case, "assigned_lawyer", None),
-                "assigned_lawyer_id": case.assigned_lawyer_id,
-                "relative_name": case.relative_name,
-                "relative_relation": case.relative_relation,
-                "relative_phone": case.relative_phone,
-                "permanent_address": case.permanent_address,
-                "timeline": getattr(case, "timeline", []),
-                "urgency_flags": case.urgency_flags,
-            },
-            "jail_authorized_view": True,
-            "status_record": res.get("status_record"),
-            "completeness": {
-                "complete": res.get("completeness", {}).get("complete", False),
-                "missing_docs": res.get("completeness", {}).get("missing_docs", []),
-                "present_docs": res.get("completeness", {}).get("present_docs", []),
-            },
-            "eligibility": {
-                "eligible": res.get("eligibility", {}).get("eligible", False),
-                "threshold_days": res.get("eligibility", {}).get("threshold_days", 0),
-                "countable_custody_days": case.custody_days - (case.excluded_delay_days or 0),
-                "disclaimer": "Informational calculation. Legal representation determination handled by DLSA and defense counsel.",
-            },
-            # Strictly redact advocate strategy, draft petition, legal statutes, and RAG retrieval
-            "draft": None,
-            "statutes": [],
-            "retrieval": {},
-            "agent_activity_log": [],
-            "urgency": res.get("urgency"),
-        }
 
     from app.database import get_case_bail_application
     bail_app = get_case_bail_application(case_id)
@@ -2059,6 +2059,12 @@ def get_documents(
         ]
     elif current_user.role == Role.POLICE_OFFICER:
         cases = [c for c in cases if _check_police_jurisdiction(c, current_user)]
+    elif current_user.role == Role.JAIL_OFFICER:
+        cases = [c for c in cases if _check_jail_facility_match(c, current_user)]
+    elif current_user.role in (Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER):
+        if current_user.district and current_user.district.lower() != "all":
+            dist = current_user.district.lower()
+            cases = [c for c in cases if c.district and dist in c.district.lower()]
     elif current_user.role == Role.READ_ONLY_AUDITOR:
         if getattr(current_user, "authorized_district_ids", None):
             auth_dists = [d.strip().lower() for d in current_user.authorized_district_ids]
@@ -2192,7 +2198,7 @@ def get_case_documents(
     current_user: AuthUser = Depends(require_role(
         Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
         Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
-        Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE,
+        Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE, Role.READ_ONLY_AUDITOR,
     ))
 ):
     """Retrieve document status breakdown for a single case including uploader provenance."""
@@ -2210,6 +2216,14 @@ def get_case_documents(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Forbidden: Case '{case.case_id}' is outside your authorized police station jurisdiction.",
             )
+    elif current_user.role == Role.READ_ONLY_AUDITOR:
+        if getattr(current_user, "authorized_district_ids", None) and case.district:
+            auth_dists = [d.strip().lower() for d in current_user.authorized_district_ids]
+            if case.district.strip().lower() not in auth_dists and "all" not in auth_dists:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Forbidden: Case district '{case.district}' is outside your authorized statutory audit scope.",
+                )
     elif current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
         user_full = (current_user.full_name or "").lower()
         is_assigned = (
@@ -3334,12 +3348,12 @@ def verify_evidence(
     # 3. Compare cryptographic hashes
     is_match = current_hash == stored_hash
     
-    status = "INTEGRITY_VERIFIED" if is_match else "INTEGRITY_VIOLATION"
+    result_status = "INTEGRITY_VERIFIED" if is_match else "INTEGRITY_VIOLATION"
 
     return {
         "evidence_id": evidence_id,
         "case_id": case_id,
-        "status": status,
+        "status": result_status,
         "tampering_detected": not is_match,
         "hash_algorithm": "SHA-256",
         "stored_hash": stored_hash,

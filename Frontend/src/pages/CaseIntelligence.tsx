@@ -729,7 +729,7 @@ export function CaseIntelligence() {
               { key: "dossier", label: "Accused Dossier" },
               { key: "draft", label: "Bail Petition Draft" },
               { key: "timeline", label: "Case Timeline & Provenance" },
-              { key: "evidence", label: "Document Vault & SHA-256" },
+              { key: "evidence", label: "Document Vault & Evidentiary Verification" },
               { key: "statutes", label: "Grounded Statutory Law" },
             ]
         ).map((tab) => (
@@ -1421,10 +1421,10 @@ export function CaseIntelligence() {
           <div className="flex items-center justify-between border-b border-border pb-3">
             <div>
               <h3 className="font-bold font-serif text-lg text-foreground">
-                Document Vault & Cryptographic Integrity Checking
+                Document Vault &amp; Evidentiary Verification
               </h3>
               <p className="text-xs text-muted-foreground">
-                SHA-256 document hashing verifies digital file tamper-detection. (Proves file integrity; does not prove legal truth of contents).
+                Digital tamper-verification confirms official documents are authentic and uncorrupted under BSA Sec 63 where applicable.
               </p>
             </div>
           </div>
@@ -1441,23 +1441,23 @@ export function CaseIntelligence() {
                         {docType.replace(/_/g, " ").toUpperCase()}
                       </h4>
                       <p className="text-xs font-mono text-muted-foreground">
-                        Evidence ID: {eviId} • Format: PDF / Digitised Record
+                        Evidence ID: {eviId} • Format: PDF / Digitised Court Record
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER") ? (
+                    {hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER", "PLATFORM_ADMIN") ? (
                       <button
                         onClick={() => handleVerifyEvidence(eviId)}
                         disabled={verifyingEvidenceId === eviId}
-                        className="px-3 py-1.5 bg-secondary border border-border text-foreground hover:bg-muted text-xs font-semibold font-mono rounded flex items-center gap-1.5"
+                        className="px-3 py-1.5 bg-secondary border border-border text-foreground hover:bg-muted text-xs font-semibold rounded flex items-center gap-1.5"
                       >
                         {verifyingEvidenceId === eviId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                        Verify SHA-256 Hash
+                        Verify Document Integrity
                       </button>
                     ) : (
-                      <span className="px-2.5 py-1 text-[11px] font-mono text-muted-foreground bg-muted/50 border border-border rounded flex items-center gap-1" title="Evidence verification is performed by DLSA, Supervisory Legal Officer, or Jail Custody Officer">
+                      <span className="px-2.5 py-1 text-[11px] font-sans text-muted-foreground bg-muted/50 border border-border rounded flex items-center gap-1" title="Evidence verification is performed by DLSA, Supervisory Legal Officer, or Jail Custody Officer">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
                         Custody Verified
                       </span>
@@ -1470,41 +1470,59 @@ export function CaseIntelligence() {
             {evidenceVerificationResult && (
               evidenceVerificationResult.error ? (
                 /* Access Denied / Other API Error */
-                <div className="p-4 rounded border bg-red-500/10 border-red-500/30 text-xs font-mono space-y-1">
+                <div className="p-4 rounded border bg-red-500/10 border-red-500/30 text-xs font-sans space-y-1">
                   <p className="font-bold text-red-600">VERIFICATION FAILED — ACCESS DENIED</p>
-                  <p className="text-muted-foreground text-[10px]">{evidenceVerificationResult.error}</p>
+                  <p className="text-muted-foreground text-xs">{evidenceVerificationResult.error}</p>
                 </div>
               ) : evidenceVerificationResult.integrity_verified ? (
                 /* Authentic — Hashes Match */
-                <div className="p-4 rounded border bg-emerald-500/10 border-emerald-500/30 text-xs font-mono space-y-1.5">
+                <div className="p-4 rounded border bg-emerald-500/10 border-emerald-500/30 text-xs font-sans space-y-1.5">
                   <p className="font-bold text-emerald-600 dark:text-emerald-400">
-                    ✔ CRYPTOGRAPHIC INTEGRITY VERIFIED — AUTHENTIC
+                    ✔ OFFICIAL DOCKET INTEGRITY VERIFIED — AUTHENTIC
                   </p>
-                  <p className="text-foreground/80 break-all">
-                    <span className="text-muted-foreground">Stored Hash:&nbsp;</span>
-                    {evidenceVerificationResult.stored_hash}
-                  </p>
-                  <p className="text-foreground/80 break-all">
-                    <span className="text-muted-foreground">Computed Hash:&nbsp;</span>
-                    {evidenceVerificationResult.computed_hash}
-                  </p>
-                  <p className="text-muted-foreground text-[10px]">{evidenceVerificationResult.note}</p>
+                  {user?.role === "PLATFORM_ADMIN" ? (
+                    <>
+                      <p className="text-foreground/80 break-all font-mono text-[11px]">
+                        <span className="text-muted-foreground">Stored Hash:&nbsp;</span>
+                        {evidenceVerificationResult.stored_hash}
+                      </p>
+                      <p className="text-foreground/80 break-all font-mono text-[11px]">
+                        <span className="text-muted-foreground">Computed Hash:&nbsp;</span>
+                        {evidenceVerificationResult.computed_hash}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-foreground/80">
+                      <span className="text-muted-foreground">Digital Seal:&nbsp;</span>
+                      Sealed &amp; Matching Judicial Records Repository (BSA Sec 63 where applicable)
+                    </p>
+                  )}
+                  <p className="text-muted-foreground text-xs">{evidenceVerificationResult.note}</p>
                 </div>
               ) : (
                 /* Tampered — Hashes Do Not Match */
-                <div className="p-4 rounded border bg-red-500/10 border-red-500/30 text-xs font-mono space-y-1.5">
+                <div className="p-4 rounded border bg-red-500/10 border-red-500/30 text-xs font-sans space-y-1.5">
                   <p className="font-bold text-red-600">
                     ⚠ INTEGRITY VIOLATION — POSSIBLE TAMPERING DETECTED
                   </p>
-                  <p className="text-foreground/80 break-all">
-                    <span className="text-muted-foreground">Stored Hash (Original):&nbsp;</span>
-                    {evidenceVerificationResult.stored_hash}
-                  </p>
-                  <p className="text-foreground/80 break-all">
-                    <span className="text-muted-foreground">Computed Hash (Current):&nbsp;</span>
-                    {evidenceVerificationResult.computed_hash}
-                  </p>
-                  <p className="text-red-500 text-[10px] font-semibold">{evidenceVerificationResult.note}</p>
+                  {user?.role === "PLATFORM_ADMIN" ? (
+                    <>
+                      <p className="text-foreground/80 break-all font-mono text-[11px]">
+                        <span className="text-muted-foreground">Stored Hash (Original):&nbsp;</span>
+                        {evidenceVerificationResult.stored_hash}
+                      </p>
+                      <p className="text-foreground/80 break-all font-mono text-[11px]">
+                        <span className="text-muted-foreground">Computed Hash (Current):&nbsp;</span>
+                        {evidenceVerificationResult.computed_hash}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-foreground/80">
+                      <span className="text-muted-foreground">Status:&nbsp;</span>
+                      The file presented does not match the original sealed court docket file.
+                    </p>
+                  )}
+                  <p className="text-red-500 text-xs font-semibold">{evidenceVerificationResult.note}</p>
                 </div>
               )
             )}

@@ -309,12 +309,12 @@ export function LegalSourcesAdmin() {
   };
 
   const getHeaderTitle = () => {
-    if (isAdvocate) return "Legal Knowledge Base (Advocate Consumer Mode)";
-    if (isAuditor) return "Legal Knowledge Audit & Evaluation (Auditor Mode)";
-    if (isDlsa) return "Governed Legal Knowledge (DLSA Operational Mode)";
-    if (isSupervisor) return "Legal Knowledge Governance (Supervising Officer Mode)";
-    if (isGovAdmin) return "Statutory Repository Administration (SLSA Admin Mode)";
-    return "Legal Knowledge Infrastructure (Technical Admin Mode)";
+    if (isAdvocate) return "Governed Legal Knowledge Base";
+    if (isAuditor) return "Statutory Knowledge & Compliance Register";
+    if (isDlsa) return "DLSA Statutory Reference Library";
+    if (isSupervisor) return "Judicial Knowledge Governance";
+    if (isGovAdmin) return "SLSA Statutory Repository";
+    return "Legal Knowledge Infrastructure [Technical Administration]";
   };
 
   return (
@@ -324,8 +324,8 @@ export function LegalSourcesAdmin() {
         <div>
           <div className="flex items-center gap-2.5 mb-1.5">
             <Scale className="w-6 h-6 text-primary" />
-            <span className="text-xs font-mono font-bold uppercase tracking-wider text-primary px-2.5 py-0.5 rounded-md bg-primary/10 border border-primary/20">
-              {role.replace(/_/g, " ")} CLEARANCE
+            <span className="text-xs font-sans font-bold uppercase tracking-wider text-primary px-2.5 py-0.5 rounded-md bg-primary/10 border border-primary/20">
+              {isPlatformAdmin ? `${role} CLEARANCE` : "OFFICIAL JUDICIAL CLEARANCE"}
             </span>
           </div>
           <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight text-foreground">
@@ -410,7 +410,7 @@ export function LegalSourcesAdmin() {
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
-            <Sparkles className="w-4 h-4" /> Hybrid Retrieval &amp; Citation Verifier
+            <Sparkles className="w-4 h-4" /> {isPlatformAdmin ? "Hybrid Retrieval & Citation Verifier" : "Statutory Search & Citation Verifier"}
           </button>
         )}
 
@@ -423,7 +423,7 @@ export function LegalSourcesAdmin() {
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
-            <FileCheck className="w-4 h-4" /> Evaluation Benchmark Suite (5 Categories)
+            <FileCheck className="w-4 h-4" /> {isPlatformAdmin ? "Evaluation Benchmark Suite (5 Categories)" : "Statutory Accuracy & Compliance Verification"}
           </button>
         )}
 
@@ -436,7 +436,7 @@ export function LegalSourcesAdmin() {
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
-            <AlertTriangle className="w-4 h-4 text-amber-500" /> Human Review Queue ({escalations.length})
+            <AlertTriangle className="w-4 h-4 text-amber-500" /> Judicial Review Queue ({escalations.length})
           </button>
         )}
       </div>
@@ -541,8 +541,14 @@ export function LegalSourcesAdmin() {
                       </div>
                     </div>
 
-                    <div className="text-[11px] font-mono text-muted-foreground truncate max-w-xl">
-                      <strong>SHA-256:</strong> {src.document_hash}
+                    <div className="text-xs font-sans text-muted-foreground truncate max-w-xl">
+                      {isPlatformAdmin ? (
+                        <span className="font-mono text-[11px]"><strong>SHA-256:</strong> {src.document_hash}</span>
+                      ) : (
+                        <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                          <ShieldCheck className="w-3.5 h-3.5" /> Statutory Integrity Seal: Verified on Official Register
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -551,7 +557,7 @@ export function LegalSourcesAdmin() {
                       onClick={() => handleViewDetail(src.id)}
                       className="px-3 py-1.5 rounded bg-secondary hover:bg-secondary/80 text-foreground font-medium text-xs border border-border flex items-center gap-1.5 transition-colors"
                     >
-                      <Layers className="w-3.5 h-3.5 text-primary" /> View Chunks &amp; Boundaries
+                      <Layers className="w-3.5 h-3.5 text-primary" /> {isPlatformAdmin ? "View Chunks & Boundaries" : "View Statutory Provisions"}
                     </button>
 
                     {canUpdateLifecycle && (

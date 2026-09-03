@@ -10,11 +10,19 @@ from app.auth.roles import Role
 client = TestClient(app)
 
 
-def _get_auth_headers(role: Role, user_id: str = "test_user", org_id: str = "org_dlsa_central") -> dict:
+def _get_auth_headers(
+    role: Role,
+    user_id: str = "test_user",
+    org_id: str = "org_dlsa_central",
+    facility_ids: list[str] | None = None,
+) -> dict:
+    if facility_ids is None and role == Role.JAIL_OFFICER:
+        facility_ids = ["fac_tihar_jail_04", "Central Jail No. 4, Tihar (Synthetic)", "tihar"]
     token = create_access_token(
         subject=user_id,
         role=role.value,
         org_id=org_id,
+        facility_ids=facility_ids or [],
     )
     return {"Authorization": f"Bearer {token}"}
 

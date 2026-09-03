@@ -85,8 +85,12 @@ export function CommandCenter() {
                 ? "State Legal Services Authority (SLSA)"
                 : "District Legal Aid Coordination"}
             </span>
-            <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-primary/10 text-primary border border-primary/20">
-              {user?.role}
+            <span className="text-xs px-2.5 py-0.5 rounded font-sans font-semibold bg-primary/10 text-primary border border-primary/20">
+              {isSupervisor
+                ? "Authorized Supervising Legal Officer"
+                : isGovAdmin
+                ? "SLSA State Authority"
+                : "DLSA Legal Aid Officer"}
             </span>
           </div>
           <h1 className="text-2xl md:text-3xl font-bold font-serif text-foreground mt-1">

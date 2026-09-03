@@ -83,12 +83,12 @@ export function LawyerProfileModal({ isOpen, onClose }: UserProfileModalProps) {
         color: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
       },
       SUPERVISING_LEGAL_OFFICER: {
-        name: "Supervising Judicial Officer",
-        badge: "BNSS 479 Final Sign-Off Authority",
+        name: "Authorized Supervising Legal Officer",
+        badge: "BNSS 479 Submission Authorization Authority",
         color: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30",
       },
       DEFENSE_ADVOCATE: {
-        name: "Panel Defense Advocate (Pro Bono)",
+        name: "Legal Aid / Panel Defence Counsel",
         badge: "DLSA Bar Enrolled Counsel",
         color: "bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/30",
       },
@@ -184,11 +184,19 @@ export function LawyerProfileModal({ isOpen, onClose }: UserProfileModalProps) {
                   </span>
                 </div>
 
-                <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground font-mono">
-                  <span>UID: <strong className="text-foreground">{profile.id}</strong></span>
-                  <span>•</span>
-                  <span>Role: <strong className="text-primary">{profile.role}</strong></span>
-                </div>
+                {profile.role === "PLATFORM_ADMIN" ? (
+                  <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground font-mono">
+                    <span>UID: <strong className="text-foreground">{profile.id}</strong></span>
+                    <span>•</span>
+                    <span>Role: <strong className="text-primary">{profile.role}</strong></span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground font-sans">
+                    <span>Jurisdiction: <strong className="text-foreground">{profile.district}</strong></span>
+                    <span>•</span>
+                    <span>Status: <strong className="text-emerald-600 font-semibold">Authorized &amp; Active</strong></span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -212,7 +220,7 @@ export function LawyerProfileModal({ isOpen, onClose }: UserProfileModalProps) {
                     {roleInfo.name}
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5">
-                    Jurisdiction: {profile.district} • Database Record Synchronized
+                    Jurisdiction: {profile.district} • Official Registry Synchronized
                   </div>
                 </div>
               </div>
@@ -225,13 +233,15 @@ export function LawyerProfileModal({ isOpen, onClose }: UserProfileModalProps) {
             <div className="rounded-xl bg-card border-2 border-border overflow-hidden shadow-sm">
               <div className="px-4 py-2.5 bg-secondary/50 border-b border-border flex items-center justify-between text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 <span>Institutional Registry Particulars</span>
-                <button
-                  onClick={() => handleCopy(profile.id)}
-                  className="text-[11px] text-primary hover:underline flex items-center gap-1 font-mono font-medium"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                  {copied ? "Copied!" : "Copy User ID"}
-                </button>
+                {profile.role === "PLATFORM_ADMIN" && (
+                  <button
+                    onClick={() => handleCopy(profile.id)}
+                    className="text-[11px] text-primary hover:underline flex items-center gap-1 font-mono font-medium"
+                  >
+                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copied ? "Copied!" : "Copy User ID"}
+                  </button>
+                )}
               </div>
 
               <div className="divide-y divide-border p-2">
@@ -239,7 +249,15 @@ export function LawyerProfileModal({ isOpen, onClose }: UserProfileModalProps) {
                   <span className="text-muted-foreground flex items-center gap-2">
                     <Building2 className="w-4 h-4 text-primary" /> Organization Entity:
                   </span>
-                  <strong className="text-foreground font-mono">{profile.org_id}</strong>
+                  <strong className="text-foreground">
+                    {profile.role === "PLATFORM_ADMIN"
+                      ? profile.org_id
+                      : profile.org_id === "org_dlsa_central"
+                      ? "District Legal Services Authority (Central)"
+                      : profile.org_id === "org_tihar_central"
+                      ? "Tihar Central Prison Administration"
+                      : profile.org_id.replace(/_/g, " ").toUpperCase()}
+                  </strong>
                 </div>
 
                 <div className="flex items-center justify-between p-2.5 text-xs">

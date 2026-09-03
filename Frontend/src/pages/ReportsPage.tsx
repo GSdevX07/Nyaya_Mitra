@@ -45,46 +45,49 @@ interface ReportsData {
 export function ReportsPage() {
   const [data, setData] = useState<ReportsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
       const res = await fetchReports();
       if (res) {
         setData(res);
       } else {
-        // Fallback stats
-        setData({
-          overview: {
-            total_undertrials_monitored: 5,
-            bnss_479_eligible: 3,
-            senior_citizens: 2,
-            medical_priority_cases: 2,
-            average_custody_days: 436.0,
-            estimated_hours_saved_by_ai: 340,
-          },
-          court_jurisdiction_breakdown: [
-            { jail: "District Jail, ", count: 2 },
-            { jail: "Central Jail, ", count: 2 },
-            { jail: "Sub-Jail, ", count: 1 },
-          ],
-          eligibility_distribution: [
-            { category: "Eligible & Complete", count: 3 },
-            { category: "Missing Documents", count: 1 },
-            { category: "Ineligible (Sentence Threshold)", count: 1 },
-          ],
-        });
+        setError("Unable to aggregate report records from judicial database.");
       }
+    } catch (err: any) {
+      console.error("Failed to load reports:", err);
+      setError(err?.message || "Failed to load judicial report records.");
+    } finally {
       setLoading(false);
     }
-    load();
+  };
+
+  useEffect(() => {
+    loadData();
   }, []);
 
-  if (loading || !data) {
+  if (loading) {
     return (
       <div className="p-20 flex flex-col items-center justify-center gap-3 text-muted-foreground">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        <span className="text-sm font-mono">Compiling legal analytics report from Nyaya Mitra pipeline...</span>
+        <span className="text-sm font-sans">Compiling live legal analytics report from judicial database...</span>
+      </div>
+    );
+  }
+
+  if (error || !data || !data.overview) {
+    return (
+      <div className="p-16 text-center space-y-4 max-w-md mx-auto">
+        <p className="text-sm text-muted-foreground">{error || "No report records found in judicial database."}</p>
+        <button
+          onClick={loadData}
+          className="px-4 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded shadow-sm hover:bg-primary/90"
+        >
+          Retry Loading
+        </button>
       </div>
     );
   }
@@ -100,7 +103,7 @@ export function ReportsPage() {
             <span className="px-2.5 py-0.5 rounded-sm text-xs font-semibold bg-accent/10 text-accent border border-accent/20">
               Legal Operations Intelligence
             </span>
-            <span className="text-xs text-muted-foreground font-mono">System Analytics & DLSA Impact</span>
+            <span className="text-xs text-muted-foreground font-sans">Judicial Analytics &amp; DLSA Impact</span>
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-primary">Legal Analytics & Population Reports</h1>
           <p className="text-sm text-muted-foreground mt-1">

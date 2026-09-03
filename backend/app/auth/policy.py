@@ -52,10 +52,26 @@ def _org_match(user: AuthUser, resource: dict[str, Any]) -> bool:
 
 
 def _facility_match(user: AuthUser, resource: dict[str, Any]) -> bool:
-    if user.role in (Role.PLATFORM_ADMIN, Role.GOV_ADMIN):
+    # State-level oversight admin has access across facilities
+    if user.role == Role.GOV_ADMIN:
         return True
-    fac = resource.get("facility_id") or resource.get("jail_location") or ""
-    return not fac or not user.facility_ids or fac in user.facility_ids
+    # Fail-closed: non-admin users without facility_ids have NO facility access
+    if not user.facility_ids:
+        return False
+    fac = (resource.get("facility_id") or resource.get("jail_location") or "").lower().strip()
+    if not fac:
+        return False
+    user_facs = [str(f).lower().strip() for f in user.facility_ids]
+    for ufac in user_facs:
+        if ufac in fac or fac in ufac:
+            return True
+        if "tihar" in ufac and "tihar" in fac:
+            return True
+        if "rohini" in ufac and "rohini" in fac:
+            return True
+        if "mandoli" in ufac and "mandoli" in fac:
+            return True
+    return False
 
 
 def _is_assigned(user: AuthUser, resource: dict[str, Any]) -> bool:
@@ -81,8 +97,24 @@ def check_permission(
     r = resource or {}
     role = user.role
 
-    # ── Platform admin passes everything ──────────────────────────────────────
+    # Consequential legal, judicial, and evidentiary actions strictly segregated from technical admin
+    CONSEQUENTIAL_LEGAL_ACTIONS = {
+        CASES_APPROVE,
+        CASES_FILE_IN_COURT,
+        CASES_TAKE_OR_DECLINE,
+        CASES_ASSIGN_LAWYER,
+        CUSTODY_UPDATE_STATUS,
+        EVIDENCE_VERIFY,
+        ACCUSED_UPDATE_IDENTITY,
+    }
+
+    # ── Platform admin passes technical management, strictly barred from consequential legal actions ──
     if role == Role.PLATFORM_ADMIN:
+        if action in CONSEQUENTIAL_LEGAL_ACTIONS:
+            _deny(
+                f"Platform administrators are strictly segregated from consequential legal action '{action}'. "
+                "Consequential judicial and detention actions require authorized legal aid or prison authorities."
+            )
         return
 
     # ── Integration service — only allowed actions ────────────────────────────

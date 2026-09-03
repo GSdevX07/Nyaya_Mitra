@@ -310,13 +310,7 @@ function App() {
                 element={
                   <ProtectedRoute
                     allowedRoles={[
-                      "DLSA_OFFICER",
-                      "SUPERVISING_LEGAL_OFFICER",
                       "PLATFORM_ADMIN",
-                      "GOV_ADMIN",
-                      "DEFENSE_ADVOCATE",
-                      "CONTROLLED_EXTERNAL_ADVOCATE",
-                      "READ_ONLY_AUDITOR",
                     ]}
                   >
                     <DocumentAssessmentPage />
@@ -395,10 +389,6 @@ function App() {
                   <ProtectedRoute
                     allowedRoles={[
                       "PLATFORM_ADMIN",
-                      "GOV_ADMIN",
-                      "DLSA_OFFICER",
-                      "SUPERVISING_LEGAL_OFFICER",
-                      "READ_ONLY_AUDITOR",
                     ]}
                   >
                     <IngestionDashboard />

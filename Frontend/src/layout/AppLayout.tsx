@@ -116,7 +116,22 @@ function getNavItemsForRole(role?: Role): NavItem[] {
   }
 }
 
-
+export function formatRoleTitle(role?: string): string {
+  switch (role) {
+    case "PLATFORM_ADMIN": return "Platform Administrator [PLATFORM_ADMIN]";
+    case "GOV_ADMIN": return "State Legal Authority (SLSA)";
+    case "DLSA_OFFICER": return "DLSA Legal Aid Officer";
+    case "SUPERVISING_LEGAL_OFFICER": return "Authorized Supervising Legal Officer";
+    case "DEFENSE_ADVOCATE": return "Defense Panel Counsel";
+    case "CONTROLLED_EXTERNAL_ADVOCATE": return "Panel Advocate";
+    case "JAIL_OFFICER": return "Jail Custody Officer";
+    case "POLICE_OFFICER": return "Police Records Officer";
+    case "READ_ONLY_AUDITOR": return "Statutory Oversight Auditor";
+    case "ACCUSED_USER": return "Citizen / Accused";
+    case "FAMILY_GUARDIAN": return "Family / Guardian";
+    default: return role ? role.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Authorized Official";
+  }
+}
 
 function getDefaultNotificationsForRole(role?: string): NotificationItem[] {
   switch (role) {
@@ -577,8 +592,8 @@ export function AppLayout() {
                 <span className="font-bold font-serif text-foreground text-xs leading-none">
                   {user?.full_name || "Institutional User"}
                 </span>
-                <span className="text-[10px] font-mono text-primary font-bold leading-tight mt-0.5">
-                  [{user?.role || "OFFICER"}]
+                <span className="text-[11px] font-sans text-primary font-semibold leading-tight mt-0.5">
+                  {formatRoleTitle(user?.role)}
                 </span>
               </div>
             </button>

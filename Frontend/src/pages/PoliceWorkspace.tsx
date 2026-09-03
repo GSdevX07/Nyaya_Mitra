@@ -115,7 +115,7 @@ export function PoliceWorkspace() {
       }
 
       setUploadMsg({
-        text: `Document uploaded successfully as PENDING_VERIFICATION. SHA-256: ${result.file_hash ? result.file_hash.substring(0, 16) + "..." : "Recorded"}`,
+        text: "Official police document deposited successfully. Awaiting judicial verification on court file.",
         type: "success",
       });
       await loadData();
@@ -510,10 +510,10 @@ export function PoliceWorkspace() {
                 />
               </div>
 
-              <div className="bg-secondary/40 p-3 rounded-sm text-[11px] font-mono text-muted-foreground space-y-1">
-                <div>* Source Authority: <strong>POLICE</strong></div>
-                <div>* Initial Status: <strong>PENDING_VERIFICATION</strong></div>
-                <div>* Tamper-Evidence: SHA-256 hash computed upon submission</div>
+              <div className="bg-secondary/40 p-3 rounded-sm text-xs font-sans text-muted-foreground space-y-1">
+                <div>* Source Authority: <strong>Police Investigating Agency</strong></div>
+                <div>* Docket Status: <strong>Deposited &amp; Awaiting Judicial File Confirmation</strong></div>
+                <div>* Record Integrity: <strong>Digitally sealed and indexed in case docket</strong></div>
               </div>
 
               {uploadMsg && (

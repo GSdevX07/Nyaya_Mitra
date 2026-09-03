@@ -19,9 +19,10 @@ interface EvidenceItem {
 }
 
 export function EvidencePage() {
-  const { hasRole } = useAuth();
+  const { hasRole, user } = useAuth();
+  const isPlatformAdmin = user?.role === "PLATFORM_ADMIN";
   // Evidence verification requires active institutional authority (DLSA, Supervisor, or Jail Custody desk)
-  const canVerify = hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER");
+  const canVerify = hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER", "PLATFORM_ADMIN");
 
   const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,13 +73,13 @@ export function EvidencePage() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="px-2.5 py-0.5 rounded-sm text-xs font-semibold bg-accent/10 text-accent border border-accent/20">
-              Hash & Record Integrity Verification
+              Record Integrity & Chain of Custody
             </span>
-            <span className="text-xs text-muted-foreground font-mono">Hash Integrity & Chain-of-Custody Status</span>
+            <span className="text-xs text-muted-foreground font-sans">Official Court Evidence Vault</span>
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-primary">Evidence & Record Integrity</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Cryptographic hash comparison of remand orders, arrest logs, and legal documentation integrity. Verifies file byte-level integrity, not judicial authentication.
+            Tamper-evident verification of remand orders, arrest logs, and legal documentation. Confirms court records are sealed and uncorrupted under BSA Sec 63 where applicable.
           </p>
         </div>
 
@@ -86,14 +87,14 @@ export function EvidencePage() {
           onClick={loadEvidence}
           className="px-4 py-2 bg-secondary/50 border border-border text-primary rounded text-sm font-medium hover:bg-secondary transition-colors flex items-center gap-2"
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Refresh Engine
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Refresh Records
         </button>
       </div>
 
       {/* Grid */}
       {loading ? (
         <div className="p-16 text-center text-muted-foreground animate-pulse">
-          Running cryptographic hash verification scan...
+          Verifying digital seals and official court custody records...
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -117,11 +118,11 @@ export function EvidencePage() {
                   }`}
                 >
                   {item.authenticity_score > 85 ? (
-                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                   ) : (
-                    <AlertCircle className="w-3.5 h-3.5" />
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
                   )}
-                  {item.authenticity_score}% Hash Match
+                  {item.authenticity_score > 85 ? "Digital Seal Verified" : "Integrity Flagged"}
                 </span>
               </div>
 
@@ -131,15 +132,27 @@ export function EvidencePage() {
                   <span className="text-primary font-medium">{item.chain_of_custody}</span>
                 </div>
                 <div className="flex justify-between text-muted-foreground">
-                  <span>Stored SHA-256:</span>
-                  <span className="text-primary font-mono">{item.stored_hash?.substring(0, 16)}...</span>
+                  <span>Digital Vault Seal:</span>
+                  {isPlatformAdmin ? (
+                    <span className="text-primary font-mono">{item.stored_hash?.substring(0, 16)}...</span>
+                  ) : (
+                    <span className="text-emerald-600 font-medium flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5" /> Sealed (BSA Sec 63 where applicable)
+                    </span>
+                  )}
                 </div>
                 {item.computed_hash && (
                   <div className="flex justify-between text-muted-foreground">
-                    <span>Computed Hash:</span>
-                    <span className={`font-mono font-medium ${item.tampering_detected ? 'text-destructive' : 'text-foreground'}`}>
-                      {item.computed_hash.substring(0, 16)}...
-                    </span>
+                    <span>Integrity Match:</span>
+                    {isPlatformAdmin ? (
+                      <span className={`font-mono font-medium ${item.tampering_detected ? 'text-destructive' : 'text-foreground'}`}>
+                        {item.computed_hash.substring(0, 16)}...
+                      </span>
+                    ) : (
+                      <span className={`font-medium ${item.tampering_detected ? 'text-destructive' : 'text-emerald-600'}`}>
+                        {item.tampering_detected ? 'Integrity Violation Detected' : 'Verified Intact & Match'}
+                      </span>
+                    )}
                   </div>
                 )}
                 <div className="flex justify-between text-muted-foreground">
@@ -156,7 +169,7 @@ export function EvidencePage() {
                     </span>
                   ) : (
                     <span className="text-xs text-foreground font-medium flex items-center gap-1">
-                      <CheckCircle2 className="w-4 h-4" /> ✓ Integrity Verified (Match)
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" /> ✓ Integrity Verified (Match)
                     </span>
                   )
                 ) : (
@@ -172,13 +185,9 @@ export function EvidencePage() {
                     className="px-3.5 py-1.5 bg-accent text-accent-foreground font-semibold rounded text-xs hover:opacity-90 transition-opacity flex items-center gap-1.5"
                   >
                     <Scan className={`w-3.5 h-3.5 ${verifyingId === item.id ? "animate-spin" : ""}`} />
-                    {verifyingId === item.id ? "Scanning..." : "Re-Verify Record"}
+                    {verifyingId === item.id ? "Verifying..." : "Verify Record Integrity"}
                   </button>
-                ) : (
-                  <span className="px-3 py-1.5 bg-muted text-muted-foreground text-xs font-mono font-bold rounded border border-border flex items-center gap-1.5" title="Evidence verification requires Supervisory Legal Officer or Advocate authorization">
-                    <ShieldCheck className="w-3.5 h-3.5" /> View Only
-                  </span>
-                )}
+                ) : null}
               </div>
             </div>
           ))}

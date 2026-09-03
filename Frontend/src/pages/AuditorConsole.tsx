@@ -322,21 +322,21 @@ export function AuditorConsole() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <ShieldCheck className="w-5 h-5 text-primary" />
-            <span className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground">
-              Statutory Oversight & Cryptographic Audit Ledger // Read-Only
+            <span className="text-xs font-sans font-bold uppercase tracking-wider text-muted-foreground">
+              Statutory Oversight &amp; Official Audit Register
             </span>
           </div>
           <h1 className="text-2xl font-serif font-black tracking-tight text-foreground uppercase">
             Auditor Oversight Console
           </h1>
           <p className="text-sm font-sans text-muted-foreground mt-1 max-w-2xl leading-relaxed">
-            Append-only, SHA-256 hash-chained event ledger tracking legal sign-offs, security boundaries, evidence integrity, and institutional exceptions.
+            Statutory tamper-evident event register tracking judicial sign-offs, BSA Sec 63 certifications where applicable, and institutional compliance.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <span className="text-xs font-mono font-bold px-3 py-1.5 bg-muted border border-border text-foreground rounded">
-            READ_ONLY_AUDITOR
+          <span className="text-xs font-sans font-bold px-3 py-1.5 bg-muted border border-border text-foreground rounded">
+            Statutory Oversight Auditor
           </span>
           <button
             onClick={() => setIsExportOpen(true)}
@@ -587,32 +587,32 @@ export function AuditorConsole() {
 
                         <button
                           onClick={() => toggleChain(ev.id)}
-                          className="text-xs text-primary font-medium hover:underline flex items-center gap-1 font-mono"
+                          className="text-xs text-primary font-medium hover:underline flex items-center gap-1 font-sans"
                         >
                           <Key className="w-3 h-3" />
-                          {isExpanded ? "Hide Cryptographic Proof" : "Verify SHA-256 Chain"}
+                          {isExpanded ? "Hide Verification Details" : "Verify Audit Trail Seal"}
                         </button>
                       </div>
 
                       {/* Collapsible Cryptographic Chain Proof Drawer */}
                       {isExpanded && (
-                        <div className="p-4 bg-muted/60 border border-border rounded font-mono text-xs space-y-2.5 animate-in fade-in duration-150">
+                        <div className="p-4 bg-muted/60 border border-border rounded font-sans text-xs space-y-2.5 animate-in fade-in duration-150">
                           <div className="flex flex-wrap justify-between items-center text-[11px] text-muted-foreground border-b border-border pb-1.5 gap-2">
-                            <span className="font-bold text-foreground">AUDIT EVENT ID: {ev.id}</span>
+                            <span className="font-bold text-foreground">AUDIT EVENT RECORD: {ev.id}</span>
                             <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-bold">
-                              <CheckCircle2 className="w-3.5 h-3.5" /> CRYPTOGRAPHIC CHAIN CONTINUITY VERIFIED
+                              <CheckCircle2 className="w-3.5 h-3.5" /> AUDIT TRAIL INTEGRITY CONTINUITY VERIFIED
                             </span>
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                             <div>
-                              <div className="text-[11px] text-muted-foreground">EVENT SHA-256 CHECKSUM:</div>
+                              <div className="text-[11px] text-muted-foreground font-semibold">EVENT DIGITAL SEAL (SHA-256):</div>
                               <div className="text-foreground font-mono text-[11px] break-all bg-card p-2 rounded border border-border">
                                 {ev.event_hash || "Calculated at write-time (V1 Entry)"}
                               </div>
                             </div>
                             <div>
-                              <div className="text-[11px] text-muted-foreground">PREVIOUS EVENT SHA-256 LINK:</div>
+                              <div className="text-[11px] text-muted-foreground font-semibold">PREVIOUS RECORD LINK:</div>
                               <div className="text-muted-foreground font-mono text-[11px] break-all bg-card p-2 rounded border border-border">
                                 {ev.previous_event_hash || "GENESIS_NYAYA_MITRA_AUDIT_LEDGER_V1"}
                               </div>

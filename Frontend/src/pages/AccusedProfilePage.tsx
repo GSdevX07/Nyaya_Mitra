@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { fetchAccusedProfile, fetchAccusedTimeline } from '../lib/api';
@@ -101,21 +101,43 @@ export const AccusedProfilePage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'cases' | 'timeline' | 'medical' | 'family' | 'identity'>('cases');
   const [timelineFilter, setTimelineFilter] = useState<'ALL' | 'FACTUAL_EVENT' | 'SYSTEM_INTERPRETATION'>('ALL');
 
-  const accusedId = id || 'acc_utp_0001';
+  const [fetchError, setFetchError] = useState<{ status?: number; message?: string } | null>(null);
+
+  const effectiveAccusedId = useMemo(() => {
+    if (id) {
+      if (!id.toLowerCase().startsWith("acc_") && id.toUpperCase().startsWith("UTP-")) {
+        return `acc_${id.toLowerCase().replace("-", "_")}`;
+      }
+      return id;
+    }
+    if (user?.linked_case_id) {
+      return `acc_${user.linked_case_id.toLowerCase().replace("-", "_")}`;
+    }
+    return "acc_utp_0001";
+  }, [id, user?.linked_case_id]);
 
   useEffect(() => {
     const fetchProfileData = async () => {
       setLoading(true);
+      setFetchError(null);
       try {
         // 1. Fetch Profile
-        const profData = await fetchAccusedProfile(accusedId);
+        const profData = await fetchAccusedProfile(effectiveAccusedId);
         setProfile(profData);
 
         // 2. Fetch Timeline
-        const timeData = await fetchAccusedTimeline(accusedId);
+        const timeData = await fetchAccusedTimeline(effectiveAccusedId);
         setTimeline(timeData);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Error fetching accused profile dossier:', err);
+        const msg = err?.message || String(err);
+        const is403 = msg.includes("403") || msg.includes("Forbidden") || msg.includes("authorized");
+        setFetchError({
+          status: is403 ? 403 : 404,
+          message: is403
+            ? "Access to this accused dossier is restricted by institutional scoping policies. Only assigned defense counsel, jurisdiction police stations, or custody facility officers may inspect this file."
+            : `No consolidated records located for identifier: ${effectiveAccusedId}`,
+        });
       } finally {
         setLoading(false);
       }
@@ -124,7 +146,7 @@ export const AccusedProfilePage: React.FC = () => {
     if (token) {
       fetchProfileData();
     }
-  }, [accusedId, token]);
+  }, [effectiveAccusedId, token]);
 
   const backRoute =
     user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE"
@@ -148,13 +170,24 @@ export const AccusedProfilePage: React.FC = () => {
   }
 
   if (!profile) {
+    const isForbidden = fetchError?.status === 403;
     return (
-      <div className="p-8 text-center bg-card rounded-xl border border-border">
-        <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-3" />
-        <h2 className="text-xl font-bold">Accused Profile Not Found</h2>
-        <p className="text-muted-foreground mt-1">No consolidated records located for identifier: {accusedId}</p>
-        <Link to={backRoute} className="mt-4 inline-flex items-center gap-2 text-primary hover:underline text-sm font-medium">
-          <ArrowLeft className="h-4 w-4" /> Return to Matters
+      <div className="p-8 text-center bg-card rounded-xl border border-border max-w-2xl mx-auto my-12 shadow-sm">
+        {isForbidden ? (
+          <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-3 border border-amber-500/20">
+            <Lock className="h-6 w-6 text-amber-500" />
+          </div>
+        ) : (
+          <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-3" />
+        )}
+        <h2 className="text-xl font-bold font-serif text-foreground">
+          {isForbidden ? "Institutional Access Restricted" : "Accused Profile Not Found"}
+        </h2>
+        <p className="text-muted-foreground mt-2 text-sm max-w-md mx-auto">
+          {fetchError?.message || `No consolidated records located for identifier: ${effectiveAccusedId}`}
+        </p>
+        <Link to={backRoute} className="mt-6 inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-xs font-bold font-mono uppercase rounded-sm hover:opacity-90 transition-opacity">
+          <ArrowLeft className="h-4 w-4" /> Return to Assigned Workspace
         </Link>
       </div>
     );
@@ -365,13 +398,13 @@ export const AccusedProfilePage: React.FC = () => {
                 onClick={() => setTimelineFilter('FACTUAL_EVENT')}
                 className={`px-4 py-2 text-xs md:text-sm rounded-lg font-bold transition-all ${timelineFilter === 'FACTUAL_EVENT' ? 'bg-emerald-600 text-white shadow' : 'bg-card text-foreground border border-border hover:bg-muted'}`}
               >
-                Ground-Truth Facts Only
+                Official Court Records Only
               </button>
               <button
                 onClick={() => setTimelineFilter('SYSTEM_INTERPRETATION')}
                 className={`px-4 py-2 text-xs md:text-sm rounded-lg font-bold transition-all ${timelineFilter === 'SYSTEM_INTERPRETATION' ? 'bg-purple-600 text-white shadow' : 'bg-card text-foreground border border-border hover:bg-muted'}`}
               >
-                System Interpretations Only
+                Legal Assessments &amp; Milestones
               </button>
             </div>
             <span className="text-xs text-muted-foreground font-medium">

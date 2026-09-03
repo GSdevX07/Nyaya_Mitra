@@ -2900,12 +2900,14 @@ def get_document_evidence_chain(
     doc_id: str,
     current_user: AuthUser = Depends(require_role(
         Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER, Role.READ_ONLY_AUDITOR,
-        Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE, Role.GOV_ADMIN, Role.PLATFORM_ADMIN,
+        Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE, Role.GOV_ADMIN,
+        Role.PLATFORM_ADMIN, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.ACCUSED_USER, Role.FAMILY_GUARDIAN,
     )),
 ):
     """
-    Evidence chain inspection DAG linking:
-    Document Version -> Extracted Facts -> Human Corrections -> Statutory Rule Calculation -> Legal Actions.
+    Evidence chain and provenance inspection with strict role-specific projection
+    and least-privilege scoping.
     """
     chain = build_evidence_chain(doc_id)
     if not chain:
@@ -2920,22 +2922,89 @@ def get_document_evidence_chain(
             detail=f"Evidence chain for document '{doc_id}' not found.",
         )
 
-    # Scoping for defense advocates
     case = _find_case(chain["case_id"])
-    if current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case record '{chain['case_id']}' not found.",
+        )
+
+    doc_obj = get_uploaded_document_by_id(doc_id)
+
+    # 1. Jail Officer: Strict facility scoping (No facility scope = access denied)
+    if current_user.role == Role.JAIL_OFFICER:
+        if not current_user.facility_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Jail officers must have an authorized facility scope to inspect document provenance.",
+            )
+        from app.auth.policy import _facility_match
+        res_dict = {
+            "facility_id": getattr(case, "facility_id", None),
+            "jail_location": getattr(case, "jail_location", None),
+        }
+        if not _facility_match(current_user, res_dict):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Jail officers can only inspect document provenance for their authorized prison facility.",
+            )
+
+    # 2. Police Officer: Jurisdiction scoping (station / district)
+    elif current_user.role == Role.POLICE_OFFICER:
+        user_district = (current_user.district or "").lower()
+        case_district = (getattr(case, "district", "") or "").lower()
+        if user_district and case_district and user_district != case_district and user_district not in case_district:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Police officers can only access document provenance within their authorized police jurisdiction.",
+            )
+
+    # 3. DLSA Officer & Supervising Legal Officer: District scoping
+    elif current_user.role in (Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER):
+        if not _check_dlsa_district_match(case, current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Legal officers can only inspect records within their authorized district jurisdiction.",
+            )
+
+    # 4. Defense Advocate: Strict case assignment check
+    elif current_user.role == Role.DEFENSE_ADVOCATE:
         user_full = (current_user.full_name or "").lower()
-        if not (
+        is_assigned = (
             (case.assigned_lawyer_id and case.assigned_lawyer_id == current_user.id)
             or (getattr(case, "assigned_lawyer", None) and user_full and user_full in case.assigned_lawyer.lower())
             or (current_user.linked_case_id and case.case_id == current_user.linked_case_id)
-            or current_user.role == Role.DEFENSE_ADVOCATE
-        ):
+        )
+        if not is_assigned:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Forbidden: Defense advocates may only inspect evidence chains of assigned cases.",
             )
 
-    return chain
+    # 5. Controlled External Advocate: Explicitly shared check
+    elif current_user.role == Role.CONTROLLED_EXTERNAL_ADVOCATE:
+        is_shared = (
+            (doc_obj and doc_obj.get("explicitly_shared", False))
+            or getattr(case, "explicitly_shared", False)
+            or (current_user.linked_case_id and case.case_id == current_user.linked_case_id)
+        )
+        if not is_shared:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: External advocates may only inspect explicitly shared document records.",
+            )
+
+    # 6. Accused User & Family Guardian: Linked case check
+    elif current_user.role in (Role.ACCUSED_USER, Role.FAMILY_GUARDIAN):
+        if not (current_user.linked_case_id and case.case_id == current_user.linked_case_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Accused persons and family members may only view document status for their own linked case.",
+            )
+
+    # Project role-specific, least-privilege representation
+    from app.services.evidence_chain_service import project_evidence_chain_for_user
+    return project_evidence_chain_for_user(chain, current_user, case, doc_obj)
 
 
 @app.post("/documents/{doc_id}/verify", tags=["Documents"])

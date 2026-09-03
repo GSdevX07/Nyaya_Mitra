@@ -12,9 +12,11 @@ import {
   acknowledgePoliceAction,
   completePoliceAction,
   uploadDocumentFile,
+  fetchEvidenceChain,
   type PoliceCaseSummary,
   type PoliceActionItem
 } from "../lib/api";
+import { RoleEvidenceProvenanceModal } from "../components/RoleEvidenceProvenanceModal";
 
 const POLICE_DOC_TYPES = [
   { value: "fir", label: "FIR Copy (First Information Report)" },
@@ -45,6 +47,24 @@ export function PoliceWorkspace() {
   const [linkedActionId, setLinkedActionId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
+
+  // Provenance Modal State
+  const [provenanceModalCaseId, setProvenanceModalCaseId] = useState<string | null>(null);
+  const [provenanceData, setProvenanceData] = useState<any>(null);
+  const [provenanceLoading, setProvenanceLoading] = useState(false);
+
+  const handleOpenProvenance = async (caseId: string) => {
+    setProvenanceModalCaseId(caseId);
+    setProvenanceLoading(true);
+    try {
+      const data = await fetchEvidenceChain(caseId);
+      setProvenanceData(data);
+    } catch (err) {
+      console.error("Failed to load police provenance:", err);
+    } finally {
+      setProvenanceLoading(false);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -313,6 +333,13 @@ export function PoliceWorkspace() {
                       >
                         <Plus className="w-3.5 h-3.5" /> Submit Record
                       </button>
+                      <button
+                        onClick={() => handleOpenProvenance(c.case_id)}
+                        className="px-3 py-1.5 bg-secondary hover:bg-muted border border-border text-foreground font-mono text-xs font-semibold rounded-sm flex items-center gap-1"
+                        title="Police Record Provenance"
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5 text-primary" /> Police Record Provenance
+                      </button>
                       <Link
                         to={`/accused/${accusedOpaqueId}`}
                         className="px-3 py-1.5 bg-secondary hover:bg-muted border border-border text-foreground font-mono text-xs font-semibold rounded-sm flex items-center gap-1"
@@ -548,6 +575,14 @@ export function PoliceWorkspace() {
           </div>
         </div>
       )}
+
+      {/* Role-Specific Police Record Provenance Modal */}
+      <RoleEvidenceProvenanceModal
+        isOpen={!!provenanceModalCaseId}
+        onClose={() => setProvenanceModalCaseId(null)}
+        data={provenanceData}
+        loading={provenanceLoading}
+      />
     </div>
   );
 }

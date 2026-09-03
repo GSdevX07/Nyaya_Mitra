@@ -10,26 +10,25 @@ import {
   X,
   Loader2,
   FileScan,
-  Pencil,
-  Download,
   GitBranch,
   CheckCheck,
-  RefreshCw,
   Clock,
-  BookOpen,
 } from "lucide-react";
 import {
   fetchDocuments,
   fetchCases,
   uploadDocumentFile,
   fetchEvidenceChain,
-  correctDocumentField,
   reprocessDocument,
   downloadSecureDocument,
   verifyUploadedDocument,
   getUploadedDocuments,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import {
+  RoleEvidenceProvenanceModal,
+  getEvidenceChainButtonLabel,
+} from "../components/RoleEvidenceProvenanceModal";
 
 interface DocItem {
   id: string;
@@ -125,21 +124,6 @@ export function DocumentsPage() {
   const [evidenceChainModalDoc, setEvidenceChainModalDoc] = useState<string | null>(null);
   const [evidenceChainData, setEvidenceChainData] = useState<any | null>(null);
   const [chainLoading, setChainLoading] = useState(false);
-  const [showAllVersions, setShowAllVersions] = useState(false);
-
-  const formatLegalEngineName = (engine?: string) => {
-    if (!engine || engine.toLowerCase() === "none") return "Official Certified Docket Ingestion";
-    if (engine.toLowerCase().includes("pypdf")) return "Court Document Digital Text Extraction";
-    if (engine.toLowerCase().includes("easyocr") || engine.toLowerCase().includes("ocr")) return "Certified Judicial Optical Scan (OCR)";
-    return "Official Document Processing";
-  };
-
-  // Field Correction state
-  const [correctingField, setCorrectingField] = useState<string | null>(null);
-  const [correctionValue, setCorrectionValue] = useState("");
-  const [correctionReason, setCorrectionReason] = useState("");
-  const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
-  const [correctionMsg, setCorrectionMsg] = useState("");
 
   // Upload modal state
   const [dragOver, setDragOver] = useState(false);
@@ -197,10 +181,6 @@ export function DocumentsPage() {
     setChainLoading(true);
     setEvidenceChainModalDoc(docIdOrCaseId);
     setEvidenceChainData(null);
-    setCorrectingField(null);
-    setCorrectionMsg("");
-    setDownloadFeedback(null);
-    setShowAllVersions(false);
     try {
       let targetDocId = docIdOrCaseId;
       if (docIdOrCaseId.startsWith("UTP-") || docIdOrCaseId.startsWith("CASE-") || docIdOrCaseId.startsWith("DOC-") || docIdOrCaseId.startsWith("CONV-") || docIdOrCaseId.startsWith("REL-")) {
@@ -229,7 +209,7 @@ export function DocumentsPage() {
       setEvidenceChainData(data);
     } catch (err: any) {
       console.error("Failed to load evidence chain:", err);
-      setDownloadFeedback({ type: "error", text: `Document verification record: ${err.message || err}` });
+      setTopFeedback({ type: "error", message: `Document verification record: ${err.message || err}` });
     } finally {
       setChainLoading(false);
     }
@@ -253,33 +233,6 @@ export function DocumentsPage() {
   };
 
   // Submit Field Correction
-  const handleSubmitCorrection = async (docId: string, fieldName: string) => {
-    if (!correctionValue.trim() || !correctionReason.trim()) {
-      alert("Please provide both a corrected value and a justification reason.");
-      return;
-    }
-    setCorrectionSubmitting(true);
-    setCorrectionMsg("");
-    try {
-      await correctDocumentField(docId, {
-        field_name: fieldName,
-        corrected_value: correctionValue.trim(),
-        correction_reason: correctionReason.trim(),
-      });
-      setCorrectionMsg(`Successfully corrected ${fieldName}!`);
-      setCorrectingField(null);
-      setCorrectionValue("");
-      setCorrectionReason("");
-      // Refresh evidence chain
-      const refreshed = await fetchEvidenceChain(docId);
-      setEvidenceChainData(refreshed);
-    } catch (err: any) {
-      alert(err.message || "Correction failed.");
-    } finally {
-      setCorrectionSubmitting(false);
-    }
-  };
-
   // Reprocess Document
   const handleReprocess = async (docId: string) => {
     if (!confirm("Reprocess document to generate Version N+1? Prior version will remain immutable.")) return;
@@ -296,7 +249,6 @@ export function DocumentsPage() {
   };
 
   // Verify Legal Document
-  const [downloadFeedback, setDownloadFeedback] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
   const handleVerify = async (docId: string) => {
     if (!confirm("Verify and authorize this legal document? This will confirm presence and update case completeness.")) return;
@@ -319,7 +271,6 @@ export function DocumentsPage() {
 
   // Secure File Download
   const handleDownload = async (docId: string, fileName: string) => {
-    setDownloadFeedback(null);
     try {
       const blob = await downloadSecureDocument(docId);
       const url = window.URL.createObjectURL(blob);
@@ -330,14 +281,14 @@ export function DocumentsPage() {
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
-      setDownloadFeedback({
+      setTopFeedback({
         type: "success",
-        text: `Secure download initiated for '${fileName || "document.pdf"}'.`,
+        message: `Secure download initiated for '${fileName || "document.pdf"}'.`,
       });
     } catch (err: any) {
-      setDownloadFeedback({
+      setTopFeedback({
         type: "error",
-        text: err.message || "Secure download failed. Access may be restricted to your jurisdiction or role.",
+        message: err.message || "Secure download failed. Access may be restricted to your jurisdiction or role.",
       });
     }
   };
@@ -570,11 +521,11 @@ export function DocumentsPage() {
                           <button
                             onClick={() => handleOpenEvidenceChain(d.actual_doc_id || d.id, d.document_type)}
                             className="px-2.5 py-1 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-semibold border border-primary/20 transition-colors inline-flex items-center gap-1 shadow-sm"
-                            title="Inspect document custody chain and verification history"
+                            title={`Inspect ${getEvidenceChainButtonLabel(user?.role)}`}
                           >
-                            <GitBranch className="w-3.5 h-3.5" /> Chain
+                            <GitBranch className="w-3.5 h-3.5" /> {getEvidenceChainButtonLabel(user?.role)}
                           </button>
-                          {(user?.role === "SUPERVISING_LEGAL_OFFICER" || user?.role === "PLATFORM_ADMIN" || user?.role === "DLSA_OFFICER") && (
+                          {(user?.role === "SUPERVISING_LEGAL_OFFICER" || user?.role === "DLSA_OFFICER") && (
                             <button
                               onClick={() => handleVerifyDirect(d.actual_doc_id || d.id)}
                               className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1 shadow-sm"
@@ -588,9 +539,9 @@ export function DocumentsPage() {
                         <button
                           onClick={() => handleOpenEvidenceChain(d.actual_doc_id || d.id, d.document_type)}
                           className="px-3 py-1 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-semibold border border-primary/20 transition-colors inline-flex items-center gap-1.5 shadow-sm"
-                          title="Inspect document custody chain and verification history"
+                          title={`Inspect ${getEvidenceChainButtonLabel(user?.role)}`}
                         >
-                          <GitBranch className="w-3.5 h-3.5" /> Evidence Chain
+                          <GitBranch className="w-3.5 h-3.5" /> {getEvidenceChainButtonLabel(user?.role)}
                         </button>
                       ) : (
                         <button
@@ -608,354 +559,18 @@ export function DocumentsPage() {
           </div>
         </div>
       )}
+      {/* Role-Specific Evidence Chain & Provenance Inspector Modal */}
+      <RoleEvidenceProvenanceModal
+        isOpen={!!evidenceChainModalDoc}
+        onClose={() => setEvidenceChainModalDoc(null)}
+        data={evidenceChainData}
+        loading={chainLoading}
+        onDownload={handleDownload}
+        onVerify={handleVerify}
+        onReprocess={handleReprocess}
+        canReview={canReview}
+      />
 
-      {/* Evidence Chain Inspector Modal */}
-      {evidenceChainModalDoc && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-4xl bg-card border-2 border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-secondary/30">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
-                  <GitBranch className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-serif font-bold text-foreground flex items-center gap-2">
-                    Document Chain of Custody & Integrity Ledger
-                  </h3>
-                  <p className="text-xs text-muted-foreground font-mono">
-                    Case: {evidenceChainData?.case_id || evidenceChainModalDoc} &bull; Document: {evidenceChainData?.document_type || evidenceChainData?.file_name || "Official Case File"}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setEvidenceChainModalDoc(null)}
-                className="w-8 h-8 rounded-lg hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-6 overflow-y-auto space-y-6">
-              {downloadFeedback && (
-                <div
-                  className={`p-3 rounded-xl text-xs flex items-center justify-between font-mono ${
-                    downloadFeedback.type === "success"
-                      ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-600"
-                      : "bg-destructive/10 border border-destructive/30 text-destructive"
-                  }`}
-                >
-                  <span>{downloadFeedback.text}</span>
-                  <button
-                    onClick={() => setDownloadFeedback(null)}
-                    className="ml-2 text-muted-foreground hover:text-foreground text-xs"
-                  >
-                    ✕
-                  </button>
-                </div>
-              )}
-              {chainLoading ? (
-                <div className="py-16 text-center text-muted-foreground animate-pulse font-mono text-xs">
-                  Loading document custody chain, verified text and judicial audit history...
-                </div>
-              ) : evidenceChainData ? (
-                <>
-                  {/* Origin & Security Screening Card */}
-                  <div className="p-4 bg-secondary/20 border border-border rounded-xl space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-xs font-serif font-bold uppercase tracking-wider text-muted-foreground">
-                        Deposited Court Record
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${
-                          evidenceChainData.document_status === "VERIFIED"
-                            ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-                            : "bg-amber-500/10 text-amber-600 border-amber-500/20"
-                        }`}>
-                          {evidenceChainData.document_status === "VERIFIED" ? "Verified on Docket" : "Pending Verification"}
-                        </span>
-                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                          Security Check: Passed
-                        </span>
-                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-primary/10 text-primary border border-primary/20">
-                          Court Evidence Vault
-                        </span>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                      <div>
-                        <span className="text-muted-foreground block text-[11px]">Filename:</span>
-                        <span className="text-foreground font-semibold">{evidenceChainData.file_name}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground block text-[11px]">Integrity Seal:</span>
-                        {user?.role === "PLATFORM_ADMIN" ? (
-                          <span className="text-foreground truncate block font-mono" title={evidenceChainData.file_hash_sha256}>
-                            {evidenceChainData.file_hash_sha256?.substring(0, 20)}...
-                          </span>
-                        ) : (
-                          <span className="text-emerald-600 font-semibold flex items-center gap-1">
-                            <ShieldCheck className="w-3.5 h-3.5" /> Sealed (BSA Sec 63 where applicable)
-                          </span>
-                        )}
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground block text-[11px]">Depositing Authority:</span>
-                        <span className="text-foreground font-semibold">{evidenceChainData.source_authority}</span>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-border flex flex-wrap items-center justify-between gap-2">
-                      <button
-                        onClick={() => handleDownload(evidenceChainData.document_id, evidenceChainData.file_name)}
-                        className="px-3 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 border border-border transition-colors"
-                      >
-                        <Download className="w-3.5 h-3.5 text-primary" /> Download Certified PDF
-                      </button>
-
-                      <div className="flex items-center gap-2">
-                        {canReview && evidenceChainData.document_status !== "VERIFIED" && (
-                          <button
-                            onClick={() => handleVerify(evidenceChainData.document_id)}
-                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm transition-colors"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" /> Sign & Authorize Document
-                          </button>
-                        )}
-                        {canReview && (
-                          <button
-                            onClick={() => handleReprocess(evidenceChainData.document_id)}
-                            className="px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 border border-primary/20 transition-colors"
-                            title="Re-run text extraction if court deposited an updated copy"
-                          >
-                            <RefreshCw className="w-3.5 h-3.5" /> Re-Scan Document Text
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Processing Record & History */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-serif font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5 text-primary" /> Official Processing Record & Custody History
-                      </h4>
-                      {evidenceChainData.version_history && evidenceChainData.version_history.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setShowAllVersions(!showAllVersions)}
-                          className="text-xs text-primary hover:underline font-medium"
-                        >
-                          {showAllVersions
-                            ? "Show Current Active Only"
-                            : `View ${evidenceChainData.version_history.length - 1} Prior Revisions`}
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Active/Current Version Card */}
-                    {(() => {
-                      const history = evidenceChainData.version_history || [];
-                      const latest = history[history.length - 1] || {
-                        version_number: evidenceChainData.current_version_number || 1,
-                        created_at: evidenceChainData.uploaded_at,
-                        ocr_engine: "Court Registry Digital Text Extraction",
-                        ocr_confidence: 0.95,
-                      };
-                      const priorVersions = history.slice(0, -1);
-
-                      return (
-                        <div className="space-y-3">
-                          <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl space-y-2">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary text-primary-foreground">
-                                  Current Official Record (v{latest.version_number})
-                                </span>
-                                <span className="text-xs text-muted-foreground font-mono">
-                                  Ingested: {new Date(latest.created_at || Date.now()).toLocaleDateString()}
-                                </span>
-                              </div>
-                              <span className="text-xs font-semibold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                                Legibility: {Math.round((latest.ocr_confidence || 0.95) * 100)}% (Clear & Legible)
-                              </span>
-                            </div>
-                            <div className="text-xs text-foreground/90">
-                              <span className="font-semibold text-foreground">Processing Method:</span>{" "}
-                              {formatLegalEngineName(latest.ocr_engine)}
-                            </div>
-                            <p className="text-[11px] text-muted-foreground">
-                              Digital transcript verified BSA Sec 63 compliant where applicable for statutory BNSS 479 undertrial evaluation.
-                            </p>
-                          </div>
-
-                          {/* Collapsible Historical Revisions if user clicks toggle */}
-                          {showAllVersions && priorVersions.length > 0 && (
-                            <div className="pt-2 space-y-2">
-                              <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                                Prior Archived Processing Scans (Audit Vault)
-                              </div>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                                {priorVersions.map((v: any) => (
-                                  <div key={v.version_id} className="p-3 bg-secondary/30 border border-border rounded-lg text-xs space-y-1">
-                                    <div className="flex items-center justify-between font-mono">
-                                      <span className="text-foreground font-semibold">Version {v.version_number} (Archived)</span>
-                                      <span className="text-[11px] text-muted-foreground">
-                                        {new Date(v.created_at).toLocaleDateString()}
-                                      </span>
-                                    </div>
-                                    <div className="text-muted-foreground text-[11px]">
-                                      Method: {formatLegalEngineName(v.ocr_engine)} &bull; Legibility: {Math.round((v.ocr_confidence || 0.95) * 100)}%
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  {/* Extracted Facts with Verbatim Source Spans & Human Corrections */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-serif font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                        <CheckCheck className="w-3.5 h-3.5 text-primary" /> Key Legal Particulars Extracted from Document
-                      </h4>
-                      {correctionMsg && <span className="text-xs text-emerald-600 font-semibold">{correctionMsg}</span>}
-                    </div>
-
-                    <div className="space-y-3">
-                      {evidenceChainData.evidence_chain?.extracted_facts_with_spans?.map((fact: any) => (
-                        <div key={fact.field_name} className="p-4 bg-secondary/20 border border-border rounded-xl space-y-2 text-xs">
-                          <div className="flex items-center justify-between">
-                            <span className="font-mono font-bold text-foreground capitalize">
-                              {fact.field_name.replace(/_/g, " ")}:
-                            </span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-primary/10 text-primary">
-                                Conf: {Math.round(fact.confidence * 100)}%
-                              </span>
-                              {canReview && (
-                                <button
-                                  onClick={() => {
-                                    setCorrectingField(fact.field_name);
-                                    setCorrectionValue(String(fact.effective_value ?? ""));
-                                  }}
-                                  className="text-[11px] text-primary hover:underline flex items-center gap-1"
-                                >
-                                  <Pencil className="w-3 h-3" /> Correct Field
-                                </button>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 font-mono">
-                            <div>
-                              <span className="text-muted-foreground block text-[11px]">Effective Value:</span>
-                              <strong className="text-foreground text-sm">{JSON.stringify(fact.effective_value)}</strong>
-                              {fact.is_corrected && (
-                                <span className="text-[10px] text-amber-600 block">
-                                  (Corrected from machine value: {JSON.stringify(fact.machine_value)})
-                                </span>
-                              )}
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground block text-[11px]">Source Span:</span>
-                              <p className="p-1.5 bg-card rounded border border-border text-[11px] text-muted-foreground italic">
-                                "{fact.source_span || "Direct digital stream extract"}"
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Field Correction Inline Dialog */}
-                          {correctingField === fact.field_name && (
-                            <div className="mt-3 p-3 bg-card border-2 border-primary/30 rounded-lg space-y-2 animate-in fade-in duration-150">
-                              <strong className="text-foreground text-xs block">
-                                Authoritative Correction for {fact.field_name}:
-                              </strong>
-                              <input
-                                type="text"
-                                value={correctionValue}
-                                onChange={e => setCorrectionValue(e.target.value)}
-                                placeholder="Corrected value"
-                                className="w-full px-3 py-1.5 bg-secondary/50 border border-border rounded text-xs text-foreground focus:outline-none"
-                              />
-                              <input
-                                type="text"
-                                value={correctionReason}
-                                onChange={e => setCorrectionReason(e.target.value)}
-                                placeholder="Justification reason (e.g. Verified against jail nominal roll)"
-                                className="w-full px-3 py-1.5 bg-secondary/50 border border-border rounded text-xs text-foreground focus:outline-none"
-                              />
-                              <div className="flex justify-end gap-2">
-                                <button
-                                  onClick={() => setCorrectingField(null)}
-                                  className="px-3 py-1 bg-secondary text-muted-foreground rounded text-xs"
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  onClick={() => handleSubmitCorrection(evidenceChainData.document_id, fact.field_name)}
-                                  disabled={correctionSubmitting}
-                                  className="px-3 py-1 bg-primary text-primary-foreground font-bold rounded text-xs flex items-center gap-1"
-                                >
-                                  {correctionSubmitting && <Loader2 className="w-3 h-3 animate-spin" />}
-                                  Save Correction
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Downstream Rule & Action Linkage */}
-                  <div className="p-4 bg-secondary/20 border border-border rounded-xl space-y-2 text-xs">
-                    <h4 className="font-serif font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                      <BookOpen className="w-3.5 h-3.5 text-primary" /> Downstream Rule & Action Linkage
-                    </h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="p-3 bg-card rounded border border-border font-mono space-y-1">
-                        <span className="text-[11px] text-muted-foreground block">Statutory Rule:</span>
-                        <strong className="text-foreground">
-                          {evidenceChainData.evidence_chain?.statutory_rule_grounding?.statute}
-                        </strong>
-                        <div className="text-[11px] text-muted-foreground">
-                          Eligibility Outcome:{" "}
-                          <span className="text-emerald-600 font-bold">
-                            {evidenceChainData.evidence_chain?.statutory_rule_grounding?.eligibility_outcome ? "ELIGIBLE" : "REVIEW NEEDED"}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="p-3 bg-card rounded border border-border space-y-1">
-                        <span className="text-[11px] text-muted-foreground block font-mono">Institutional Actions:</span>
-                        {evidenceChainData.evidence_chain?.institutional_actions?.length > 0 ? (
-                          evidenceChainData.evidence_chain.institutional_actions.map((act: any, idx: number) => (
-                            <div key={idx} className="text-[11px] flex justify-between font-mono">
-                              <span className="text-foreground font-semibold">{act.action}</span>
-                              <span className="text-muted-foreground">{new Date(act.timestamp).toLocaleDateString()}</span>
-                            </div>
-                          ))
-                        ) : (
-                          <span className="text-muted-foreground italic text-xs">No formal actions logged yet.</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="text-center py-12 text-muted-foreground text-xs">
-                  No evidence chain available for this record.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Upload Modal */}
       {showUploadModal && (

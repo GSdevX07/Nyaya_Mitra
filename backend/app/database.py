@@ -20,6 +20,7 @@ import sqlite3
 import logging
 import datetime
 import uuid
+import hashlib
 from typing import List, Optional, Dict, Any
 
 from pathlib import Path

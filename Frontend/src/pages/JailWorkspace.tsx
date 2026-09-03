@@ -8,8 +8,10 @@ import {
   fetchJailInmates,
   referJailCaseToDlsa,
   uploadDocumentFile,
+  fetchEvidenceChain,
   type JailInmateRecord
 } from "../lib/api";
+import { RoleEvidenceProvenanceModal } from "../components/RoleEvidenceProvenanceModal";
 
 const PRISON_DOC_TYPES = [
   { value: "prison_admission_record", label: "Prison Admission Record" },
@@ -35,6 +37,24 @@ export function JailWorkspace() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Provenance Modal State
+  const [provenanceModalCaseId, setProvenanceModalCaseId] = useState<string | null>(null);
+  const [provenanceData, setProvenanceData] = useState<any>(null);
+  const [provenanceLoading, setProvenanceLoading] = useState(false);
+
+  const handleOpenProvenance = async (inmateId: string) => {
+    setProvenanceModalCaseId(inmateId);
+    setProvenanceLoading(true);
+    try {
+      const data = await fetchEvidenceChain(inmateId);
+      setProvenanceData(data);
+    } catch (err) {
+      console.error("Failed to load provenance:", err);
+    } finally {
+      setProvenanceLoading(false);
+    }
+  };
 
   const loadJailInmates = async () => {
     setLoading(true);
@@ -280,6 +300,14 @@ export function JailWorkspace() {
                       </span>
                     )}
 
+                    <button
+                      onClick={() => handleOpenProvenance(c.inmate_id)}
+                      className="px-2.5 py-1.5 text-xs font-semibold rounded-sm bg-secondary hover:bg-secondary/80 text-foreground border border-border flex items-center gap-1 transition-colors"
+                      title="Inspect Document Verification & Provenance"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-primary" /> Document Verification &amp; Provenance
+                    </button>
+
                     <Link
                       to={`/case/${c.inmate_id}`}
                       className="px-3 py-1.5 bg-primary text-primary-foreground rounded-sm text-xs font-serif font-semibold flex items-center gap-1"
@@ -398,6 +426,14 @@ export function JailWorkspace() {
           </div>
         </div>
       )}
+
+      {/* Role-Specific Document Verification & Provenance Modal */}
+      <RoleEvidenceProvenanceModal
+        isOpen={!!provenanceModalCaseId}
+        onClose={() => setProvenanceModalCaseId(null)}
+        data={provenanceData}
+        loading={provenanceLoading}
+      />
     </div>
   );
 }

@@ -5,7 +5,8 @@ import {
   Send, CheckCheck
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
-import { fetchCitizenCase, fetchCitizenTimeline } from "../lib/api";
+import { fetchCitizenCase, fetchCitizenTimeline, fetchEvidenceChain } from "../lib/api";
+import { RoleEvidenceProvenanceModal } from "../components/RoleEvidenceProvenanceModal";
 
 interface CitizenPortalProps {
   mode?: "accused" | "family";
@@ -73,6 +74,25 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
   const [loading, setLoading] = useState(true);
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [lang, setLang] = useState<'en' | 'hi'>('en');
+
+  // Document Status Modal State
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  const [docProvenance, setDocProvenance] = useState<any>(null);
+  const [docLoading, setDocLoading] = useState(false);
+
+  const handleOpenDocStatus = async (docId?: string) => {
+    const target = docId || (data?.case_reference ? `DOC-${data.case_reference}-remand_order` : "UTP-0001");
+    setSelectedDocId(target);
+    setDocLoading(true);
+    try {
+      const res = await fetchEvidenceChain(target);
+      setDocProvenance(res);
+    } catch (err) {
+      console.error("Failed to load document status:", err);
+    } finally {
+      setDocLoading(false);
+    }
+  };
 
   useEffect(() => {
     async function loadData() {
@@ -396,7 +416,12 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         {data.available_documents && data.available_documents.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {data.available_documents.map((doc, idx) => (
-              <div key={idx} className="p-3.5 bg-secondary/30 border border-border rounded-lg flex items-center justify-between">
+              <div
+                key={idx}
+                onClick={() => handleOpenDocStatus(doc.id)}
+                className="p-3.5 bg-secondary/30 hover:bg-secondary/50 cursor-pointer border border-border rounded-lg flex items-center justify-between transition-colors shadow-xs"
+                title="Click to view official document status"
+              >
                 <div className="flex items-center gap-2.5 truncate">
                   <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
                   <span className="text-xs font-semibold text-foreground truncate">{doc.title}</span>
@@ -470,6 +495,14 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
           </a>
         </div>
       </div>
+
+      {/* Citizen / Family Document Status Modal */}
+      <RoleEvidenceProvenanceModal
+        isOpen={!!selectedDocId}
+        onClose={() => setSelectedDocId(null)}
+        data={docProvenance}
+        loading={docLoading}
+      />
     </div>
   );
 }

@@ -423,7 +423,83 @@ export function RoleEvidenceProvenanceModal({
               )}
 
               {/* ============================================================== */}
-              {/* 6. PLATFORM ADMIN VIEW (Technical Only) */}
+              {/* 6. GOVERNMENT / SLSA ADMIN VIEW */}
+              {/* ============================================================== */}
+              {roleView === "GOV_ADMIN" && (
+                <div className="space-y-4">
+                  <div className="p-4 bg-secondary/20 border border-border rounded-xl space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-serif font-bold uppercase tracking-wider text-muted-foreground">
+                        Institutional Governance & Compliance Overview
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                        {data.integrity_status}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs pt-1">
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">Jurisdiction:</span>
+                        <strong className="text-foreground">{data.district || "Not specified"}</strong>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">Source Authority:</span>
+                        <strong className="text-foreground">{data.source_authority}</strong>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">Verification Status:</span>
+                        <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-primary/10 text-primary">
+                          {data.verification_status}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Compliance Indicators */}
+                  <div className="p-4 bg-card border border-border rounded-xl space-y-2">
+                    <h4 className="text-xs font-serif font-bold text-foreground">Compliance & Legal Standards</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                      <div className="p-2.5 bg-secondary/30 rounded border border-border">
+                        <span className="text-muted-foreground block text-[11px]">Automated Screening:</span>
+                        <strong className="text-foreground">{data.compliance_indicators?.security_screening || "Compliant"}</strong>
+                      </div>
+                      <div className="p-2.5 bg-secondary/30 rounded border border-border">
+                        <span className="text-muted-foreground block text-[11px]">Chain of Custody:</span>
+                        <strong className="text-foreground">
+                          {data.compliance_indicators?.chain_of_custody_established ? "Established (Append-Only)" : "Pending"}
+                        </strong>
+                      </div>
+                      <div className="p-2.5 bg-secondary/30 rounded border border-border">
+                        <span className="text-muted-foreground block text-[11px]">Electronic Record Legal Reference:</span>
+                        <strong className="text-foreground">{data.compliance_indicators?.electronic_record_legal_reference || "BSA Section 63 where applicable"}</strong>
+                      </div>
+                      <div className="p-2.5 bg-secondary/30 rounded border border-border">
+                        <span className="text-muted-foreground block text-[11px]">Compliance Status:</span>
+                        <strong className="text-foreground">{data.compliance_indicators?.electronic_record_compliance || "Applicable - On Record"}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Case & Workflow Overview */}
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div className="p-3 bg-secondary/20 rounded-lg border border-border">
+                      <span className="text-lg font-mono font-bold text-foreground">{data.version_count || 1}</span>
+                      <span className="text-[11px] text-muted-foreground block">Version History</span>
+                    </div>
+                    <div className="p-3 bg-secondary/20 rounded-lg border border-border">
+                      <span className="text-lg font-mono font-bold text-amber-600">{data.missing_records_count || 0}</span>
+                      <span className="text-[11px] text-muted-foreground block">Missing Records</span>
+                    </div>
+                    <div className="p-3 bg-secondary/20 rounded-lg border border-border">
+                      <span className="text-lg font-mono font-bold text-primary">{data.audit_trail_events_count || 0}</span>
+                      <span className="text-[11px] text-muted-foreground block">Audit Events Logged</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ============================================================== */}
+              {/* 7. PLATFORM ADMIN VIEW (Technical Only) */}
               {/* ============================================================== */}
               {roleView === "PLATFORM_ADMIN" && (
                 <div className="space-y-4">

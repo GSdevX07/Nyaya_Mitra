@@ -4,14 +4,14 @@ test_role_scoped_evidence_chain.py
 Exhaustive verification of role-specific, least-privilege, and facility/jurisdiction-scoped
 evidence chain projections across all 11 roles in Nyaya Mitra:
 
-1. JAIL_OFFICER -> "Document Verification & Provenance", facility-scoped, plain integrity.
+1. JAIL_OFFICER -> "Document Verification & Provenance", facility-scoped, truthful integrity.
 2. POLICE_OFFICER -> "Police Record Provenance", police jurisdiction scoped.
 3. DLSA_OFFICER -> "Evidence Chain & Legal Record History", full legal-aid context.
 4. SUPERVISING_LEGAL_OFFICER -> "Full Evidence Chain & Supervisory Audit", supervisory review.
 5. DEFENSE_ADVOCATE -> "Case Evidence & Document History", assigned cases only.
-6. CONTROLLED_EXTERNAL_ADVOCATE -> "Authorized Document History", explicitly shared only.
+6. CONTROLLED_EXTERNAL_ADVOCATE -> "Authorized Document History", strictly explicitly shared only.
 7. READ_ONLY_AUDITOR -> "Audit Evidence Chain", complete timestamps & actor roles (read-only).
-8. GOV_ADMIN -> "Evidence & Compliance Overview", oversight indicators.
+8. GOV_ADMIN -> "Evidence & Compliance Overview", contextual BSA 63 oversight indicators.
 9. PLATFORM_ADMIN -> "Technical Document Integrity", raw SHA-256 and vault protection.
 10. ACCUSED_USER -> "Document Status", simple plain language for own case.
 11. FAMILY_GUARDIAN -> "Case Document Status", high-level status for linked accused.
@@ -54,7 +54,8 @@ def test_jail_officer_with_valid_facility_gets_jail_projection():
     assert data["role_view"] == "JAIL_OFFICER"
     assert data["ui_label"] == "Document Verification & Provenance"
     assert "integrity_status" in data
-    assert data["integrity_status"] == "Record is intact"
+    assert data["integrity_status"] in ("Record intact", "Integrity check pending")
+    assert data["verification_status"] in ("Institutionally Verified", "Pending Verification")
     # Hidden fields must NOT be present
     assert "statutory_rule_grounding" not in data
     assert "legal_aid_actions" not in data
@@ -78,7 +79,8 @@ def test_police_officer_in_district_gets_police_projection():
     assert data["role_view"] == "POLICE_OFFICER"
     assert data["ui_label"] == "Police Record Provenance"
     assert "police_station" in data
-    assert data["integrity_status"] == "Record unchanged"
+    assert data["integrity_status"] in ("Record intact", "Integrity check pending")
+    assert data["verification_status"] in ("Institutionally Verified", "Pending Verification")
     # Internal strategy and statutory analysis hidden
     assert "statutory_rule_grounding" not in data
     assert "advocate_strategy" not in data
@@ -121,7 +123,7 @@ def test_defense_advocate_assigned_gets_case_evidence():
     data = resp.json()
     assert data["role_view"] == "DEFENSE_ADVOCATE"
     assert data["ui_label"] == "Case Evidence & Document History"
-    assert data["evidence_integrity_status"] == "Integrity Verified"
+    assert data["evidence_integrity_status"] in ("Integrity Verified", "Record intact")
     assert "relevant_extracted_facts" in data
 
 
@@ -145,6 +147,18 @@ def test_external_advocate_unshared_denied():
     assert "explicitly shared" in resp.json()["detail"].lower()
 
 
+def test_external_advocate_with_linked_case_still_denied_if_doc_not_shared():
+    """Controlled External Advocate CANNOT bypass explicit document sharing via linked_case_id."""
+    headers = _token(
+        Role.CONTROLLED_EXTERNAL_ADVOCATE,
+        user_id="demo_ext_advocate",
+        extra={"linked_case_id": "UTP-0001"}
+    )
+    resp = client.get(f"/documents/{DOC_ID}/evidence-chain", headers=headers)
+    assert resp.status_code == 403
+    assert "explicitly shared" in resp.json()["detail"].lower()
+
+
 def test_read_only_auditor_gets_audit_evidence_chain():
     """Read-Only Auditor gets full audit evidence chain with raw hash and actor timestamps."""
     headers = _token(Role.READ_ONLY_AUDITOR, user_id="demo_auditor")
@@ -158,7 +172,7 @@ def test_read_only_auditor_gets_audit_evidence_chain():
 
 
 def test_government_admin_gets_compliance_overview():
-    """Government Admin gets Evidence & Compliance Overview."""
+    """Government Admin gets Evidence & Compliance Overview with contextual BSA Section 63 reference."""
     headers = _token(Role.GOV_ADMIN, user_id="demo_gov")
     resp = client.get(f"/documents/{DOC_ID}/evidence-chain", headers=headers)
     assert resp.status_code == 200, resp.text
@@ -166,6 +180,7 @@ def test_government_admin_gets_compliance_overview():
     assert data["role_view"] == "GOV_ADMIN"
     assert data["ui_label"] == "Evidence & Compliance Overview"
     assert "compliance_indicators" in data
+    assert data["compliance_indicators"]["electronic_record_legal_reference"] == "BSA Section 63 where applicable"
 
 
 def test_platform_admin_gets_technical_integrity():

@@ -2981,13 +2981,9 @@ def get_document_evidence_chain(
                 detail="Forbidden: Defense advocates may only inspect evidence chains of assigned cases.",
             )
 
-    # 5. Controlled External Advocate: Explicitly shared check
+    # 5. Controlled External Advocate: Strictly explicitly shared document records only
     elif current_user.role == Role.CONTROLLED_EXTERNAL_ADVOCATE:
-        is_shared = (
-            (doc_obj and doc_obj.get("explicitly_shared", False))
-            or getattr(case, "explicitly_shared", False)
-            or (current_user.linked_case_id and case.case_id == current_user.linked_case_id)
-        )
+        is_shared = bool(doc_obj and doc_obj.get("explicitly_shared", False))
         if not is_shared:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

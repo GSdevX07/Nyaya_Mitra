@@ -4,19 +4,64 @@ Role-Specific Document Evidence Chain & Provenance Projection Service
 Enforces least-privilege scoping and role-tailored projection for the Nyaya Mitra
 Document Evidence Chain / Document Provenance feature.
 
-This ensures:
+Key Architectural Guarantees:
 1. Strict facility, jurisdiction, assignment, and sharing scoping per role.
-2. Distinct, role-tailored response projections containing ONLY the data
-   authorized and relevant for that institutional responsibility.
-3. Complete elimination of internal legal reasoning, advocate notes, and
-   statutory calculations from non-legal institutional entry roles (Jail & Police).
-4. Translation of cryptographic SHA-256 verification into plain-language institutional
-   statements for non-technical users.
+2. Faithful reflection of actual underlying security screening and integrity checks
+   (never fabricating "Passed" or "Record unchanged" when pending or quarantined).
+3. Zero fabricated default timestamps or invented jurisdictions/locations.
+4. Clear institutional verification wording ("Institutionally Verified") rather than
+   implying court docket verification.
+5. Contextual reference to BSA Section 63 ("BSA Section 63 where applicable").
 """
 
 from typing import Any, Optional
 from app.auth.roles import Role
 from app.auth.dependencies import AuthUser
+
+
+def _resolve_security_screening(raw_chain: dict[str, Any], doc: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """Translate actual underlying security screening state into plain institutional language."""
+    screening = raw_chain.get("security_screening") or (doc.get("security_screening") if doc else None)
+    if not screening:
+        return {
+            "status": "Integrity check pending",
+            "message": "Automated security screening has not yet been processed for this record.",
+        }
+    raw_status = str(screening.get("status", "")).upper()
+    if raw_status in ("PASSED", "CLEAN", "SAFE"):
+        return {
+            "status": "Passed",
+            "message": "File verified safe; free of security or file-integrity anomalies.",
+        }
+    elif raw_status in ("QUARANTINED", "MALICIOUS", "FLAGGED", "FAILED"):
+        return {
+            "status": "Security issue detected",
+            "message": screening.get("details") or "Quarantined due to security anomaly or active payload.",
+        }
+    elif raw_status in ("REVIEW_REQUIRED", "SUSPICIOUS", "MANUAL_REVIEW"):
+        return {
+            "status": "Review required",
+            "message": screening.get("details") or "Flagged for manual verification review.",
+        }
+    return {
+        "status": "Integrity check pending",
+        "message": screening.get("details") or "Awaiting automated security screening.",
+    }
+
+
+def _resolve_integrity_status(raw_chain: dict[str, Any], doc: Optional[dict[str, Any]]) -> str:
+    """Translate actual cryptographic hash comparison into plain institutional status."""
+    if raw_chain.get("tamper_detected") or (doc and doc.get("tamper_detected")):
+        return "Integrity mismatch detected"
+    raw_hash = (
+        raw_chain.get("file_hash_sha256")
+        or raw_chain.get("file_hash")
+        or (doc.get("file_hash") if doc else None)
+        or (doc.get("file_hash_sha256") if doc else None)
+    )
+    if raw_hash:
+        return "Record intact"
+    return "Integrity check pending"
 
 
 def project_evidence_chain_for_user(
@@ -30,26 +75,36 @@ def project_evidence_chain_for_user(
     """
     role = user.role
     doc_info = doc or {}
-    case_id = raw_chain.get("case_id") or getattr(case, "case_id", "UTP-0001")
-    doc_name = raw_chain.get("file_name") or raw_chain.get("document_type") or "Case Document"
+    case_id = raw_chain.get("case_id") or getattr(case, "case_id", None) or "Not recorded"
+    doc_name = raw_chain.get("file_name") or raw_chain.get("document_type") or (doc_info.get("document_type") if doc_info else None) or "Document on file"
     doc_status = raw_chain.get("document_status", "PENDING_VERIFICATION")
     is_verified = doc_status == "VERIFIED"
-    uploaded_by = raw_chain.get("uploaded_by") or "Institutional Authority"
-    uploaded_at = raw_chain.get("uploaded_at") or "2026-09-01T10:00:00Z"
-    screening = raw_chain.get("security_screening") or {"status": "PASSED", "details": "Verified safe"}
-    raw_hash = raw_chain.get("file_hash_sha256") or raw_chain.get("file_hash") or ""
+    uploaded_by = raw_chain.get("uploaded_by") or (doc_info.get("uploaded_by") if doc_info else None) or "Not recorded"
+    uploaded_at = raw_chain.get("uploaded_at") or (doc_info.get("uploaded_at") if doc_info else None)
+    screening = _resolve_security_screening(raw_chain, doc_info)
+    integrity_status = _resolve_integrity_status(raw_chain, doc_info)
+    raw_hash = (
+        raw_chain.get("file_hash_sha256")
+        or raw_chain.get("file_hash")
+        or (doc_info.get("file_hash") if doc_info else None)
+        or ""
+    )
     current_version = raw_chain.get("current_version_number", 1)
 
     # 1. JAIL OFFICER PROJECTION
     if role == Role.JAIL_OFFICER:
-        facility_name = getattr(case, "jail_location", None) or getattr(case, "facility_id", None) or "Tihar Central Prison"
+        facility_name = (
+            getattr(case, "jail_location", None)
+            or getattr(case, "facility_id", None)
+            or (user.facility_ids[0] if user.facility_ids else "Not specified")
+        )
         
         jail_versions = []
         for v in raw_chain.get("version_history", []):
             jail_versions.append({
                 "version_number": f"V{v.get('version_number', 1)}",
                 "recorded_at": v.get("created_at"),
-                "uploader": v.get("processed_by", "Jail Custody Desk"),
+                "uploader": v.get("processed_by") or "Jail Custody Desk",
             })
 
         return {
@@ -61,24 +116,21 @@ def project_evidence_chain_for_user(
             "facility_name": facility_name,
             "uploaded_by": uploaded_by,
             "uploaded_at": uploaded_at,
-            "source_authority": "Prison/Jail Custody Desk",
-            "security_screening": {
-                "status": "Passed",
-                "message": "File verified safe; free of security or file-integrity anomalies.",
-            },
-            "verification_status": "Verified on Court Docket" if is_verified else "Awaiting Judicial Verification",
+            "source_authority": raw_chain.get("source_authority") or "Prison/Jail Custody Desk",
+            "security_screening": screening,
+            "verification_status": "Institutionally Verified" if is_verified else "Pending Verification",
             "current_document_version": f"V{current_version}",
             "version_history": jail_versions,
-            "integrity_status": "Record is intact" if raw_hash else "Pending Integrity Check",
-            "file_tampered": False,
-            "verified_by": "Authorized Legal Aid Officer" if is_verified else "Pending",
+            "integrity_status": integrity_status,
+            "file_tampered": bool(raw_chain.get("tamper_detected")),
+            "verified_by": "Authorized Legal Aid Officer" if is_verified else "Pending Verification",
             "verified_on": uploaded_at if is_verified else None,
         }
 
     # 2. POLICE OFFICER PROJECTION
     if role == Role.POLICE_OFFICER:
-        police_station = getattr(case, "police_station", None) or "Kotwali Police Station"
-        district = getattr(case, "district", None) or user.district or "Central Delhi"
+        police_station = getattr(case, "police_station", None) or "Not recorded"
+        district = getattr(case, "district", None) or user.district or "Not recorded"
 
         police_versions = []
         for v in raw_chain.get("version_history", []):
@@ -98,24 +150,21 @@ def project_evidence_chain_for_user(
             "district": district,
             "uploaded_by": uploaded_by,
             "uploaded_at": uploaded_at,
-            "source_authority": "Police Records",
-            "security_screening": {
-                "status": "Passed",
-                "message": "Police document passed automated screening.",
-            },
-            "verification_status": "Verified on Court File" if is_verified else "Pending Court File Verification",
+            "source_authority": raw_chain.get("source_authority") or "Police Records",
+            "security_screening": screening,
+            "verification_status": "Institutionally Verified" if is_verified else "Pending Verification",
             "current_document_version": f"V{current_version}",
             "version_history": police_versions,
-            "integrity_status": "Record unchanged",
+            "integrity_status": integrity_status,
             "verification_history": [
                 {
-                    "stage": "Police Submission",
-                    "status": "Completed",
+                    "stage": "Police Intake Submission",
+                    "status": "Completed" if uploaded_at else "Recorded",
                     "timestamp": uploaded_at,
                 },
                 {
-                    "stage": "Court File Linking",
-                    "status": "Verified" if is_verified else "Pending",
+                    "stage": "Institutional Verification (Nyaya Mitra)",
+                    "status": "Institutionally Verified" if is_verified else "Pending Verification",
                     "timestamp": uploaded_at if is_verified else None,
                 },
             ],
@@ -139,18 +188,26 @@ def project_evidence_chain_for_user(
             "security_screening": screening,
             "extraction_status": "Complete" if extracted_facts else "Indexed",
             "extracted_fields_count": len(extracted_facts),
-            "verification_status": "Verified" if is_verified else "Pending Verification",
+            "verification_status": "Institutionally Verified" if is_verified else "Pending Verification",
             "current_document_version": f"V{current_version}",
             "version_history": raw_chain.get("version_history", []),
             "human_corrections_count": len(corrections),
             "human_corrections": corrections,
             "statutory_assessment_impact": {
                 "statute": "Bharatiya Nagarik Suraksha Sanhita, 2023 (Sec 479)",
-                "document_completeness_impact": "Satisfies mandatory docket requirement" if is_verified else "Pending verification to satisfy completeness requirement",
+                "document_completeness_impact": (
+                    "Satisfies mandatory docket requirement"
+                    if is_verified
+                    else "Pending verification to satisfy completeness requirement"
+                ),
             },
             "missing_document_history": getattr(case, "missing_docs", []),
             "legal_aid_actions": downstream,
-            "case_workflow_impact": "Eligible for panel counsel briefing" if is_verified else "Requires verification before counsel briefing",
+            "case_workflow_impact": (
+                "Eligible for panel counsel briefing"
+                if is_verified
+                else "Requires verification before counsel briefing"
+            ),
             "evidence_chain": raw_chain.get("evidence_chain", {}),
         }
 
@@ -174,9 +231,19 @@ def project_evidence_chain_for_user(
             "extracted_facts": extracted_facts,
             "human_corrections": [f for f in extracted_facts if f.get("is_corrected")],
             "statutory_rule_grounding": raw_chain.get("evidence_chain", {}).get("statutory_rule_grounding", {}),
-            "document_completeness_impact": "Verified — Court file complete for Section 479 review" if is_verified else "Pending verification",
-            "counsel_actions": [a for a in downstream if "ADVOCATE" in a.get("actor_role", "") or "COUNSEL" in a.get("actor_role", "")],
-            "supervisory_approval_history": [a for a in downstream if "SUPERVISOR" in a.get("actor_role", "") or "APPROVED" in a.get("action", "")],
+            "document_completeness_impact": (
+                "Verified — Completeness threshold met for Section 479 review"
+                if is_verified
+                else "Pending verification"
+            ),
+            "counsel_actions": [
+                a for a in downstream
+                if "ADVOCATE" in a.get("actor_role", "") or "COUNSEL" in a.get("actor_role", "")
+            ],
+            "supervisory_approval_history": [
+                a for a in downstream
+                if "SUPERVISOR" in a.get("actor_role", "") or "APPROVED" in a.get("action", "")
+            ],
             "complete_audit_trail": downstream,
             "can_authorize_filing": True,
             "evidence_chain": raw_chain.get("evidence_chain", {}),
@@ -195,6 +262,17 @@ def project_evidence_chain_for_user(
                 "is_corrected": f.get("is_corrected", False),
             })
 
+        doc_date = (
+            (uploaded_at.split("T")[0] if "T" in uploaded_at else str(uploaded_at))
+            if uploaded_at
+            else "Not recorded"
+        )
+        upload_hist = (
+            f"Deposited on {doc_date} by {uploaded_by}"
+            if uploaded_at
+            else f"Deposited by {uploaded_by} (Date not recorded)"
+        )
+
         return {
             "role_view": "DEFENSE_ADVOCATE",
             "ui_label": "Case Evidence & Document History",
@@ -202,21 +280,29 @@ def project_evidence_chain_for_user(
             "document_name": doc_name,
             "case_reference": case_id,
             "source_authority": raw_chain.get("source_authority", "Prison / Police Record"),
-            "document_date": uploaded_at.split("T")[0] if "T" in uploaded_at else uploaded_at,
-            "upload_history": f"Deposited on {uploaded_at.split('T')[0] if 'T' in uploaded_at else uploaded_at} by {uploaded_by}",
-            "verification_status": "Verified" if is_verified else "Pending Verification",
+            "document_date": doc_date,
+            "upload_history": upload_hist,
+            "verification_status": "Institutionally Verified" if is_verified else "Pending Verification",
             "current_document_version": f"V{current_version}",
             "relevant_extracted_facts": counsel_facts,
-            "evidence_integrity_status": "Integrity Verified",
-            "technical_hash_available": True,
+            "evidence_integrity_status": "Integrity Verified" if integrity_status == "Record intact" else integrity_status,
+            "technical_hash_available": bool(raw_hash),
             "technical_hash": raw_hash,
-            "statutory_references": ["BNSS Section 479", "BSA Section 63 (where applicable)"],
+            "statutory_references": [
+                "BNSS Section 479",
+                "BSA Section 63 (where applicable)",
+            ],
             "missing_case_documents": getattr(case, "missing_docs", []),
-            "last_updated": uploaded_at,
+            "last_updated": uploaded_at or "Not recorded",
         }
 
     # 6. CONTROLLED EXTERNAL ADVOCATE PROJECTION
     if role == Role.CONTROLLED_EXTERNAL_ADVOCATE:
+        doc_date = (
+            (uploaded_at.split("T")[0] if "T" in uploaded_at else str(uploaded_at))
+            if uploaded_at
+            else "Not recorded"
+        )
         return {
             "role_view": "CONTROLLED_EXTERNAL_ADVOCATE",
             "ui_label": "Authorized Document History",
@@ -225,9 +311,9 @@ def project_evidence_chain_for_user(
             "case_reference": case_id,
             "access_type": "Explicitly Shared by Legal Aid Authority",
             "source_authority": raw_chain.get("source_authority", "Official Record"),
-            "document_date": uploaded_at.split("T")[0] if "T" in uploaded_at else uploaded_at,
-            "verification_status": "Verified" if is_verified else "Pending Verification",
-            "integrity_status": "Record intact",
+            "document_date": doc_date,
+            "verification_status": "Institutionally Verified" if is_verified else "Pending Verification",
+            "integrity_status": integrity_status,
             "version_shared": f"V{current_version}",
             "permitted_usage": "Authorized strictly for designated case brief and court representation.",
         }
@@ -240,7 +326,7 @@ def project_evidence_chain_for_user(
             "document_id": raw_chain.get("document_id"),
             "document_name": doc_name,
             "case_reference": case_id,
-            "source_authority": raw_chain.get("source_authority"),
+            "source_authority": raw_chain.get("source_authority", "Institutional"),
             "uploaded_by": uploaded_by,
             "uploaded_at": uploaded_at,
             "document_status": doc_status,
@@ -250,7 +336,10 @@ def project_evidence_chain_for_user(
             "security_screening": screening,
             "all_versions": raw_chain.get("version_history", []),
             "extracted_facts": raw_chain.get("evidence_chain", {}).get("extracted_facts_with_spans", []),
-            "field_corrections": [f for f in raw_chain.get("evidence_chain", {}).get("extracted_facts_with_spans", []) if f.get("is_corrected")],
+            "field_corrections": [
+                f for f in raw_chain.get("evidence_chain", {}).get("extracted_facts_with_spans", [])
+                if f.get("is_corrected")
+            ],
             "statutory_rule_grounding": raw_chain.get("evidence_chain", {}).get("statutory_rule_grounding", {}),
             "audit_events": raw_chain.get("evidence_chain", {}).get("downstream_actions", []),
             "is_read_only": True,
@@ -264,16 +353,17 @@ def project_evidence_chain_for_user(
             "document_id": raw_chain.get("document_id"),
             "document_name": doc_name,
             "case_reference": case_id,
-            "district": getattr(case, "district", "Central Delhi"),
+            "district": getattr(case, "district", None) or "Not recorded",
             "source_authority": raw_chain.get("source_authority", "Institutional"),
-            "verification_status": "Verified" if is_verified else "Pending Verification",
-            "integrity_status": "Intact",
+            "verification_status": "Institutionally Verified" if is_verified else "Pending Verification",
+            "integrity_status": integrity_status,
             "current_document_version": f"V{current_version}",
             "version_count": len(raw_chain.get("version_history", [])),
             "compliance_indicators": {
-                "security_screening": "Compliant",
-                "chain_of_custody_established": True,
-                "bsa_section_63_referenced": True,
+                "security_screening": "Compliant" if screening["status"] == "Passed" else "Review Required",
+                "chain_of_custody_established": bool(raw_chain.get("version_history")),
+                "electronic_record_legal_reference": "BSA Section 63 where applicable",
+                "electronic_record_compliance": "Applicable - On Record" if is_verified else "Pending Assessment",
             },
             "missing_records_count": len(getattr(case, "missing_docs", [])),
             "workflow_stage": getattr(case, "stage", "IN_REVIEW"),
@@ -302,7 +392,7 @@ def project_evidence_chain_for_user(
 
     # 10. ACCUSED USER PROJECTION (Own Case Only)
     if role == Role.ACCUSED_USER:
-        status_label = "Verified" if is_verified else "Being verified"
+        status_label = "Institutionally Verified" if is_verified else "Under Verification"
         return {
             "role_view": "ACCUSED_USER",
             "ui_label": "Document Status",
@@ -323,7 +413,7 @@ def project_evidence_chain_for_user(
             "document_name": doc_name,
             "case_reference": case_id,
             "document_received": True,
-            "high_level_status": "Verified & On Record" if is_verified else "Under Legal Aid Review",
+            "high_level_status": "Institutionally Verified" if is_verified else "Under Legal Aid Review",
             "next_action": "Application being prepared by assigned counsel" if is_verified else "Awaiting institutional document intake",
             "support_note": "DLSA legal aid services are free of charge. No payment is required.",
         }

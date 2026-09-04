@@ -19,10 +19,10 @@ interface EvidenceItem {
 }
 
 export function EvidencePage() {
-  const { hasRole, user } = useAuth();
+  const { user, can } = useAuth();
   const isPlatformAdmin = user?.role === "PLATFORM_ADMIN";
   // Evidence verification requires active institutional authority (DLSA, Supervisor, or Jail Custody desk)
-  const canVerify = hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER");
+  const canVerify = can("EVIDENCE_VERIFY");
 
   const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
   const [loading, setLoading] = useState(true);

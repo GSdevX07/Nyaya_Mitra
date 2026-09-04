@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, require_role
 from app.auth.user_store import AuthUser
 from app.auth.roles import Role
 from app.services.accused_service import (
@@ -16,6 +16,7 @@ from app.services.accused_service import (
     get_accused_timeline,
     get_duplicate_candidates,
     resolve_duplicate_candidate,
+    update_accused_identity_attributes,
     get_citizen_view,
 )
 
@@ -30,18 +31,52 @@ class DuplicateResolutionRequest(BaseModel):
     resolution_notes: str
 
 
+class UpdateAccusedIdentityRequest(BaseModel):
+    full_name: Optional[str] = None
+    aliases: Optional[List[str]] = None
+    father_name: Optional[str] = None
+    gender: Optional[str] = None
+    age: Optional[int] = None
+    government_identifiers: Optional[Dict[str, Any]] = None
+    update_reason: str
+
+
 # ── Accused-Centric Profile Endpoints ─────────────────────────────────────────
 
 @accused_router.get("/duplicates/candidates", response_model=List[Dict[str, Any]])
 async def list_duplicate_candidates(
     status: Optional[str] = Query("PENDING_HUMAN_REVIEW"),
-    current_user: AuthUser = Depends(get_current_user),
+    current_user: AuthUser = Depends(require_role(
+        Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER, Role.GOV_ADMIN, Role.PLATFORM_ADMIN,
+    )),
 ):
     """
     Retrieve candidate duplicate identities detected across facilities/records
     for human-in-the-loop legal review.
     """
     return get_duplicate_candidates(current_user, status_filter=status)
+
+
+@accused_router.patch("/{accused_id}/identity", response_model=Dict[str, Any])
+async def update_identity(
+    accused_id: str,
+    body: UpdateAccusedIdentityRequest,
+    current_user: AuthUser = Depends(require_role(Role.SUPERVISING_LEGAL_OFFICER)),
+):
+    """
+    Update consolidated legal identity attributes for an accused person.
+    Strictly authorized to SUPERVISING_LEGAL_OFFICER.
+    """
+    if not body.update_reason or len(body.update_reason.strip()) < 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A substantive statutory reason (minimum 5 characters) is required to update identity records.",
+        )
+    return update_accused_identity_attributes(
+        accused_id=accused_id,
+        attributes=body.model_dump(exclude_unset=True),
+        actor=current_user,
+    )
 
 
 @accused_router.post("/duplicates/resolve")

@@ -102,11 +102,8 @@ def _get_hearings_schedule_authoritative() -> List[Dict[str, Any]]:
 def _has_medical_access(user: AuthUser) -> bool:
     """Return True if user role is authorized to view sensitive medical data."""
     allowed_roles = {
-        Role.PLATFORM_ADMIN,
         Role.SUPERVISING_LEGAL_OFFICER,
         Role.DLSA_OFFICER,
-        Role.GOV_ADMIN,
-        Role.JAIL_OFFICER,
     }
     return user.role in allowed_roles
 
@@ -716,6 +713,7 @@ def resolve_duplicate_candidate(
     allowed_roles = {
         Role.SUPERVISING_LEGAL_OFFICER,
         Role.DLSA_OFFICER,
+        Role.GOV_ADMIN,
     }
     if user.role not in allowed_roles:
         raise HTTPException(
@@ -733,6 +731,7 @@ def resolve_duplicate_candidate(
         "REJECT_MATCH": "REJECT_MATCH",
         "DISTINCT": "REJECT_MATCH",
         "MARK_AS_DISTINCT": "REJECT_MATCH",
+        "ESCALATE": "MARK_AS_ALIAS",
     }
     canonical_action = action_map.get(action_raw, action_raw)
     valid_actions = {"MERGE_RECORDS", "REJECT_MATCH", "MARK_AS_ALIAS"}
@@ -740,6 +739,18 @@ def resolve_duplicate_candidate(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid resolution action '{action}'. Must be one of {valid_actions}.",
+        )
+
+    # High-impact canonical identity merge strictly requires SUPERVISING_LEGAL_OFFICER
+    if canonical_action == "MERGE_RECORDS" and user.role != Role.SUPERVISING_LEGAL_OFFICER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Merging canonical identity records requires Supervising Legal Officer authority. DLSA and State officers may flag or link as alias.",
+        )
+    if canonical_action == "MARK_AS_ALIAS" and user.role not in (Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Linking identity alias requires DLSA or Supervising Legal Officer authority.",
         )
     from app.database import resolve_merge_candidate
     result = resolve_merge_candidate(candidate_id, canonical_action, resolution_notes, user.full_name or user.id)
@@ -762,7 +773,7 @@ def resolve_duplicate_candidate(
                 "candidate_accused_id": result.get("candidate_accused_id"),
                 "resolution_notes": resolution_notes,
                 "timestamp": now,
-            }
+            },
         })
     except Exception as e:
         print(f"[WARN] Audit logging for duplicate resolution failed: {e}")
@@ -773,6 +784,81 @@ def resolve_duplicate_candidate(
         "reviewed_by": user.full_name,
         "resolved_at": now,
         "message": f"Candidate '{candidate_id}' successfully resolved with action '{action}'.",
+    }
+
+
+def update_accused_identity_attributes(
+    accused_id: str,
+    attributes: Dict[str, Any],
+    actor: AuthUser,
+) -> Dict[str, Any]:
+    """
+    Update consolidated legal identity attributes for an accused person.
+    Strictly authorized to SUPERVISING_LEGAL_OFFICER.
+    """
+    if actor.role != Role.SUPERVISING_LEGAL_OFFICER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Updating legal identity records requires Supervising Legal Officer authority.",
+        )
+
+    profile = get_accused_profile(accused_id, actor)
+    if not profile or profile.get("is_quarantined"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Accused record '{accused_id}' not found.",
+        )
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        sets = []
+        vals = []
+        if "full_name" in attributes and attributes["full_name"] is not None:
+            sets.append("full_name = ?")
+            vals.append(attributes["full_name"])
+        if "aliases" in attributes and attributes["aliases"] is not None:
+            sets.append("alias_names = ?")
+            vals.append(json.dumps(attributes["aliases"]))
+        if "gender" in attributes and attributes["gender"] is not None:
+            sets.append("gender = ?")
+            vals.append(attributes["gender"])
+        if "age" in attributes and attributes["age"] is not None:
+            sets.append("age = ?")
+            vals.append(attributes["age"])
+        if sets:
+            vals.extend([accused_id, accused_id])
+            cursor.execute(
+                f"UPDATE accused_persons SET {', '.join(sets)} WHERE id = ? OR LOWER(id) = LOWER(?)",
+                vals,
+            )
+            conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[WARN] Failed to update accused_persons row: {e}")
+
+    try:
+        from app.repositories.audit_repository import append_audit_event
+        append_audit_event({
+            "entity_type": "accused_identity",
+            "entity_id": accused_id,
+            "action": "ACCUSED_IDENTITY_UPDATED",
+            "actor_id": actor.id,
+            "actor_role": actor.role.value,
+            "details": {
+                "updated_fields": [k for k in attributes.keys() if k != "update_reason"],
+                "reason": attributes.get("update_reason", "Statutory identity update"),
+            },
+        })
+    except Exception as e:
+        print(f"[WARN] Audit logging for identity update failed: {e}")
+
+    return {
+        "status": "SUCCESS",
+        "message": f"Legal identity attributes for accused '{accused_id}' updated successfully.",
+        "accused_id": accused_id,
+        "updated_attributes": attributes,
+        "updated_by": actor.full_name or actor.id,
     }
 
 

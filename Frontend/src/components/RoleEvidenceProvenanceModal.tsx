@@ -13,6 +13,7 @@ interface RoleEvidenceProvenanceModalProps {
   loading?: boolean;
   onDownload?: (docId: string, filename: string) => void;
   onVerify?: (docId: string) => void;
+  onReview?: (docId: string) => void;
   onReprocess?: (docId: string) => void;
   canReview?: boolean;
 }
@@ -53,6 +54,7 @@ export function RoleEvidenceProvenanceModal({
   loading = false,
   onDownload,
   onVerify,
+  onReview,
   onReprocess,
   canReview = false,
 }: RoleEvidenceProvenanceModalProps) {
@@ -601,12 +603,22 @@ export function RoleEvidenceProvenanceModal({
                     )}
 
                     <div className="flex items-center gap-2">
-                      {canReview && data.verification_status !== "Verified" && onVerify && (
+                      {user?.role === "DLSA_OFFICER" && data.verification_status !== "Verified" && data.verification_status !== "Reviewed" && onReview && (
+                        <button
+                          onClick={() => onReview(data.document_id)}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm transition-colors"
+                          title="Mark reviewed for legal-aid intake processing"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Review Document
+                        </button>
+                      )}
+                      {user?.role === "SUPERVISING_LEGAL_OFFICER" && data.verification_status !== "Verified" && onVerify && (
                         <button
                           onClick={() => onVerify(data.document_id)}
                           className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm transition-colors"
+                          title="Supervisory verification: confirm presence and update case completeness"
                         >
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Sign & Authorize Document
+                          <ShieldCheck className="w-3.5 h-3.5" /> Supervisory Verify
                         </button>
                       )}
                       {canReview && onReprocess && (

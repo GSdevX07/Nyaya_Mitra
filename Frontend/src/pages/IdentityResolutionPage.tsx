@@ -38,7 +38,7 @@ interface DuplicateCandidate {
 }
 
 export const IdentityResolutionPage: React.FC = () => {
-  const { token, user } = useAuth();
+  const { token, user, can } = useAuth();
   const [candidates, setCandidates] = useState<DuplicateCandidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCandidate, setSelectedCandidate] = useState<DuplicateCandidate | null>(null);
@@ -210,7 +210,7 @@ export const IdentityResolutionPage: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-mono font-bold text-primary bg-primary/10 px-2 py-1 rounded">{cand.id}</span>
                     <span className="text-xs px-2.5 py-1 rounded-full font-extrabold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
-                      {(cand.match_confidence * 100).toFixed(0)}% Match
+                      Candidate Match — Human Decision Required ({(cand.match_confidence * 100).toFixed(0)}%)
                     </span>
                   </div>
 
@@ -350,40 +350,55 @@ export const IdentityResolutionPage: React.FC = () => {
                     </div>
                   )}
                 </div>
-              ) : !(user?.role === "SUPERVISING_LEGAL_OFFICER" || user?.role === "DLSA_OFFICER") ? (
+              ) : !can("IDENTITY_VIEW") ? (
                 <div className="bg-card border-2 border-border rounded-xl p-6 space-y-3 shadow-md">
                   <div className="flex items-center gap-2 text-foreground font-bold text-sm">
                     <Shield className="h-5 w-5 text-primary" />
-                    <span>Judicial Authority Required for Identity Mutations</span>
+                    <span>Authorized Legal Authority Required for Identity Queue</span>
                   </div>
                   <p className="text-xs text-muted-foreground leading-relaxed">
-                    Under BNSS Section 479 statutory governance and segregation of duties, resolving de-duplication candidates (Merge Under Canonical ID, Link as Alias Profile, or Mark as Distinct Persons) must be formally recorded by an authorized judicial officer (DLSA Officer or Supervising Legal Officer). As a <span className="font-semibold text-foreground">{user?.role?.replace(/_/g, " ")}</span>, you have supervisory inspection and audit visibility over this queue.
+                    Under BNSS Section 479 statutory governance and institutional segregation of duties, inspecting and resolving de-duplication candidates must be performed by authorized institutional legal personnel (DLSA Officer, State Legal Authority, or Supervising Legal Officer). As a <span className="font-semibold text-foreground">{user?.role?.replace(/_/g, " ")}</span>, you have technical inspection visibility only.
                   </p>
                 </div>
               ) : (
                 <div className="bg-card border-2 border-border rounded-xl p-6 space-y-5 shadow-md">
                   <div>
                     <h4 className="text-base font-bold text-foreground flex items-center gap-2">
-                      <GitMerge className="h-5 w-5 text-primary" /> Judicial De-duplication Decision
+                      <GitMerge className="h-5 w-5 text-primary" /> Institutional Identity Resolution Decision
                     </h4>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Select the statutory action to apply across state prison and court registries. This action is permanently logged into the immutable audit trail.
+                      Select the institutional action to apply across state prison and court registries. High-impact Canonical ID merges require Supervising Legal Officer authorization; DLSA officers may link aliases or escalate for supervisory review. All actions are logged into the immutable audit trail.
                     </p>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <button
-                      onClick={() => setResolutionAction('MERGE_RECORDS')}
-                      className={`p-4 rounded-xl border-2 text-sm font-bold transition-all flex flex-col items-center text-center gap-2 shadow-sm ${
-                        resolutionAction === 'MERGE_RECORDS'
-                          ? 'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-500/30'
-                          : 'bg-secondary/40 border-border text-foreground hover:border-emerald-500 hover:bg-emerald-500/5'
-                      }`}
-                    >
-                      <GitMerge className="h-6 w-6 text-emerald-500" />
-                      <span>Merge Under Canonical ID</span>
-                      <span className="text-[11px] font-normal opacity-80">Unify dockets across facilities</span>
-                    </button>
+                    {can("IDENTITY_RESOLVE") ? (
+                      <button
+                        onClick={() => setResolutionAction('MERGE_RECORDS')}
+                        className={`p-4 rounded-xl border-2 text-sm font-bold transition-all flex flex-col items-center text-center gap-2 shadow-sm ${
+                          resolutionAction === 'MERGE_RECORDS'
+                            ? 'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-500/30'
+                            : 'bg-secondary/40 border-border text-foreground hover:border-emerald-500 hover:bg-emerald-500/5'
+                        }`}
+                      >
+                        <GitMerge className="h-6 w-6 text-emerald-500" />
+                        <span>Merge Under Canonical ID</span>
+                        <span className="text-[11px] font-normal opacity-80">Supervising Officer Authority</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setResolutionAction('MARK_AS_ALIAS');
+                          setNotes(`Flagged and escalated for supervisory review by ${user?.full_name || user?.role}`);
+                        }}
+                        className="p-4 rounded-xl border-2 border-amber-500/40 bg-amber-500/5 text-sm font-bold transition-all flex flex-col items-center text-center gap-2 shadow-sm text-foreground hover:bg-amber-500/10"
+                        title="High-impact Canonical ID merge requires Supervising Legal Officer authority. Click to flag and escalate."
+                      >
+                        <AlertTriangle className="h-6 w-6 text-amber-500" />
+                        <span>Escalate to Supervisor</span>
+                        <span className="text-[11px] font-normal opacity-80">Flag for supervisory decision</span>
+                      </button>
+                    )}
 
                     <button
                       onClick={() => setResolutionAction('MARK_AS_ALIAS')}

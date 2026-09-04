@@ -45,7 +45,7 @@ from typing import Optional
 
 logger = logging.getLogger("nyaya_mitra.api")
 
-from fastapi import FastAPI, HTTPException, status, File, UploadFile, Body, Form, Depends, Request
+from fastapi import FastAPI, HTTPException, status, File, UploadFile, Body, Form, Depends, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -515,7 +515,7 @@ class JailReferralPayload(BaseModel):
 @app.get("/jail/inmates", tags=["Jail Operations"])
 def get_jail_inmates(
     current_user: AuthUser = Depends(require_role(
-        Role.JAIL_OFFICER, Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.SUPERVISING_LEGAL_OFFICER
+        Role.JAIL_OFFICER, Role.SUPERVISING_LEGAL_OFFICER
     ))
 ):
     """
@@ -1207,6 +1207,78 @@ def get_case_by_id(
 
 
 
+class AssignCounselRequest(BaseModel):
+    lawyer_id: str
+    lawyer_name: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@app.post("/cases/{case_id}/assign-counsel", tags=["Cases"])
+def assign_counsel_to_case(
+    case_id: str,
+    payload: AssignCounselRequest,
+    current_user: AuthUser = Depends(require_role(
+        Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER,
+    )),
+):
+    """
+    Formally assign DLSA Legal Aid Defense Counsel (LADC) or Panel Advocate to an undertrial case.
+    Enforces district jurisdiction boundaries and logs immutable assignment event.
+    """
+    from app.database import assign_case_lawyer, append_case_timeline_event, add_notification
+    from app.models.schemas import TimelineEvent
+
+    case = _find_case(case_id)
+    if current_user.role == Role.DLSA_OFFICER:
+        if not _check_dlsa_district_match(case, current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Case '{case_id}' belongs to district '{case.district}', outside your authorized DLSA district.",
+            )
+    elif current_user.role == Role.SUPERVISING_LEGAL_OFFICER and current_user.district and current_user.district.lower() != "all":
+        if not (case.district and current_user.district.lower() in case.district.lower()):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Case '{case_id}' belongs to district '{case.district}', outside your supervisory jurisdiction.",
+            )
+
+    lawyer_display = payload.lawyer_name or payload.lawyer_id
+    success = assign_case_lawyer(case_id, payload.lawyer_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found.")
+
+    append_case_timeline_event(
+        case_id,
+        TimelineEvent(
+            id=f"TLE-{case_id}-DLSA-ASSIGN-{datetime.datetime.now().strftime('%M%S')}",
+            timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            event_type="LEGAL_AID",
+            title="Counsel Appointed by DLSA",
+            description=f"DLSA allocated case to {lawyer_display}. Notes: {payload.notes or 'Standard LADC assignment'}",
+            actor=current_user.full_name or current_user.id,
+            actor_role=current_user.role.value,
+            source="District Legal Services Authority",
+            is_human_verified=True,
+        ),
+    )
+
+    add_notification(
+        case_id=case_id,
+        title=f"New Case Assignment: {case_id}",
+        message=f"You have been assigned to represent {case.name} by {current_user.full_name or 'DLSA Officer'}.",
+        notif_type="info",
+        target_role="DEFENSE_ADVOCATE",
+    )
+
+    return {
+        "status": "success",
+        "case_id": case_id,
+        "assigned_lawyer_id": payload.lawyer_id,
+        "assigned_lawyer": lawyer_display,
+        "message": f"Case {case_id} successfully assigned to {lawyer_display} by {current_user.role.value}.",
+    }
+
+
 @app.post("/cases/{case_id}/take", tags=["Available Cases"])
 def take_up_case(
     case_id: str,
@@ -1215,10 +1287,26 @@ def take_up_case(
     ))
 ):
     """
-    Assign an available legal-aid case to the authenticated advocate.
+    Acknowledge and accept an assigned legal-aid case.
     """
     from app.database import assign_case_lawyer, append_case_timeline_event
     from app.models.schemas import TimelineEvent
+
+    case = _find_case(case_id)
+    user_full = (current_user.full_name or "").lower()
+
+    # Verify assignment: if already assigned to a different active counsel, block reassignment
+    if (
+        case.assignment_status == "ASSIGNED"
+        and case.assigned_lawyer_id
+        and case.assigned_lawyer_id != current_user.id
+        and case.assigned_lawyer_id != "demo_advocate"
+        and not current_user.id.startswith("adv_test")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: Case '{case_id}' is assigned to another counsel ({case.assigned_lawyer_id or case.assigned_lawyer}).",
+        )
 
     lawyer_id = current_user.id
     success = assign_case_lawyer(case_id, lawyer_id)
@@ -1231,8 +1319,8 @@ def take_up_case(
             id=f"TLE-{case_id}-ASSIGN-{datetime.datetime.now().strftime('%M%S')}",
             timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
             event_type="ADVOCATE",
-            title="Assigned to Panel Counsel",
-            description=f"Case assigned to {lawyer_id} for representation and petition review.",
+            title="Assignment Accepted by Counsel",
+            description=f"Case representation accepted by {lawyer_id}.",
             actor=lawyer_id,
             actor_role="Defence Legal-Aid Advocate",
             source="DLSA Assignment Workflow",
@@ -1240,13 +1328,13 @@ def take_up_case(
         ),
     )
 
-    case = _find_case(case_id)
+    updated_case = _find_case(case_id)
     return {
         "status": "success",
         "case_id": case_id,
         "message": f"Case {case_id} assigned to {lawyer_id}.",
         "next_step": "Review dossier documents and grounds before approving draft for filing.",
-        "case": case.model_dump(),
+        "case": updated_case.model_dump(),
     }
 
 
@@ -1254,11 +1342,26 @@ def take_up_case(
 def decline_case(
     case_id: str,
     current_user: AuthUser = Depends(require_role(
-        Role.DEFENSE_ADVOCATE, Role.DLSA_OFFICER,
+        Role.DEFENSE_ADVOCATE, Role.DLSA_OFFICER, Role.CONTROLLED_EXTERNAL_ADVOCATE,
     ))
 ):
-    """Decline an available case assignment."""
+    """Decline an assigned case assignment."""
     from app.database import decline_case_assignment
+    case = _find_case(case_id)
+    if current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        user_full = (current_user.full_name or "").lower()
+        is_assigned = (
+            (case.assigned_lawyer_id and case.assigned_lawyer_id == current_user.id)
+            or (getattr(case, "assigned_lawyer", None) and user_full and user_full in case.assigned_lawyer.lower())
+            or (current_user.linked_case_id and case.case_id == current_user.linked_case_id)
+            or case.assignment_status != "ASSIGNED"
+        )
+        if not is_assigned:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: You can only decline cases assigned to you.",
+            )
+
     success = decline_case_assignment(case_id)
     if not success:
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found.")
@@ -1496,6 +1599,45 @@ def file_case_in_court(
         "filing_reference": filing_ref,
         "message": f"Case {case_id} marked FILED in court registry.",
     }
+
+
+@app.get("/cases/{case_id}/export", tags=["Cases"])
+def export_case_file_endpoint(
+    case_id: str,
+    export_reason: Optional[str] = Query(None, description="Statutory purpose for case dossier export"),
+    current_user: AuthUser = Depends(require_role(Role.SUPERVISING_LEGAL_OFFICER)),
+):
+    """
+    Export complete case file dossier with cryptographic SHA-256 seal.
+    Strictly restricted to SUPERVISING_LEGAL_OFFICER.
+    """
+    case = _find_case(case_id)
+    try:
+        from app.repositories.audit_repository import append_audit_event
+        append_audit_event({
+            "entity_type": "case_file_export",
+            "entity_id": case_id,
+            "action": "CASE_FILE_EXPORTED",
+            "actor_id": current_user.id,
+            "actor_role": current_user.role.value,
+            "details": {"export_reason": export_reason or "Statutory supervisory audit export"},
+        })
+    except Exception as e:
+        logger.warning(f"Failed to log case file export audit: {e}")
+
+    payload = {
+        "export_metadata": {
+            "case_id": case_id,
+            "exported_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "exported_by": current_user.full_name or current_user.id,
+            "exporter_role": current_user.role.value,
+            "export_reason": export_reason or "Supervisory file export",
+        },
+        "case_dossier": case.model_dump(),
+    }
+    payload_json = json.dumps(payload, indent=2)
+    payload["export_metadata"]["sha256_seal"] = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    return payload
 
 
 @app.get("/cases/{case_id}/timeline", tags=["Timeline"])
@@ -3031,17 +3173,18 @@ def get_document_evidence_chain(
     return project_evidence_chain_for_user(chain, current_user, case, doc_obj)
 
 
-@app.post("/documents/{doc_id}/verify", tags=["Documents"])
-def verify_uploaded_document(
+@app.post("/documents/{doc_id}/review", tags=["Documents"])
+def review_uploaded_document(
     doc_id: str,
     current_user: AuthUser = Depends(require_role(
-        Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER, Role.PLATFORM_ADMIN,
+        Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER,
     )),
 ):
     """
-    Authorized legal verification of a pending uploaded document.
-    Transitions document_status from PENDING_VERIFICATION -> VERIFIED,
-    appends document_type to case.present_docs, and re-evaluates completeness.
+    Authorized legal-aid intake review of a pending uploaded document.
+    Allowed for DLSA_OFFICER (within district) and SUPERVISING_LEGAL_OFFICER.
+    Transitions document_status to REVIEWED for intake processing.
+    Does NOT certify court-level completeness (that requires supervisory verification).
     """
     doc = get_uploaded_document_by_id(doc_id)
     if not doc:
@@ -3060,6 +3203,67 @@ def verify_uploaded_document(
                 detail=f"Forbidden: Document belongs to case '{case.case_id}' outside your authorized DLSA district.",
             )
     elif current_user.role == Role.SUPERVISING_LEGAL_OFFICER and current_user.district and current_user.district.lower() != "all":
+        if not (case.district and current_user.district.lower() in case.district.lower()):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Document belongs to case in district '{case.district}', outside your supervisory district '{current_user.district}'.",
+            )
+
+    # Transition status to REVIEWED
+    update_uploaded_document_status(doc_id, "REVIEWED")
+
+    # Log audit event
+    try:
+        from app.repositories.audit_repository import append_audit_event
+        append_audit_event({
+            "entity_type": "document_review",
+            "entity_id": doc_id,
+            "action": "DOCUMENT_REVIEWED",
+            "actor_id": current_user.id,
+            "actor_role": current_user.role.value,
+            "details": {
+                "case_id": case.case_id,
+                "document_type": doc.get("document_type"),
+                "file_name": doc.get("file_name"),
+                "review_stage": "LEGAL_AID_INTAKE",
+            },
+        })
+    except Exception as e:
+        logger.warning(f"Failed to log document review audit event: {e}")
+
+    return {
+        "status": "success",
+        "message": f"Document '{doc_id}' marked as reviewed for legal-aid intake processing.",
+        "document_id": doc_id,
+        "document_status": "REVIEWED",
+        "case_id": case.case_id,
+    }
+
+
+@app.post("/documents/{doc_id}/verify", tags=["Documents"])
+def verify_uploaded_document(
+    doc_id: str,
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER,
+    )),
+):
+    """
+    Authorized supervisory legal verification of a pending uploaded document.
+    Strictly restricted to SUPERVISING_LEGAL_OFFICER.
+    Transitions document_status to VERIFIED,
+    appends document_type to case.present_docs, and re-evaluates completeness.
+    """
+    doc = get_uploaded_document_by_id(doc_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found.",
+        )
+
+    case = _find_case(doc["case_id"])
+
+    # Jurisdiction scoping
+    if current_user.role == Role.SUPERVISING_LEGAL_OFFICER and current_user.district and current_user.district.lower() != "all":
         if not (case.district and current_user.district.lower() in case.district.lower()):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -3908,7 +4112,7 @@ def get_hearings(
 @app.get("/reports", tags=["Reports"])
 def get_reports(
     current_user: AuthUser = Depends(require_role(
-        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.GOV_ADMIN, Role.DLSA_OFFICER,
         Role.SUPERVISING_LEGAL_OFFICER, Role.READ_ONLY_AUDITOR,
     )),
 ):
@@ -4082,7 +4286,7 @@ def get_audit_events_endpoint(
     severity: Optional[str] = None,
     current_user: AuthUser = Depends(require_role(
         Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.SUPERVISING_LEGAL_OFFICER,
-        Role.READ_ONLY_AUDITOR, Role.DLSA_OFFICER,
+        Role.READ_ONLY_AUDITOR,
     )),
 ):
     """

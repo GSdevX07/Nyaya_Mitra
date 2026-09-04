@@ -127,15 +127,17 @@ export function PoliceWorkspace() {
       );
 
       if (linkedActionId) {
+        const resAny = result as any;
+        const docId = resAny.document_id || resAny.id || result.file_hash || `doc_${Date.now()}`;
         await completePoliceAction(
           linkedActionId,
-          result.file_hash || `doc_${Date.now()}`,
-          `Submitted by station IO. Ref: ${selectedDocType}`
+          docId,
+          `Submitted by station IO. Ref: ${selectedDocType} (Hash: ${result.file_hash?.substring(0, 12)}...)`
         );
       }
 
       setUploadMsg({
-        text: "Official police document deposited successfully. Awaiting judicial verification on court file.",
+        text: "Official police document deposited successfully. Recorded in station investigation docket.",
         type: "success",
       });
       await loadData();

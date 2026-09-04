@@ -15,7 +15,7 @@ interface ActionItem {
 }
 
 export function ActionsPage() {
-  const { hasRole, user } = useAuth();
+  const { user, can } = useAuth();
   const [actions, setActions] = useState<ActionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
@@ -71,7 +71,7 @@ export function ActionsPage() {
     "PETITION",
   ];
 
-  const canExecute = hasRole("DLSA_OFFICER", "SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN", "DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE");
+  const canExecute = can("ACTION_QUEUE") || can("ACTION_EXECUTE");
 
   // Allow dispatch for permitted action types per role
   const canDispatchAction = (act: ActionItem): boolean => {
@@ -94,7 +94,7 @@ export function ActionsPage() {
         act.description.toUpperCase().includes(allowed)
       );
     }
-    return true; // Platform Admins
+    return false; // Platform Admins and other non-legal roles cannot dispatch legal actions
   };
 
   const loadActions = async () => {
@@ -268,10 +268,10 @@ export function ActionsPage() {
                       <Play className="w-4 h-4" />
                     )}
                     {executedIds.has(act.id)
-                      ? "Dispatched"
+                      ? (isDlsa ? "Request Queued" : isAdvocate ? "Motion Submitted" : "Action Executed")
                       : triggeringId === act.id
-                      ? "Dispatching..."
-                      : "Dispatch Action"}
+                      ? "Processing..."
+                      : (isDlsa ? "Queue Notice / Request" : isAdvocate ? "Submit Counsel Action" : "Execute Institutional Action")}
                   </button>
                 ) : isAdvocate ? (
                   <span

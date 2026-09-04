@@ -1127,6 +1127,17 @@ export async function verifyUploadedDocument(docId: string) {
   return await res.json();
 }
 
+export async function reviewUploadedDocument(docId: string) {
+  const res = await authFetch(`${API_BASE_URL}/documents/${encodeURIComponent(docId)}/review`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Document review failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
 export async function fetchLegalRules() {
   const res = await authFetch(`${API_BASE_URL}/rules`);
   if (!res.ok) {
@@ -1168,3 +1179,63 @@ export async function transitionRuleLifecycle(ruleId: string, targetState: strin
   }
   return await res.json();
 }
+
+export async function updateAccusedIdentity(
+  accusedId: string,
+  payload: {
+    update_reason: string;
+    full_name?: string;
+    aliases?: string[];
+    father_name?: string;
+    gender?: string;
+    age?: number;
+    government_identifiers?: Record<string, any>;
+  }
+) {
+  const res = await authFetch(`${API_BASE_URL}/accused/${encodeURIComponent(accusedId)}/identity`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to update identity: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function exportCaseFile(caseId: string, reason?: string) {
+  const url = `${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/export${
+    reason ? `?export_reason=${encodeURIComponent(reason)}` : ""
+  }`;
+  const res = await authFetch(url);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to export case file: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function assignCaseCounsel(
+  caseId: string,
+  lawyerId: string,
+  lawyerName?: string,
+  notes?: string
+) {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/assign-counsel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      lawyer_id: lawyerId,
+      lawyer_name: lawyerName,
+      notes: notes,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Assign counsel failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+

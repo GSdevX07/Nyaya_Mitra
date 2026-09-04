@@ -51,7 +51,7 @@ function App() {
               <Route
                 path="/my-case"
                 element={
-                  <ProtectedRoute allowedRoles={["ACCUSED_USER", "PLATFORM_ADMIN"]}>
+                  <ProtectedRoute allowedRoles={["ACCUSED_USER"]}>
                     <CitizenPortal mode="accused" />
                   </ProtectedRoute>
                 }
@@ -59,7 +59,7 @@ function App() {
               <Route
                 path="/family/status"
                 element={
-                  <ProtectedRoute allowedRoles={["FAMILY_GUARDIAN", "PLATFORM_ADMIN"]}>
+                  <ProtectedRoute allowedRoles={["FAMILY_GUARDIAN"]}>
                     <CitizenPortal mode="family" />
                   </ProtectedRoute>
                 }
@@ -92,7 +92,7 @@ function App() {
               <Route
                 path="/gov"
                 element={
-                  <ProtectedRoute allowedRoles={["GOV_ADMIN", "PLATFORM_ADMIN"]}>
+                  <ProtectedRoute allowedRoles={["GOV_ADMIN"]}>
                     <GovAdminOverview />
                   </ProtectedRoute>
                 }
@@ -103,8 +103,6 @@ function App() {
                   <ProtectedRoute
                     allowedRoles={[
                       "JAIL_OFFICER",
-                      "PLATFORM_ADMIN",
-                      "GOV_ADMIN",
                     ]}
                   >
                     <JailWorkspace />
@@ -118,7 +116,6 @@ function App() {
                     allowedRoles={[
                       "DEFENSE_ADVOCATE",
                       "CONTROLLED_EXTERNAL_ADVOCATE",
-                      "PLATFORM_ADMIN",
                     ]}
                   >
                     <AdvocateWorkspace />
@@ -131,8 +128,6 @@ function App() {
                   <ProtectedRoute
                     allowedRoles={[
                       "POLICE_OFFICER",
-                      "PLATFORM_ADMIN",
-                      "GOV_ADMIN",
                     ]}
                   >
                     <PoliceWorkspace />
@@ -237,7 +232,6 @@ function App() {
                 element={
                   <ProtectedRoute
                     allowedRoles={[
-                      "PLATFORM_ADMIN",
                       "GOV_ADMIN",
                       "SUPERVISING_LEGAL_OFFICER",
                       "DLSA_OFFICER",
@@ -340,7 +334,6 @@ function App() {
                     allowedRoles={[
                       "DLSA_OFFICER",
                       "SUPERVISING_LEGAL_OFFICER",
-                      "PLATFORM_ADMIN",
                       "DEFENSE_ADVOCATE",
                     ]}
                   >
@@ -374,7 +367,6 @@ function App() {
                     allowedRoles={[
                       "DLSA_OFFICER",
                       "SUPERVISING_LEGAL_OFFICER",
-                      "PLATFORM_ADMIN",
                       "GOV_ADMIN",
                       "READ_ONLY_AUDITOR",
                     ]}

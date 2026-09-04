@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { fetchAccusedProfile, fetchAccusedTimeline } from '../lib/api';
+import { fetchAccusedProfile, fetchAccusedTimeline, updateAccusedIdentity } from '../lib/api';
 import { 
   ShieldAlert, 
   Clock, 
@@ -15,12 +15,16 @@ import {
   Calendar,
   Layers,
   ArrowLeft,
-  Scale
+  Scale,
+  Edit3,
+  X,
+  Loader2
 } from 'lucide-react';
 
 interface AccusedProfile {
   id: string;
   full_name: string;
+  father_name?: string;
   alias_names: string[];
   gender: string;
   age: number;
@@ -94,12 +98,24 @@ interface TimelineItem {
 
 export const AccusedProfilePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const { token, user } = useAuth();
+  const { token, user, can } = useAuth();
   const [profile, setProfile] = useState<AccusedProfile | null>(null);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'cases' | 'timeline' | 'medical' | 'family' | 'identity'>('cases');
   const [timelineFilter, setTimelineFilter] = useState<'ALL' | 'FACTUAL_EVENT' | 'SYSTEM_INTERPRETATION'>('ALL');
+
+  // Identity Edit Modal State (Supervisor Only)
+  const [isEditIdentityOpen, setIsEditIdentityOpen] = useState(false);
+  const [editFullName, setEditFullName] = useState("");
+  const [editAliases, setEditAliases] = useState("");
+  const [editFatherName, setEditFatherName] = useState("");
+  const [editGender, setEditGender] = useState("");
+  const [editAge, setEditAge] = useState<number>(0);
+  const [updateReason, setUpdateReason] = useState("");
+  const [savingIdentity, setSavingIdentity] = useState(false);
+  const [identityUpdateSuccess, setIdentityUpdateSuccess] = useState<string | null>(null);
+  const [identityUpdateError, setIdentityUpdateError] = useState<string | null>(null);
 
   const [fetchError, setFetchError] = useState<{ status?: number; message?: string } | null>(null);
 
@@ -147,6 +163,50 @@ export const AccusedProfilePage: React.FC = () => {
       fetchProfileData();
     }
   }, [effectiveAccusedId, token]);
+
+  const handleOpenEditIdentity = () => {
+    if (!profile) return;
+    setEditFullName(profile.full_name || "");
+    setEditAliases((profile.alias_names || []).join(", "));
+    setEditFatherName(profile.father_name || profile.family_contacts?.find(fc => fc.relation?.toLowerCase().includes("father"))?.name || "");
+    setEditGender(profile.gender || "Male");
+    setEditAge(profile.age || 0);
+    setUpdateReason("");
+    setIdentityUpdateSuccess(null);
+    setIdentityUpdateError(null);
+    setIsEditIdentityOpen(true);
+  };
+
+  const handleSaveIdentity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!updateReason.trim() || updateReason.trim().length < 5) {
+      setIdentityUpdateError("A substantive statutory update reason (minimum 5 characters) is required.");
+      return;
+    }
+    setSavingIdentity(true);
+    setIdentityUpdateError(null);
+    try {
+      await updateAccusedIdentity(effectiveAccusedId, {
+        update_reason: updateReason.trim(),
+        full_name: editFullName.trim() || undefined,
+        aliases: editAliases.split(",").map(s => s.trim()).filter(Boolean),
+        father_name: editFatherName.trim() || undefined,
+        gender: editGender || undefined,
+        age: editAge ? Number(editAge) : undefined,
+      });
+      setIdentityUpdateSuccess("Identity attributes updated successfully with supervisory audit seal.");
+      const profData = await fetchAccusedProfile(effectiveAccusedId);
+      setProfile(profData);
+      setTimeout(() => {
+        setIsEditIdentityOpen(false);
+        setIdentityUpdateSuccess(null);
+      }, 1200);
+    } catch (err: any) {
+      setIdentityUpdateError(err?.message || "Failed to update identity record.");
+    } finally {
+      setSavingIdentity(false);
+    }
+  };
 
   const backRoute =
     user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE"
@@ -499,7 +559,7 @@ export const AccusedProfilePage: React.FC = () => {
                 {profile.medical_record.details_restricted}
               </p>
               <span className="inline-block text-xs text-muted-foreground pt-2">
-                Logged in as <strong>{user?.role}</strong>. Requires medical clearance role (DLSA, Supervising Officer, Jail Medical Staff).
+                Logged in as <strong>{user?.role}</strong>. Requires statutory medical clearance authority (DLSA Officer or Supervising Legal Officer only under Section 479 BNSS / DPDP Act).
               </span>
             </div>
           ) : (
@@ -590,12 +650,24 @@ export const AccusedProfilePage: React.FC = () => {
       {/* Tab 5: Restricted Identifiers — Zoomed In */}
       {activeTab === 'identity' && (
         <div className="bg-card border-2 border-border rounded-2xl p-8 space-y-5 shadow-sm">
-          <h3 className="text-base font-bold text-foreground flex items-center gap-2.5">
-            <Lock className="h-5 w-5 text-primary" /> Restricted Government Registry Identifiers
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Quarantined identity references accessible strictly to authorized state authorities.
-          </p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-4">
+            <div>
+              <h3 className="text-base font-bold text-foreground flex items-center gap-2.5">
+                <Lock className="h-5 w-5 text-primary" /> Restricted Government Registry Identifiers
+              </h3>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Quarantined identity references accessible strictly to authorized state authorities.
+              </p>
+            </div>
+            {can("IDENTITY_UPDATE") && (
+              <button
+                onClick={handleOpenEditIdentity}
+                className="px-3.5 py-2 bg-primary text-primary-foreground text-xs font-mono font-bold uppercase rounded-sm flex items-center gap-1.5 hover:opacity-90 transition-opacity self-start sm:self-auto"
+              >
+                <Edit3 className="w-3.5 h-3.5" /> Edit Legal Identity
+              </button>
+            )}
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-3">
             {profile.government_identifiers && Object.entries(profile.government_identifiers).map(([k, v]) => (
@@ -608,6 +680,149 @@ export const AccusedProfilePage: React.FC = () => {
                 </span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Identity Edit Modal — Authorized Supervising Legal Officer Only */}
+      {isEditIdentityOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-card border-2 border-border rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4 animate-in fade-in zoom-in duration-150 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2">
+                <Scale className="w-5 h-5 text-primary" />
+                <h3 className="font-serif font-bold text-lg text-foreground">
+                  Update Consolidated Legal Identity
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsEditIdentityOpen(false)}
+                className="p-1 text-muted-foreground hover:text-foreground rounded"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="text-xs font-mono bg-blue-500/10 text-blue-700 dark:text-blue-300 p-3 rounded border border-blue-500/20">
+              <strong>Supervisory Identity Revision:</strong> Changes will be committed to the canonical accused registry and logged in the immutable audit ledger with statutory actor credentials.
+            </div>
+
+            {identityUpdateSuccess && (
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-mono rounded flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{identityUpdateSuccess}</span>
+              </div>
+            )}
+
+            {identityUpdateError && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-mono rounded flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{identityUpdateError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveIdentity} className="space-y-3.5 text-xs font-mono">
+              <div>
+                <label className="block text-muted-foreground font-semibold mb-1">
+                  Full Legal Name
+                </label>
+                <input
+                  type="text"
+                  value={editFullName}
+                  onChange={(e) => setEditFullName(e.target.value)}
+                  className="w-full px-3 py-2 bg-secondary border border-border rounded text-foreground font-sans text-sm focus:outline-hidden focus:border-primary"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-muted-foreground font-semibold mb-1">
+                  Recognized Aliases (comma separated)
+                </label>
+                <input
+                  type="text"
+                  value={editAliases}
+                  onChange={(e) => setEditAliases(e.target.value)}
+                  placeholder="e.g. Suresh @ Langda, Suri"
+                  className="w-full px-3 py-2 bg-secondary border border-border rounded text-foreground font-sans text-sm focus:outline-hidden focus:border-primary"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-muted-foreground font-semibold mb-1">
+                    Father's / Guardian's Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editFatherName}
+                    onChange={(e) => setEditFatherName(e.target.value)}
+                    className="w-full px-3 py-2 bg-secondary border border-border rounded text-foreground font-sans text-sm focus:outline-hidden focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-muted-foreground font-semibold mb-1">
+                    Gender
+                  </label>
+                  <select
+                    value={editGender}
+                    onChange={(e) => setEditGender(e.target.value)}
+                    className="w-full px-3 py-2 bg-secondary border border-border rounded text-foreground font-sans text-sm focus:outline-hidden focus:border-primary"
+                  >
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Transgender">Transgender</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-muted-foreground font-semibold mb-1">
+                  Age (Years)
+                </label>
+                <input
+                  type="number"
+                  min="18"
+                  max="120"
+                  value={editAge || ""}
+                  onChange={(e) => setEditAge(parseInt(e.target.value) || 0)}
+                  className="w-full px-3 py-2 bg-secondary border border-border rounded text-foreground font-sans text-sm focus:outline-hidden focus:border-primary"
+                />
+              </div>
+
+              <div>
+                <label className="block text-rose-500 font-semibold mb-1">
+                  * Statutory Modification Reason (Required, min 5 chars)
+                </label>
+                <textarea
+                  value={updateReason}
+                  onChange={(e) => setUpdateReason(e.target.value)}
+                  rows={3}
+                  placeholder="e.g. Identity correction pursuant to verified Aadhaar/Voter ID submission during DLSA camp..."
+                  className="w-full px-3 py-2 bg-secondary border border-border rounded text-foreground font-sans text-xs focus:outline-hidden focus:border-primary"
+                  required
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setIsEditIdentityOpen(false)}
+                  className="px-4 py-2 bg-secondary text-foreground rounded text-xs font-mono font-semibold hover:bg-secondary/80"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingIdentity}
+                  className="px-4 py-2 bg-primary text-primary-foreground rounded text-xs font-mono font-bold flex items-center gap-1.5 hover:opacity-90 disabled:opacity-50"
+                >
+                  {savingIdentity ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  {savingIdentity ? "Saving Revisions..." : "Commit Identity Revisions"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

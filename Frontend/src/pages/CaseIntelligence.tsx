@@ -19,6 +19,7 @@ import {
   Bookmark,
   ShieldCheck,
   Building2,
+  UserCheck,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
@@ -29,17 +30,20 @@ import {
   uploadDocumentFile,
   fetchCaseDocuments,
   verifyUploadedDocument,
+  reviewUploadedDocument,
   verifyEvidence,
   type TimelineEvent,
   type LegalNeedItem,
   referJailCaseToDlsa,
   submitCaseComment,
+  assignCaseCounsel,
+  exportCaseFile,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { jsPDF } from "jspdf";
 
 export function CaseIntelligence() {
-  const { user, hasRole } = useAuth();
+  const { user, hasRole, can } = useAuth();
   const isPolice = user?.role === "POLICE_OFFICER";
   const isDlsa = user?.role === "DLSA_OFFICER";
   const isJail = user?.role === "JAIL_OFFICER";
@@ -54,6 +58,7 @@ export function CaseIntelligence() {
   const [filing, setFiling] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
   const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
+  const [reviewingDocId, setReviewingDocId] = useState<string | null>(null);
   const [editableDraft, setEditableDraft] = useState<string>("");
   const [dlsaComment, setDlsaComment] = useState<string>("");
   const [submittingComment, setSubmittingComment] = useState(false);
@@ -66,6 +71,13 @@ export function CaseIntelligence() {
   const [referringDlsa, setReferringDlsa] = useState(false);
   const [referralDone, setReferralDone] = useState(false);
   const [actionBanner, setActionBanner] = useState<{ text: string; type: "success" | "error" } | null>(null);
+
+  const [exportingDossier, setExportingDossier] = useState(false);
+  const [assigningCounsel, setAssigningCounsel] = useState(false);
+  const [selectedLawyerId, setSelectedLawyerId] = useState("LWYR-001");
+  const [selectedLawyerName, setSelectedLawyerName] = useState("Adv. Rajesh Sharma");
+  const [assignmentNotes, setAssignmentNotes] = useState("");
+  const [assignmentSuccess, setAssignmentSuccess] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [pendingDocType, setPendingDocType] = useState<string | null>(null);
@@ -117,6 +129,25 @@ export function CaseIntelligence() {
       });
     } finally {
       setVerifyingDocId(null);
+    }
+  };
+
+  const handleReviewCaseDoc = async (docId: string) => {
+    setReviewingDocId(docId);
+    try {
+      await reviewUploadedDocument(docId);
+      await load();
+      setActionBanner({
+        type: "success",
+        text: "Document marked reviewed for legal-aid intake processing.",
+      });
+    } catch (err: any) {
+      setActionBanner({
+        type: "error",
+        text: "Document review failed: " + (err.message || err),
+      });
+    } finally {
+      setReviewingDocId(null);
     }
   };
 
@@ -568,6 +599,66 @@ export function CaseIntelligence() {
     }
   };
 
+  const PANEL_ADVOCATES = [
+    { id: "LWYR-001", name: "Adv. Rajesh Sharma", bar: "D/1042/2014", specialisation: "Criminal Defense & Remand" },
+    { id: "LWYR-002", name: "Adv. Priya Verma", bar: "D/2180/2018", specialisation: "BNSS Statutory Bail & Trial" },
+    { id: "LWYR-003", name: "Adv. Amit Sen", bar: "D/0891/2016", specialisation: "NALSA Undertrial Representation" },
+  ];
+
+  const handleExportDossier = async () => {
+    if (!caseData?.case_id) return;
+    try {
+      setExportingDossier(true);
+      const dossier = await exportCaseFile(caseData.case_id, "Official Supervisory Audit & Evidentiary Archive");
+      const blob = new Blob([JSON.stringify(dossier, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `NyayaMitra_Dossier_${caseData.case_id}_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setActionBanner({
+        type: "success",
+        text: `Sealed case dossier (${caseData.case_id}) exported with cryptographically verified SHA-256 seal.`,
+      });
+    } catch (err: any) {
+      setActionBanner({
+        type: "error",
+        text: `Case Dossier Export failed: ${err.message || err}`,
+      });
+    } finally {
+      setExportingDossier(false);
+    }
+  };
+
+  const handleAssignCounsel = async () => {
+    if (!caseData?.case_id || !selectedLawyerId) return;
+    try {
+      setAssigningCounsel(true);
+      setAssignmentSuccess(null);
+      await assignCaseCounsel(
+        caseData.case_id,
+        selectedLawyerId,
+        selectedLawyerName,
+        assignmentNotes || "Statutory Legal Aid Allocation under NALSA / DLSA mandate"
+      );
+      setCaseData((prev: any) => ({
+        ...prev,
+        assignment_status: "ASSIGNED",
+        assigned_lawyer: selectedLawyerName,
+        assigned_lawyer_id: selectedLawyerId,
+      }));
+      setAssignmentSuccess(`Successfully allocated ${selectedLawyerName} (${selectedLawyerId}) to case ${caseData.case_id}`);
+      await load();
+    } catch (err: any) {
+      alert(`Counsel Allocation failed: ${err.message || err}`);
+    } finally {
+      setAssigningCounsel(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
       <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".pdf,image/*" />
@@ -600,7 +691,7 @@ export function CaseIntelligence() {
 
         {/* Workflow Action Gate */}
         <div className="flex items-center gap-2">
-          {!approvalDone && hasRole("SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN") && (
+          {!approvalDone && can("CASE_APPROVE") && (
             <button
               onClick={handleApprove}
               disabled={approving || !eligibility.eligible || !completeness.is_complete}
@@ -615,7 +706,7 @@ export function CaseIntelligence() {
             </button>
           )}
 
-          {isReadyForFiling && hasRole("DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN") && (
+          {isReadyForFiling && can("CASE_FILE") && (
             <button
               onClick={handleFileInCourt}
               disabled={filing}
@@ -631,6 +722,18 @@ export function CaseIntelligence() {
             <span className="px-3 py-1.5 rounded-sm bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold font-mono flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4" /> FILED IN COURT
             </span>
+          )}
+
+          {can("CASE_EXPORT") && (
+            <button
+              onClick={handleExportDossier}
+              disabled={exportingDossier}
+              title="Export complete SHA-256 sealed institutional case dossier package"
+              className="px-3 py-2 border border-border bg-card hover:bg-secondary rounded-sm text-xs font-mono font-semibold text-foreground flex items-center gap-1.5 transition-colors shadow-sm"
+            >
+              {exportingDossier ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5 text-primary" />}
+              Export Dossier (SHA-256)
+            </button>
           )}
 
           {isPolice ? (
@@ -731,6 +834,7 @@ export function CaseIntelligence() {
               { key: "timeline", label: "Case Timeline & Provenance" },
               { key: "evidence", label: "Document Vault & Evidentiary Verification" },
               { key: "statutes", label: "Grounded Statutory Law" },
+              { key: "legalaid", label: "Legal-Aid & Counsel Allocation" },
             ]
         ).map((tab) => (
           <button
@@ -811,13 +915,19 @@ export function CaseIntelligence() {
                   </span>
                 </div>
                 {c.urgency_flags?.health_details && (
-                  <p className="p-2.5 rounded bg-muted/40 text-[11px] text-foreground/80 border border-border/60">
-                    <strong>Medical Note:</strong> {c.urgency_flags.health_details}
-                    <br />
-                    <span className="text-[10px] text-muted-foreground italic">
-                      (Contextual information for advocate review; does not constitute autonomous medical bail)
-                    </span>
-                  </p>
+                  can("MEDICAL_DATA_VIEW") ? (
+                    <p className="p-2.5 rounded bg-muted/40 text-[11px] text-foreground/80 border border-border/60">
+                      <strong>Medical Note:</strong> {c.urgency_flags.health_details}
+                      <br />
+                      <span className="text-[10px] text-muted-foreground italic">
+                        (Contextual information for authorized legal review; does not constitute autonomous medical bail)
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="p-2.5 rounded bg-muted/20 text-[11px] text-muted-foreground border border-border/40 italic">
+                      [Protected Medical Record — Access restricted to DLSA &amp; Supervising Legal Officer under DPDP Act]
+                    </p>
+                  )
                 )}
               </div>
             </div>
@@ -1134,8 +1244,10 @@ export function CaseIntelligence() {
                     (d: any) => d.document_type === normDoc || d.id?.includes(normDoc)
                   );
                   const isVerified = (detail && detail.document_status === "VERIFIED") || c.present_docs?.includes(docType);
+                  const isReviewed = detail && detail.document_status === "REVIEWED";
                   const isPending = detail && detail.document_status === "PENDING_VERIFICATION";
-                  const canVerify = user?.role === "SUPERVISING_LEGAL_OFFICER" || user?.role === "DLSA_OFFICER" || user?.role === "PLATFORM_ADMIN";
+                  const isSupervisor = user?.role === "SUPERVISING_LEGAL_OFFICER";
+                  const isDlsa = user?.role === "DLSA_OFFICER";
 
                   return (
                     <div
@@ -1143,6 +1255,8 @@ export function CaseIntelligence() {
                       className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all ${
                         isVerified
                           ? "bg-emerald-500/5 border-emerald-500/30"
+                          : isReviewed
+                          ? "bg-blue-500/10 border-blue-500/40"
                           : isPending
                           ? "bg-amber-500/10 border-amber-500/40"
                           : "bg-destructive/5 border-destructive/20"
@@ -1152,6 +1266,8 @@ export function CaseIntelligence() {
                         <div className="flex items-center gap-2">
                           {isVerified ? (
                             <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                          ) : isReviewed ? (
+                            <CheckCircle2 className="w-4 h-4 text-blue-500 shrink-0" />
                           ) : isPending ? (
                             <Clock className="w-4 h-4 text-amber-500 shrink-0" />
                           ) : (
@@ -1165,12 +1281,19 @@ export function CaseIntelligence() {
                               PENDING VERIFICATION
                             </span>
                           )}
+                          {isReviewed && !isVerified && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-600 border border-blue-500/30">
+                              REVIEWED (INTAKE)
+                            </span>
+                          )}
                         </div>
 
                         {/* Uploader Attribution Provenance */}
                         <div className="text-[11px] text-muted-foreground pl-6">
                           {isVerified ? (
                             <span>Origin: <strong className="text-foreground">{detail?.uploaded_by || "Court Registry (Baseline)"}</strong></span>
+                          ) : isReviewed ? (
+                            <span>Status: <strong className="text-foreground">Reviewed for DLSA Intake</strong> &bull; Uploaded by: <strong className="text-foreground">{detail?.uploaded_by || "Institutional Officer"}</strong></span>
                           ) : isPending ? (
                             <span>Uploaded by: <strong className="text-foreground">{detail?.uploaded_by || "Institutional Officer"}</strong></span>
                           ) : (
@@ -1180,15 +1303,29 @@ export function CaseIntelligence() {
                       </div>
 
                       <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                        {isPending && canVerify && detail?.actual_doc_id && (
+                        {/* DLSA Officer: Review Document */}
+                        {isPending && isDlsa && detail?.actual_doc_id && (
+                          <button
+                            onClick={() => handleReviewCaseDoc(detail.actual_doc_id)}
+                            disabled={reviewingDocId === detail.actual_doc_id}
+                            className="px-2.5 py-1 bg-blue-600 text-white rounded text-[11px] font-bold uppercase hover:bg-blue-700 flex items-center gap-1 shadow-sm transition-colors"
+                            title="Mark reviewed for legal-aid intake processing"
+                          >
+                            {reviewingDocId === detail.actual_doc_id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                            Review Document
+                          </button>
+                        )}
+
+                        {/* Supervising Legal Officer: Supervisory Verify */}
+                        {(isPending || isReviewed) && !isVerified && isSupervisor && detail?.actual_doc_id && (
                           <button
                             onClick={() => handleVerifyCaseDoc(detail.actual_doc_id)}
                             disabled={verifyingDocId === detail.actual_doc_id}
                             className="px-2.5 py-1 bg-emerald-600 text-white rounded text-[11px] font-bold uppercase hover:bg-emerald-700 flex items-center gap-1 shadow-sm transition-colors"
-                            title="Verify and authorize document"
+                            title="Supervisory verification: confirm presence and update case completeness"
                           >
                             {verifyingDocId === detail.actual_doc_id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCheck className="w-3 h-3" />}
-                            Verify
+                            Supervisory Verify
                           </button>
                         )}
 
@@ -1573,8 +1710,8 @@ export function CaseIntelligence() {
         </div>
       )}
 
-      {/* TAB 6: INSTITUTIONAL LEGAL-AID & REPRESENTATION STATUS (JAIL ONLY) */}
-      {isJail && activeTab === "legalaid" && (
+      {/* TAB 6: INSTITUTIONAL LEGAL-AID & REPRESENTATION STATUS */}
+      {(isJail || !isPolice) && activeTab === "legalaid" && (
         <div className="p-6 border border-border bg-card rounded-sm space-y-6 max-w-4xl">
           <div className="flex items-center justify-between border-b border-border pb-3">
             <div className="flex items-center gap-2">
@@ -1613,35 +1750,142 @@ export function CaseIntelligence() {
             </div>
           </div>
 
-          <div className="p-4 rounded border border-border bg-secondary/20 space-y-3">
-            <h4 className="font-mono text-xs font-bold uppercase text-foreground">
-              Prison Superintendent Referral Actions
-            </h4>
-            <p className="text-xs text-muted-foreground">
-              Under NALSA Undertrial Review Committee (UTRC) guidelines, the Jail Superintendent shall identify undertrials lacking private representation and refer custody records to DLSA for timely assignment of pro-bono defense counsel.
-            </p>
-            {c.assignment_status !== "ASSIGNED" ? (
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleReferToDlsa}
-                  disabled={referringDlsa || referralDone}
-                  className="px-4 py-2 bg-primary text-primary-foreground rounded-sm text-xs font-mono font-bold flex items-center gap-1.5 hover:opacity-90 transition-opacity"
-                >
-                  {referringDlsa ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                  {referralDone ? "Referred to DLSA" : "Dispatch Referral Notice to DLSA"}
-                </button>
-                {referralDone && (
-                  <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
-                    <CheckCircle2 className="w-4 h-4" /> Referral logged & DLSA notified.
+          {/* Prison Superintendent Referral Actions */}
+          {isJail && (
+            <div className="p-4 rounded border border-border bg-secondary/20 space-y-3">
+              <h4 className="font-mono text-xs font-bold uppercase text-foreground">
+                Prison Superintendent Referral Actions
+              </h4>
+              <p className="text-xs text-muted-foreground">
+                Under NALSA Undertrial Review Committee (UTRC) guidelines, the Jail Superintendent shall identify undertrials lacking private representation and refer custody records to DLSA for timely assignment of pro-bono defense counsel.
+              </p>
+              {c.assignment_status !== "ASSIGNED" ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleReferToDlsa}
+                    disabled={referringDlsa || referralDone}
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded-sm text-xs font-mono font-bold flex items-center gap-1.5 hover:opacity-90 transition-opacity"
+                  >
+                    {referringDlsa ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    {referralDone ? "Referred to DLSA" : "Dispatch Referral Notice to DLSA"}
+                  </button>
+                  {referralDone && (
+                    <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                      <CheckCircle2 className="w-4 h-4" /> Referral logged & DLSA notified.
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                  <CheckCircle2 className="w-4 h-4" /> Legal representation is active. Adv. {c.assigned_lawyer} is handling bail proceedings.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* DLSA Counsel Assignment Desk */}
+          {can("CASE_ASSIGN_COUNSEL") && (
+            <div className="p-5 rounded border border-border bg-card space-y-4 shadow-sm">
+              <div className="border-b border-border pb-3 flex items-center justify-between">
+                <div>
+                  <h4 className="font-mono text-xs font-bold uppercase text-foreground flex items-center gap-2">
+                    <UserCheck className="w-4 h-4 text-primary" /> DLSA Legal Aid Counsel Allocation Desk
+                  </h4>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Formal statutory allocation of certified panel defense advocate under Legal Services Authorities Act, 1987.
+                  </p>
+                </div>
+                {c.assignment_status === "ASSIGNED" && (
+                  <span className="px-2.5 py-0.5 rounded font-mono text-[11px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-bold">
+                    ACTIVE ALLOCATION
                   </span>
                 )}
               </div>
-            ) : (
-              <div className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
-                <CheckCircle2 className="w-4 h-4" /> Legal representation is active. Adv. {c.assigned_lawyer} is handling bail proceedings.
+
+              {assignmentSuccess && (
+                <div className="p-3 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-mono text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{assignmentSuccess}</span>
+                </div>
+              )}
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-muted-foreground font-semibold mb-1">
+                    Select Panel Defense Advocate
+                  </label>
+                  <select
+                    value={selectedLawyerId}
+                    onChange={(e) => {
+                      const selected = PANEL_ADVOCATES.find((a) => a.id === e.target.value);
+                      if (selected) {
+                        setSelectedLawyerId(selected.id);
+                        setSelectedLawyerName(selected.name);
+                      } else {
+                        setSelectedLawyerId(e.target.value);
+                      }
+                    }}
+                    className="w-full p-2 border border-border rounded bg-background text-foreground text-xs font-mono"
+                  >
+                    {PANEL_ADVOCATES.map((adv) => (
+                      <option key={adv.id} value={adv.id}>
+                        {adv.name} ({adv.id}) — Bar: {adv.bar} [{adv.specialisation}]
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-muted-foreground font-semibold mb-1">
+                      Advocate Name (Institutional Record)
+                    </label>
+                    <input
+                      type="text"
+                      value={selectedLawyerName}
+                      onChange={(e) => setSelectedLawyerName(e.target.value)}
+                      className="w-full p-2 border border-border rounded bg-background text-foreground text-xs font-mono"
+                      placeholder="e.g. Adv. Rajesh Sharma"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-muted-foreground font-semibold mb-1">
+                      Counsel ID / Bar Enrolment
+                    </label>
+                    <input
+                      type="text"
+                      value={selectedLawyerId}
+                      onChange={(e) => setSelectedLawyerId(e.target.value)}
+                      className="w-full p-2 border border-border rounded bg-background text-foreground text-xs font-mono"
+                      placeholder="e.g. LWYR-001"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-muted-foreground font-semibold mb-1">
+                    Allocation Order Notes / DLSA Reference
+                  </label>
+                  <textarea
+                    value={assignmentNotes}
+                    onChange={(e) => setAssignmentNotes(e.target.value)}
+                    rows={2}
+                    placeholder="Enter DLSA allocation order number, urgency instructions, or court appearance directive..."
+                    className="w-full p-2 border border-border rounded bg-background text-foreground text-xs font-mono"
+                  />
+                </div>
+
+                <button
+                  onClick={handleAssignCounsel}
+                  disabled={assigningCounsel || !selectedLawyerName}
+                  className="px-4 py-2.5 bg-primary text-primary-foreground rounded-sm text-xs font-mono font-bold flex items-center gap-2 hover:opacity-90 transition-opacity shadow-sm"
+                >
+                  {assigningCounsel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserCheck className="w-3.5 h-3.5" />}
+                  {c.assignment_status === "ASSIGNED" ? "Reassign Legal Aid Counsel" : "Formally Appoint & Assign Legal Aid Counsel"}
+                </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
     </div>

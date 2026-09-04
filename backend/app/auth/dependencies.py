@@ -129,6 +129,10 @@ async def get_current_user(
     if token_dist_ids and not user.authorized_district_ids:
         user.authorized_district_ids = token_dist_ids
 
+    token_district = payload.get("district")
+    if token_district:
+        user.district = token_district
+
     return user
 
 

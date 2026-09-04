@@ -16,6 +16,7 @@ import {
   Check 
 } from "lucide-react";
 import type { BackendCaseSummary } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 interface AvailableCaseModalProps {
   item: BackendCaseSummary | null;
@@ -32,6 +33,7 @@ export function AvailableCaseModal({
   onApprove,
   onDecline,
 }: AvailableCaseModalProps) {
+  const { user } = useAuth();
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -68,6 +70,12 @@ export function AvailableCaseModal({
   if (!isOpen || !item) return null;
 
   const c = item.case;
+  const userFullName = (user?.full_name || "").toLowerCase();
+  const isAdvocate = user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE";
+  const isAssignedToUser =
+    (c.assigned_lawyer_id && c.assigned_lawyer_id === user?.id) ||
+    (c.assigned_lawyer && userFullName && c.assigned_lawyer.toLowerCase().includes(userFullName)) ||
+    (user?.linked_case_id && c.case_id === user?.linked_case_id);
   const isEligible = item.eligibility ? item.eligibility.is_eligible : item.days_overdue > 0;
   const threshold = item.eligibility?.threshold_days ?? 0;
   const relativeName = c.relative_name || "Ramesh Kumar";
@@ -279,36 +287,51 @@ export function AvailableCaseModal({
           {/* Footer Actions */}
           <div className="p-4 border-t border-border bg-card shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="text-xs text-muted-foreground">
-              {hasScrolledToBottom ? (
+              {isAdvocate && !isAssignedToUser ? (
+                <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1.5 font-medium">
+                  <ShieldAlert className="w-4 h-4 text-amber-500" /> Case unassigned. Legal Aid counsel appointment is made by DLSA.
+                </span>
+              ) : hasScrolledToBottom ? (
                 <span className="text-foreground flex items-center gap-1 font-medium">
-                  <Check className="w-4 h-4 text-foreground" /> Full details reviewed. You can now approve & take this case.
+                  <Check className="w-4 h-4 text-foreground" /> Full dossier reviewed. You can now accept or decline this assignment.
                 </span>
               ) : (
                 <span className="text-muted-foreground flex items-center gap-1 font-medium">
-                  <ArrowDownCircle className="w-4 h-4 text-muted-foreground" /> Scroll to the bottom of the modal to unlock Approve button.
+                  <ArrowDownCircle className="w-4 h-4 text-muted-foreground" /> Scroll to the bottom of the modal to review full record.
                 </span>
               )}
             </div>
 
             <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-              <button
-                onClick={() => onDecline(c.case_id)}
-                className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 rounded text-xs font-semibold transition-colors flex items-center gap-1.5 shrink-0"
-              >
-                <ThumbsDown className="w-4 h-4" /> Decline & Hide
-              </button>
+              {isAdvocate && !isAssignedToUser ? (
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2 bg-secondary text-secondary-foreground rounded text-xs font-semibold hover:bg-secondary/80 transition-colors"
+                >
+                  Close Dossier
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => onDecline(c.case_id)}
+                    className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 rounded text-xs font-semibold transition-colors flex items-center gap-1.5 shrink-0"
+                  >
+                    <ThumbsDown className="w-4 h-4" /> Decline Assignment
+                  </button>
 
-              <button
-                disabled={!hasScrolledToBottom}
-                onClick={() => onApprove(c.case_id)}
-                className={`px-5 py-2.5 rounded text-xs font-bold transition-all shadow-lg flex items-center gap-2 shrink-0 ${
-                  hasScrolledToBottom
-                    ? "bg-accent text-accent-foreground hover:bg-accent/90 shadow-accent/20 cursor-pointer"
-                    : "bg-secondary text-muted-foreground border border-border cursor-not-allowed"
-                }`}
-              >
-                <Check className="w-4 h-4" /> Approve & Take Case
-              </button>
+                  <button
+                    disabled={!hasScrolledToBottom}
+                    onClick={() => onApprove(c.case_id)}
+                    className={`px-5 py-2.5 rounded text-xs font-bold transition-all shadow-lg flex items-center gap-2 shrink-0 ${
+                      hasScrolledToBottom
+                        ? "bg-accent text-accent-foreground hover:bg-accent/90 shadow-accent/20 cursor-pointer"
+                        : "bg-secondary text-muted-foreground border border-border cursor-not-allowed"
+                    }`}
+                  >
+                    <Check className="w-4 h-4" /> Acknowledge & Accept Assignment
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </motion.div>

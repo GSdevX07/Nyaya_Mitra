@@ -13,6 +13,8 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const REFRESH_TOKEN_KEY = "nyaya_refresh_token";
 
+import { type Capability, type PermissionContext, checkPermission } from "./permissions";
+
 export type Role =
   | "PLATFORM_ADMIN"
   | "GOV_ADMIN"
@@ -54,6 +56,7 @@ export interface AuthContextType {
   loginWithDemoRole: (role: Role) => Promise<Role>;
   logout: () => Promise<void>;
   hasRole: (...roles: Role[]) => boolean;
+  can: (capability: Capability, context?: PermissionContext) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -253,8 +256,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const hasRole = (...roles: Role[]) => {
     if (!user) return false;
-    if (user.role === "PLATFORM_ADMIN") return true;
     return roles.includes(user.role);
+  };
+
+  const can = (capability: Capability, context?: PermissionContext): boolean => {
+    return checkPermission(user, capability, context);
   };
 
   return (
@@ -268,6 +274,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginWithDemoRole,
         logout,
         hasRole,
+        can,
       }}
     >
       {children}

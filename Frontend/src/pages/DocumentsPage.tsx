@@ -22,6 +22,7 @@ import {
   reprocessDocument,
   downloadSecureDocument,
   verifyUploadedDocument,
+  reviewUploadedDocument,
   getUploadedDocuments,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -105,6 +106,50 @@ export const STANDARD_DOC_TYPES = [
   { value: "supervisory_review_note", label: "Supervisory Review Note" },
   { value: "other_record", label: "Other Official Case Document" },
 ];
+
+export function getRoleAllowedDocTypes(role?: string) {
+  switch (role) {
+    case "JAIL_OFFICER":
+      return [
+        { value: "custody_certificate", label: "Custody Certificate (Prison Record)" },
+        { value: "nominal_roll", label: "Nominal Roll (Prison Record)" },
+        { value: "prison_admission_record", label: "Prison Admission Record" },
+        { value: "medical_certificate", label: "Medical Examination Record" },
+        { value: "remand_order", label: "Remand / Detention Order Copy (Prison Held)" },
+        { value: "other_prison_record", label: "Other Official Prison Record" },
+      ];
+    case "POLICE_OFFICER":
+      return [
+        { value: "fir", label: "First Information Report (FIR)" },
+        { value: "charge_sheet", label: "Charge Sheet / Final Police Report" },
+        { value: "arrest_memo", label: "Arrest Memo / Inspection Report" },
+        { value: "case_diary_extract", label: "Case Diary Extract" },
+        { value: "remand_application", label: "Police Remand Application" },
+        { value: "seizure_memo", label: "Seizure & Panchnama Memo" },
+        { value: "police_status_report", label: "Police Status / Compliance Report" },
+      ];
+    case "DLSA_OFFICER":
+      return [
+        { value: "charge_sheet", label: "Charge Sheet / Final Report (Intake Copy)" },
+        { value: "fir", label: "FIR Copy (Legal-Aid Intake)" },
+        { value: "remand_order", label: "Remand / Detention Order Copy" },
+        { value: "custody_certificate", label: "Custody Certificate Copy" },
+        { value: "nominal_roll", label: "Nominal Roll Copy" },
+        { value: "dlsa_application", label: "DLSA Legal Aid Application" },
+        { value: "trial_court_judgment", label: "Trial Court Order / Judgment" },
+      ];
+    case "DEFENSE_ADVOCATE":
+    case "CONTROLLED_EXTERNAL_ADVOCATE":
+      return [
+        { value: "bail_application", label: "Bail Petition / Legal Motion Draft" },
+        { value: "vakalatnama", label: "Vakalatnama / Memo of Appearance" },
+        { value: "defense_representation", label: "Written Legal Submission / Notes" },
+        { value: "trial_court_judgment", label: "Trial Court Order / Certified Copy" },
+      ];
+    default:
+      return STANDARD_DOC_TYPES;
+  }
+}
 
 export function DocumentsPage() {
   const { user } = useAuth();
@@ -215,7 +260,24 @@ export function DocumentsPage() {
     }
   };
 
-  // Direct In-line Verification
+  // Direct In-line Review (for DLSA Officer)
+  const handleReviewDirect = async (docId: string) => {
+    try {
+      await reviewUploadedDocument(docId);
+      await loadDocs();
+      setTopFeedback({
+        type: "success",
+        message: "Document marked reviewed for legal-aid intake processing.",
+      });
+    } catch (err: any) {
+      setTopFeedback({
+        type: "error",
+        message: `Document review failed: ${err.message || err}`,
+      });
+    }
+  };
+
+  // Direct In-line Verification (for Supervising Legal Officer)
   const handleVerifyDirect = async (docId: string) => {
     try {
       await verifyUploadedDocument(docId);
@@ -264,6 +326,25 @@ export function DocumentsPage() {
       });
     } catch (err: any) {
       alert(err.message || "Document verification failed.");
+    } finally {
+      setChainLoading(false);
+    }
+  };
+
+  // Review Legal Document (for DLSA Officer in Modal)
+  const handleReview = async (docId: string) => {
+    setChainLoading(true);
+    try {
+      await reviewUploadedDocument(docId);
+      const refreshed = await fetchEvidenceChain(docId);
+      setEvidenceChainData(refreshed);
+      await loadDocs();
+      setTopFeedback({
+        type: "success",
+        message: "Document marked reviewed for legal-aid intake processing.",
+      });
+    } catch (err: any) {
+      alert(err.message || "Document review failed.");
     } finally {
       setChainLoading(false);
     }
@@ -490,9 +571,13 @@ export function DocumentsPage() {
                     </td>
                     <td className="px-6 py-4 text-muted-foreground">{d.prisoner_name}</td>
                     <td className="px-6 py-4">
-                      {d.document_status === "VERIFIED" || (d.is_present && d.document_status !== "PENDING_VERIFICATION") ? (
+                      {d.document_status === "VERIFIED" || (d.is_present && d.document_status !== "PENDING_VERIFICATION" && d.document_status !== "REVIEWED") ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
                           <CheckCircle2 className="w-3.5 h-3.5" /> Present & Verified
+                        </span>
+                      ) : d.document_status === "REVIEWED" ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-500/15 text-blue-600 border border-blue-500/30">
+                          <CheckCheck className="w-3.5 h-3.5" /> Reviewed (Intake)
                         </span>
                       ) : d.document_status === "PENDING_VERIFICATION" ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-600 border border-amber-500/30">
@@ -516,7 +601,7 @@ export function DocumentsPage() {
                     </td>
                     <td className="px-6 py-4 text-xs">{d.jail_location}</td>
                     <td className="px-6 py-4 text-right space-x-2">
-                      {d.document_status === "PENDING_VERIFICATION" ? (
+                      {d.document_status === "PENDING_VERIFICATION" || (d.document_status === "REVIEWED" && user?.role === "SUPERVISING_LEGAL_OFFICER") ? (
                         <div className="inline-flex items-center gap-1.5 justify-end">
                           <button
                             onClick={() => handleOpenEvidenceChain(d.actual_doc_id || d.id, d.document_type)}
@@ -525,17 +610,26 @@ export function DocumentsPage() {
                           >
                             <GitBranch className="w-3.5 h-3.5" /> {getEvidenceChainButtonLabel(user?.role)}
                           </button>
-                          {(user?.role === "SUPERVISING_LEGAL_OFFICER" || user?.role === "DLSA_OFFICER") && (
+                          {user?.role === "DLSA_OFFICER" && d.document_status === "PENDING_VERIFICATION" && (
+                            <button
+                              onClick={() => handleReviewDirect(d.actual_doc_id || d.id)}
+                              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1 shadow-sm"
+                              title="Mark reviewed for legal-aid intake processing"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Review Document
+                            </button>
+                          )}
+                          {user?.role === "SUPERVISING_LEGAL_OFFICER" && (
                             <button
                               onClick={() => handleVerifyDirect(d.actual_doc_id || d.id)}
                               className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1 shadow-sm"
-                              title="Verify document and update case completeness"
+                              title="Supervisory verification: confirm presence and update case completeness"
                             >
-                              <CheckCheck className="w-3.5 h-3.5" /> Verify
+                              <CheckCheck className="w-3.5 h-3.5" /> Supervisory Verify
                             </button>
                           )}
                         </div>
-                      ) : d.is_present || d.document_status === "VERIFIED" ? (
+                      ) : d.is_present || d.document_status === "VERIFIED" || d.document_status === "REVIEWED" ? (
                         <button
                           onClick={() => handleOpenEvidenceChain(d.actual_doc_id || d.id, d.document_type)}
                           className="px-3 py-1 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-semibold border border-primary/20 transition-colors inline-flex items-center gap-1.5 shadow-sm"
@@ -567,6 +661,7 @@ export function DocumentsPage() {
         loading={chainLoading}
         onDownload={handleDownload}
         onVerify={handleVerify}
+        onReview={handleReview}
         onReprocess={handleReprocess}
         canReview={canReview}
       />
@@ -634,7 +729,7 @@ export function DocumentsPage() {
                     className="w-full px-3.5 py-2.5 bg-secondary/50 border border-border rounded-xl text-sm font-mono text-foreground focus:outline-none focus:border-primary"
                   >
                     <option value="">Select Document Type...</option>
-                    {STANDARD_DOC_TYPES.map(dt => (
+                    {getRoleAllowedDocTypes(user?.role).map(dt => (
                       <option key={dt.value} value={dt.value}>
                         {dt.label}
                       </option>

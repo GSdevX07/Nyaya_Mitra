@@ -73,10 +73,7 @@ class IdentityMergeRequest(BaseModel):
 
 @ingestion_router.get("/connectors", response_model=List[ConnectorConfig])
 def list_connectors(
-    current_user: AuthUser = Depends(require_role(
-        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
-        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.READ_ONLY_AUDITOR
-    ))
+    current_user: AuthUser = Depends(require_role(Role.PLATFORM_ADMIN))
 ):
     """List all registered external connectors and their live sync status."""
     return [c.config for c in _REGISTRY.values()]
@@ -84,10 +81,7 @@ def list_connectors(
 
 @ingestion_router.get("/dashboard", response_model=IngestionDashboardTelemetry)
 def get_ingestion_dashboard(
-    current_user: AuthUser = Depends(require_role(
-        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
-        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.READ_ONLY_AUDITOR
-    ))
+    current_user: AuthUser = Depends(require_role(Role.PLATFORM_ADMIN))
 ):
     """Retrieve operational telemetry across all ingestion pipelines."""
     connectors = [c.config for c in _REGISTRY.values()]
@@ -112,9 +106,7 @@ def get_ingestion_dashboard(
 @ingestion_router.post("/connectors/{connector_id}/sync")
 def trigger_connector_sync(
     connector_id: str,
-    current_user: AuthUser = Depends(require_role(
-        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER
-    ))
+    current_user: AuthUser = Depends(require_role(Role.PLATFORM_ADMIN))
 ):
     """Trigger manual or simulated sync on the requested connector."""
     conn = _REGISTRY.get(connector_id)
@@ -160,10 +152,7 @@ def trigger_connector_sync(
 @ingestion_router.post("/upload")
 async def upload_spreadsheet(
     file: UploadFile = File(...),
-    current_user: AuthUser = Depends(require_role(
-        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
-        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER
-    ))
+    current_user: AuthUser = Depends(require_role(Role.PLATFORM_ADMIN))
 ):
     """Upload and parse a CSV / spreadsheet file of undertrial records."""
     if not file.filename or not (file.filename.endswith(".csv") or file.filename.endswith(".txt")):
@@ -196,10 +185,7 @@ async def upload_spreadsheet(
 @ingestion_router.post("/manual-entry")
 def submit_manual_entry(
     payload: Dict[str, Any] = Body(...),
-    current_user: AuthUser = Depends(require_role(
-        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
-        Role.SUPERVISING_LEGAL_OFFICER, Role.JAIL_OFFICER, Role.POLICE_OFFICER
-    ))
+    current_user: AuthUser = Depends(require_role(Role.PLATFORM_ADMIN))
 ):
     """Controlled manual intake desk endpoint."""
     pipeline = get_ingestion_pipeline()

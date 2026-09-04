@@ -54,7 +54,6 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/cases", label: "Inmate Roll" },
         { path: "/documents", label: "Intake Documents" },
         { path: "/hearings", label: "Hearings" },
-        { path: "/reports", label: "Reports" },
       ];
 
     case "POLICE_OFFICER":
@@ -68,7 +67,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/admin", label: "Admin Console" },
         { path: "/ingestion", label: "Data Ingestion" },
         { path: "/audit", label: "Audit Logs" },
-        { path: "/reports", label: "Reports" },
+        { path: "/identity-review", label: "Identity Candidates" },
       ];
 
     case "GOV_ADMIN":
@@ -93,7 +92,6 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/actions", label: "Actions" },
         { path: "/hearings", label: "Hearings" },
         { path: "/legal-sources", label: "Legal Knowledge Governance" },
-        { path: "/ingestion", label: "Data Ingestion" },
         { path: "/audit", label: "Audit" },
         { path: "/reports", label: "Reports" },
       ];
@@ -110,7 +108,6 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/actions", label: "Actions" },
         { path: "/hearings", label: "Hearings" },
         { path: "/legal-sources", label: "Legal Knowledge" },
-        { path: "/ingestion", label: "Data Ingestion" },
         { path: "/reports", label: "Reports" },
       ];
   }

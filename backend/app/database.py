@@ -21,7 +21,7 @@ import logging
 import datetime
 import uuid
 import hashlib
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 from pathlib import Path
 from dotenv import load_dotenv
@@ -1163,6 +1163,11 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
         )
     """)
 
+    try:
+        cursor.execute("ALTER TABLE cases ADD COLUMN version_number INTEGER DEFAULT 1")
+    except Exception:
+        pass
+
     # 10. Revoked Tokens Table (Session Invalidation)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS revoked_tokens (
@@ -1349,6 +1354,78 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
         )
     """)
 
+    # 12. Stage 9: Matter Lifecycle, Approvals, Artifact Versions & Handoffs
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS matter_approvals (
+            approval_id TEXT PRIMARY KEY,
+            matter_id TEXT NOT NULL,
+            actor_id TEXT NOT NULL,
+            actor_role TEXT NOT NULL,
+            organization_id TEXT,
+            created_at TIMESTAMP NOT NULL,
+            decided_at TIMESTAMP NOT NULL,
+            artifact_id TEXT NOT NULL,
+            artifact_version_id TEXT NOT NULL,
+            artifact_type TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            comment TEXT,
+            approval_level INTEGER NOT NULL DEFAULT 1,
+            required_level INTEGER NOT NULL DEFAULT 1,
+            supersedes_approval_id TEXT,
+            is_valid INTEGER DEFAULT 1,
+            metadata_json TEXT
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS matter_approval_policies (
+            id TEXT PRIMARY KEY,
+            organization_id TEXT NOT NULL,
+            action_type TEXT NOT NULL,
+            required_levels INTEGER NOT NULL DEFAULT 1,
+            requires_supervisor INTEGER NOT NULL DEFAULT 0,
+            authorized_roles_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS matter_artifact_versions (
+            version_id TEXT PRIMARY KEY,
+            artifact_id TEXT NOT NULL,
+            matter_id TEXT NOT NULL,
+            artifact_type TEXT NOT NULL,
+            version_number INTEGER NOT NULL,
+            version_tag TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            content_text TEXT NOT NULL,
+            is_ai_generated INTEGER NOT NULL DEFAULT 0,
+            ai_model_name TEXT,
+            provenance_tag TEXT DEFAULT 'HUMAN_AUTHORED',
+            created_by TEXT NOT NULL,
+            created_by_role TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS matter_handoffs (
+            handoff_id TEXT PRIMARY KEY,
+            matter_id TEXT NOT NULL,
+            from_user_id TEXT NOT NULL,
+            to_user_id TEXT NOT NULL,
+            from_role TEXT NOT NULL,
+            to_role TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL,
+            initiated_by TEXT NOT NULL,
+            acknowledged_at TIMESTAMP,
+            metadata_json TEXT
+        )
+    """)
+
     # Performance Indices for Foreign Keys and Lookups
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_court_cases_accused ON court_cases(accused_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_court_cases_status ON court_cases(current_status)")
@@ -1370,6 +1447,11 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_rule_executions_case ON legal_rule_executions(case_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_rule_audit_rule ON legal_rule_audit_trail(rule_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_retrieval_actor ON legal_retrieval_logs(actor_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_matter_approvals_matter ON matter_approvals(matter_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_matter_approvals_artifact ON matter_approvals(artifact_version_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_matter_artifacts_matter ON matter_artifact_versions(matter_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_matter_artifacts_tag ON matter_artifact_versions(matter_id, version_tag)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_matter_handoffs_matter ON matter_handoffs(matter_id)")
 
     conn.commit()
 
@@ -4037,6 +4119,336 @@ def build_evidence_chain(document_id: str) -> Optional[dict]:
             "institutional_actions": relevant_actions,
         },
     }
+
+
+# ── Stage 9: Matter Lifecycle, Approvals, Artifact Versions & Handoffs ──────────
+
+def get_case_version(case_id: str) -> int:
+    """Retrieve the current optimistic locking version number for a case."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT version_number FROM cases WHERE case_id = ?", (case_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row and row[0] is not None:
+            return int(row[0])
+    except Exception as e:
+        logger.warning(f"Failed to get case version: {e}")
+    return 1
+
+
+def execute_case_transition_tx(
+    case_id: str,
+    new_status: str,
+    expected_version: Optional[int] = None,
+    updated_data: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, int, str]:
+    """
+    Concurrency-safe transactional transition of matter state with optimistic locking.
+    Returns (success, new_version, error_detail).
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("SELECT data, version_number, status FROM cases WHERE case_id = ?", (case_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.rollback()
+            conn.close()
+            return False, 0, f"Matter '{case_id}' not found."
+
+        data_json, current_ver, current_status = row[0], row[1] or 1, row[2]
+
+        if expected_version is not None and expected_version != current_ver:
+            conn.rollback()
+            conn.close()
+            return False, current_ver, f"Concurrency conflict: Expected matter version {expected_version}, but current version is {current_ver}."
+
+        case_dict = json.loads(data_json) if isinstance(data_json, str) else dict(data_json)
+        case_dict["status"] = new_status
+        if updated_data:
+            case_dict.update(updated_data)
+
+        new_ver = current_ver + 1
+        new_data_str = json.dumps(case_dict)
+
+        cursor.execute(
+            """
+            UPDATE cases
+            SET status = ?, data = ?, version_number = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE case_id = ? AND (version_number = ? OR version_number IS NULL)
+            """,
+            (new_status, new_data_str, new_ver, case_id, current_ver),
+        )
+
+        if cursor.rowcount == 0:
+            conn.rollback()
+            conn.close()
+            return False, current_ver, "Concurrent transition conflict detected. State change aborted."
+
+        conn.commit()
+        conn.close()
+
+        # Update in-memory cache if present
+        if case_id in _MEMORY_CASES:
+            try:
+                _MEMORY_CASES[case_id].status = CaseState(new_status)
+            except Exception:
+                pass
+
+        return True, new_ver, ""
+    except Exception as e:
+        try:
+            conn.rollback()
+            conn.close()
+        except Exception:
+            pass
+        return False, 0, f"Database transaction error: {str(e)}"
+
+
+def store_matter_approval(approval_record: Dict[str, Any]) -> bool:
+    """Store an immutable approval record referencing an exact artifact version."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO matter_approvals (
+                approval_id, matter_id, actor_id, actor_role, organization_id,
+                created_at, decided_at, artifact_id, artifact_version_id, artifact_type,
+                decision, comment, approval_level, required_level, supersedes_approval_id,
+                is_valid, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                approval_record["approval_id"],
+                approval_record["matter_id"],
+                approval_record["actor_id"],
+                approval_record["actor_role"],
+                approval_record.get("organization_id"),
+                approval_record["created_at"],
+                approval_record["decided_at"],
+                approval_record["artifact_id"],
+                approval_record["artifact_version_id"],
+                approval_record["artifact_type"],
+                approval_record["decision"],
+                approval_record.get("comment", ""),
+                approval_record.get("approval_level", 1),
+                approval_record.get("required_level", 1),
+                approval_record.get("supersedes_approval_id"),
+                1 if approval_record.get("is_valid", True) else 0,
+                json.dumps(approval_record.get("metadata", {})),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to store matter approval: {e}")
+        conn.close()
+        return False
+
+
+def get_matter_approvals(matter_id: str, artifact_version_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieve approvals for a matter, optionally filtered by exact artifact version."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    if artifact_version_id:
+        cursor.execute(
+            "SELECT * FROM matter_approvals WHERE matter_id = ? AND artifact_version_id = ? ORDER BY decided_at DESC",
+            (matter_id, artifact_version_id),
+        )
+    else:
+        cursor.execute(
+            "SELECT * FROM matter_approvals WHERE matter_id = ? ORDER BY decided_at DESC",
+            (matter_id,),
+        )
+    rows = cursor.fetchall()
+    cols = [d[0] for d in cursor.description]
+    conn.close()
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def store_matter_artifact_version(artifact_ver: Dict[str, Any]) -> bool:
+    """Store an immutable artifact version. Deactivates previous versions for same artifact."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Mark prior versions inactive
+        cursor.execute(
+            "UPDATE matter_artifact_versions SET is_active = 0 WHERE matter_id = ? AND artifact_id = ?",
+            (artifact_ver["matter_id"], artifact_ver["artifact_id"]),
+        )
+        cursor.execute(
+            """
+            INSERT INTO matter_artifact_versions (
+                version_id, artifact_id, matter_id, artifact_type, version_number,
+                version_tag, content_hash, content_text, is_ai_generated, ai_model_name,
+                provenance_tag, created_by, created_by_role, created_at, is_active
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """,
+            (
+                artifact_ver["version_id"],
+                artifact_ver["artifact_id"],
+                artifact_ver["matter_id"],
+                artifact_ver["artifact_type"],
+                artifact_ver["version_number"],
+                artifact_ver["version_tag"],
+                artifact_ver["content_hash"],
+                artifact_ver["content_text"],
+                1 if artifact_ver.get("is_ai_generated") else 0,
+                artifact_ver.get("ai_model_name"),
+                artifact_ver.get("provenance_tag", "HUMAN_AUTHORED"),
+                artifact_ver["created_by"],
+                artifact_ver["created_by_role"],
+                artifact_ver.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to store artifact version: {e}")
+        conn.close()
+        return False
+
+
+def get_matter_artifact_versions(matter_id: str, artifact_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieve artifact versions for a matter."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    if artifact_id:
+        cursor.execute(
+            "SELECT * FROM matter_artifact_versions WHERE matter_id = ? AND artifact_id = ? ORDER BY version_number DESC",
+            (matter_id, artifact_id),
+        )
+    else:
+        cursor.execute(
+            "SELECT * FROM matter_artifact_versions WHERE matter_id = ? ORDER BY created_at DESC",
+            (matter_id,),
+        )
+    rows = cursor.fetchall()
+    cols = [d[0] for d in cursor.description]
+    conn.close()
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def get_active_matter_artifact(matter_id: str, artifact_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Get latest active artifact version for a matter."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    if artifact_type:
+        cursor.execute(
+            "SELECT * FROM matter_artifact_versions WHERE matter_id = ? AND artifact_type = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1",
+            (matter_id, artifact_type),
+        )
+    else:
+        cursor.execute(
+            "SELECT * FROM matter_artifact_versions WHERE matter_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1",
+            (matter_id,),
+        )
+    row = cursor.fetchone()
+    cols = [d[0] for d in cursor.description] if row else []
+    conn.close()
+    return dict(zip(cols, row)) if row else None
+
+
+def store_matter_handoff(handoff_record: Dict[str, Any]) -> bool:
+    """Store an immutable matter reassignment/handoff record."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO matter_handoffs (
+                handoff_id, matter_id, from_user_id, to_user_id, from_role, to_role,
+                reason, created_at, initiated_by, acknowledged_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                handoff_record["handoff_id"],
+                handoff_record["matter_id"],
+                handoff_record["from_user_id"],
+                handoff_record["to_user_id"],
+                handoff_record["from_role"],
+                handoff_record["to_role"],
+                handoff_record["reason"],
+                handoff_record["created_at"],
+                handoff_record["initiated_by"],
+                handoff_record.get("acknowledged_at"),
+                json.dumps(handoff_record.get("metadata", {})),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to store matter handoff: {e}")
+        conn.close()
+        return False
+
+
+def get_matter_handoffs(matter_id: str) -> List[Dict[str, Any]]:
+    """Retrieve full chronological handoff history for a matter."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM matter_handoffs WHERE matter_id = ? ORDER BY created_at DESC",
+        (matter_id,),
+    )
+    rows = cursor.fetchall()
+    cols = [d[0] for d in cursor.description]
+    conn.close()
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def get_matter_approval_policy(organization_id: Optional[str], action_type: str) -> Dict[str, Any]:
+    """Retrieve organization approval policy for an action type, falling back to default."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    if organization_id:
+        cursor.execute(
+            "SELECT * FROM matter_approval_policies WHERE organization_id = ? AND action_type = ?",
+            (organization_id, action_type),
+        )
+        row = cursor.fetchone()
+        if row:
+            cols = [d[0] for d in cursor.description]
+            conn.close()
+            return dict(zip(cols, row))
+    cursor.execute(
+        "SELECT * FROM matter_approval_policies WHERE organization_id = '*' AND action_type = ?",
+        (action_type,),
+    )
+    row = cursor.fetchone()
+    cols = [d[0] for d in cursor.description] if row else []
+    conn.close()
+    if row:
+        return dict(zip(cols, row))
+
+    if action_type == "LEGAL_FILING":
+        return {
+            "action_type": "LEGAL_FILING",
+            "required_levels": 2,
+            "requires_supervisor": 1,
+            "authorized_roles_json": json.dumps(["DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER"]),
+        }
+    elif action_type == "HIGH_IMPACT_ACTION":
+        return {
+            "action_type": "HIGH_IMPACT_ACTION",
+            "required_levels": 2,
+            "requires_supervisor": 1,
+            "authorized_roles_json": json.dumps(["DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER"]),
+        }
+    else:
+        return {
+            "action_type": "NORMAL_ACTION",
+            "required_levels": 1,
+            "requires_supervisor": 0,
+            "authorized_roles_json": json.dumps(["SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "DEFENSE_ADVOCATE"]),
+        }
 
 
 # ── Domain Service & Repository Instances ──────────────────────────────────────

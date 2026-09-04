@@ -65,8 +65,60 @@ class LegalNeedType(str, Enum):
     HUMAN_LEGAL_REVIEW = "HUMAN_LEGAL_REVIEW"
 
 
+class MatterState(str, Enum):
+    """Canonical 16-state matter lifecycle and 4 explicit exception states."""
+    # Canonical Matter Lifecycle (16 States)
+    INTAKE = "INTAKE"
+    VERIFICATION = "VERIFICATION"
+    REVIEW = "REVIEW"
+    LEGAL_AID_REQUIRED = "LEGAL_AID_REQUIRED"
+    ASSIGNED = "ASSIGNED"
+    DOCUMENT_PENDING = "DOCUMENT_PENDING"
+    ANALYSIS_READY = "ANALYSIS_READY"
+    HUMAN_REVIEW = "HUMAN_REVIEW"
+    APPROVED = "APPROVED"
+    SUBMITTED = "SUBMITTED"
+    FILED = "FILED"
+    HEARING_SCHEDULED = "HEARING_SCHEDULED"
+    ORDER_RECEIVED = "ORDER_RECEIVED"
+    RELEASE_WORKFLOW = "RELEASE_WORKFLOW"
+    POST_RELEASE_FOLLOW_UP = "POST_RELEASE_FOLLOW_UP"
+    CLOSED = "CLOSED"
+
+    # Explicit Exception States (4 States)
+    MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
+    TRANSITION_BLOCKED = "TRANSITION_BLOCKED"
+    DATA_CONFLICT = "DATA_CONFLICT"
+    EXTERNAL_SYNC_FAILED = "EXTERNAL_SYNC_FAILED"
+
+
 class CaseState(str, Enum):
-    """Explicit procedural states across the case lifecycle."""
+    """Procedural states across the case lifecycle with backward compatibility."""
+    # Canonical States
+    INTAKE = "INTAKE"
+    VERIFICATION = "VERIFICATION"
+    REVIEW = "REVIEW"
+    LEGAL_AID_REQUIRED = "LEGAL_AID_REQUIRED"
+    ASSIGNED = "ASSIGNED"
+    DOCUMENT_PENDING = "DOCUMENT_PENDING"
+    ANALYSIS_READY = "ANALYSIS_READY"
+    HUMAN_REVIEW = "HUMAN_REVIEW"
+    APPROVED = "APPROVED"
+    SUBMITTED = "SUBMITTED"
+    FILED = "FILED"
+    HEARING_SCHEDULED = "HEARING_SCHEDULED"
+    ORDER_RECEIVED = "ORDER_RECEIVED"
+    RELEASE_WORKFLOW = "RELEASE_WORKFLOW"
+    POST_RELEASE_FOLLOW_UP = "POST_RELEASE_FOLLOW_UP"
+    CLOSED = "CLOSED"
+
+    # Explicit Exception States
+    MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
+    TRANSITION_BLOCKED = "TRANSITION_BLOCKED"
+    DATA_CONFLICT = "DATA_CONFLICT"
+    EXTERNAL_SYNC_FAILED = "EXTERNAL_SYNC_FAILED"
+
+    # Legacy Backward-Compatibility Enums
     INTAKE_PENDING = "INTAKE_PENDING"
     DETECTED = "DETECTED"
     LEGAL_NEED_IDENTIFIED = "LEGAL_NEED_IDENTIFIED"
@@ -77,14 +129,41 @@ class CaseState(str, Enum):
     DRAFT_READY = "DRAFT_READY"
     LAWYER_REVIEW = "LAWYER_REVIEW"
     APPROVED_READY_FOR_FILING = "APPROVED_READY_FOR_FILING"
-    FILED = "FILED"
-    HEARING_SCHEDULED = "HEARING_SCHEDULED"
     ORDER_PASSED = "ORDER_PASSED"
     RELEASE_PROCESSING = "RELEASE_PROCESSING"
     RELEASED = "RELEASED"
     POST_RELEASE_PRESERVED = "POST_RELEASE_PRESERVED"
     APPEAL_PENDING = "APPEAL_PENDING"
-    CLOSED = "CLOSED"
+
+    @classmethod
+    def to_canonical(cls, state: Any) -> MatterState:
+        if isinstance(state, Enum):
+            val = state.value
+        else:
+            val = str(state)
+        legacy_map = {
+            "INTAKE_PENDING": MatterState.INTAKE,
+            "DETECTED": MatterState.INTAKE,
+            "LEGAL_NEED_IDENTIFIED": MatterState.LEGAL_AID_REQUIRED,
+            "DOCUMENTS_MISSING": MatterState.DOCUMENT_PENDING,
+            "DOCUMENTS_COMPLETE": MatterState.VERIFICATION,
+            "MANUAL_REVIEW": MatterState.MANUAL_REVIEW_REQUIRED,
+            "ELIGIBLE": MatterState.ANALYSIS_READY,
+            "DRAFT_READY": MatterState.ANALYSIS_READY,
+            "LAWYER_REVIEW": MatterState.HUMAN_REVIEW,
+            "APPROVED_READY_FOR_FILING": MatterState.APPROVED,
+            "ORDER_PASSED": MatterState.ORDER_RECEIVED,
+            "RELEASE_PROCESSING": MatterState.RELEASE_WORKFLOW,
+            "RELEASED": MatterState.RELEASE_WORKFLOW,
+            "POST_RELEASE_PRESERVED": MatterState.POST_RELEASE_FOLLOW_UP,
+            "APPEAL_PENDING": MatterState.HUMAN_REVIEW,
+        }
+        if val in legacy_map:
+            return legacy_map[val]
+        try:
+            return MatterState(val)
+        except ValueError:
+            return MatterState.MANUAL_REVIEW_REQUIRED
 
 
 class UrgencyFlags(BaseModel):
@@ -108,13 +187,20 @@ class TimelineEvent(BaseModel):
     """Chronological event in the accused person's legal journey."""
     id: str = Field(..., description="Unique event identifier, e.g. 'TLE-001'.")
     timestamp: str = Field(..., description="ISO 8601 datetime of the event.")
-    event_type: str = Field(..., description="Category: INTAKE, CUSTODY, DOCUMENT, ELIGIBILITY, ADVOCATE, DRAFT, FILING, HEARING, ORDER, RELEASE.")
+    event_type: str = Field(..., description="Category: INTAKE, CUSTODY, DOCUMENT, ELIGIBILITY, ADVOCATE, DRAFT, FILING, HEARING, ORDER, RELEASE, WORKFLOW, APPROVAL, HANDOFF, EXCEPTION.")
     title: str = Field(..., description="Concise human-readable title.")
     description: str = Field(..., description="Detailed description of what occurred.")
     actor: str = Field(default="System", description="Name of person or service who performed or confirmed the action.")
     actor_role: str = Field(default="Automated Pipeline", description="Institutional role: Jail Officer, DLSA Secretary, Legal Officer, Court Clerk, System.")
-    source: str = Field(default="System", description="Data origin: Remand Sheet, Jail Register, OCR Pipeline, Manual Entry.")
+    source: str = Field(default="System", description="Data origin: Remand Sheet, Jail Register, OCR Pipeline, Manual Entry, AI, External Sync.")
     is_human_verified: bool = Field(default=False, description="True if a human officer confirmed this event.")
+    previous_state: Optional[str] = None
+    new_state: Optional[str] = None
+    artifact_id: Optional[str] = None
+    artifact_version_id: Optional[str] = None
+    decision: Optional[str] = None
+    comment: Optional[str] = None
+    provenance_badge: Optional[str] = None  # USER, SYSTEM, AI, EXTERNAL_SYNC
 
 
 class DataProvenance(BaseModel):
@@ -262,4 +348,50 @@ class DocumentCorrectionRequest(BaseModel):
 class ReprocessDocumentRequest(BaseModel):
     reason: Optional[str] = Field(default="Reprocessing requested for updated extraction", description="Reason for reprocessing.")
     custom_text_override: Optional[str] = Field(default=None, description="Optional revised text content.")
+
+
+# ── Stage 9: Matter Lifecycle, Approvals & Handoff Schemas ─────────────────────
+
+class MatterTransitionRequest(BaseModel):
+    """Named workflow transition request with payload and optimistic locking."""
+    transition: str = Field(..., description="Named transition action, e.g. 'START_VERIFICATION', 'APPROVE_MATTER', 'RECORD_FILING'.")
+    payload: Optional[Dict[str, Any]] = Field(default=None, description="Optional contextual payload (hearing_date, filing_ref, etc.).")
+    comment: Optional[str] = Field(default=None, description="Optional rationale or institutional notes.")
+    expected_version: Optional[int] = Field(default=None, description="Expected matter version number for concurrency/optimistic locking.")
+
+
+class MatterApprovalRequest(BaseModel):
+    """First-class formal approval or decision on an exact artifact version."""
+    artifact_id: str = Field(..., description="ID of the artifact being approved (e.g. 'art_bail_draft_01').")
+    artifact_version_id: str = Field(..., description="Exact artifact version ID (e.g. 'ver_bail_draft_v1').")
+    artifact_type: str = Field(default="BAIL_APPLICATION", description="Artifact classification (BAIL_APPLICATION, CASE_SUMMARY, LEGAL_ANALYSIS, FILING_PACKAGE).")
+    decision: str = Field(..., description="'APPROVED', 'REJECTED', or 'CHANGES_REQUESTED'.")
+    comment: Optional[str] = Field(default=None, description="Review commentary or reasoning.")
+    approval_level: int = Field(default=1, description="1 for Primary/Advocate sign-off, 2 for Supervisory Legal Officer sign-off.")
+
+
+class MatterHandoffRequest(BaseModel):
+    """Immutable case reassignment and handoff packet."""
+    to_user_id: str = Field(..., description="ID of the incoming assignee.")
+    to_role: str = Field(..., description="Role of the incoming assignee.")
+    reason: str = Field(..., description="Detailed institutional reason for handoff/reassignment.")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Optional metadata or handover instructions.")
+
+
+class MatterArtifactCreateRequest(BaseModel):
+    """Register or version an immutable legal artifact."""
+    artifact_id: str = Field(..., description="Unique artifact grouping identifier.")
+    artifact_type: str = Field(..., description="Artifact category, e.g. 'BAIL_APPLICATION', 'CASE_SUMMARY'.")
+    content_text: str = Field(..., description="Full text or serialized content of the artifact.")
+    is_ai_generated: bool = Field(default=False, description="True if generated by AI model. Sets provenance to AI_ASSISTED.")
+    ai_model_name: Optional[str] = Field(default=None, description="AI model identity if AI-generated.")
+    version_tag: Optional[str] = Field(default=None, description="Optional semantic version tag, e.g. 'bail_draft_v1'.")
+
+
+class ExternalSyncRequest(BaseModel):
+    """Externally synchronized court or prison registry payload."""
+    source_system: str = Field(..., description="External authority or system, e.g. 'eCourts_Portal', 'ICJS_Sync'.")
+    external_reference: str = Field(..., description="External case or proceeding reference number.")
+    received_data: Dict[str, Any] = Field(..., description="Synchronized data attributes.")
+    sync_result: str = Field(default="SUCCESS", description="Outcome status of the sync operation.")
 

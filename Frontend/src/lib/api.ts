@@ -1238,4 +1238,177 @@ export async function assignCaseCounsel(
   return await res.json();
 }
 
+// ── Stage 9: Matter Lifecycle, Approvals & Handoff APIs ─────────────────────
+
+export async function requestMatterTransition(
+  caseId: string,
+  transition: string,
+  payload?: Record<string, any>,
+  comment?: string,
+  expectedVersion?: number
+) {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/transitions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      transition,
+      payload,
+      comment,
+      expected_version: expectedVersion,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Transition '${transition}' failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchMatterState(caseId: string) {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/state`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch matter state: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchAvailableTransitions(caseId: string) {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/available-transitions`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch available transitions: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function submitMatterApproval(
+  caseId: string,
+  approvalData: {
+    artifact_id: string;
+    artifact_version_id: string;
+    artifact_type?: string;
+    decision: "APPROVED" | "REJECTED" | "CHANGES_REQUESTED";
+    comment?: string;
+    approval_level?: number;
+  }
+) {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/approvals`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(approvalData),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Approval submission failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchMatterApprovals(caseId: string, artifactVersionId?: string) {
+  const url = `${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/approvals${
+    artifactVersionId ? `?artifact_version_id=${encodeURIComponent(artifactVersionId)}` : ""
+  }`;
+  const res = await authFetch(url);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch approvals: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function createMatterArtifact(
+  caseId: string,
+  artifactData: {
+    artifact_id: string;
+    artifact_type: string;
+    content_text: string;
+    is_ai_generated?: boolean;
+    ai_model_name?: string;
+    version_tag?: string;
+  }
+) {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/artifacts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(artifactData),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Artifact creation failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchMatterArtifacts(caseId: string, artifactId?: string) {
+  const url = `${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/artifacts${
+    artifactId ? `?artifact_id=${encodeURIComponent(artifactId)}` : ""
+  }`;
+  const res = await authFetch(url);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch artifacts: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function executeMatterHandoff(
+  caseId: string,
+  handoffData: {
+    to_user_id: string;
+    to_role: string;
+    reason: string;
+    metadata?: Record<string, any>;
+  }
+) {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/handoff`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(handoffData),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Handoff failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchMatterHandoffSummary(caseId: string) {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/handoff-summary`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch handoff summary: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchMatterTimeline(caseId: string) {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/timeline`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch matter timeline: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function syncMatterExternal(
+  caseId: string,
+  syncData: {
+    source_system: string;
+    external_reference: string;
+    received_data: Record<string, any>;
+  }
+) {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/external-sync`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(syncData),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `External sync failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
 

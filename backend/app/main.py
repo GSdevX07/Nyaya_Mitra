@@ -129,6 +129,11 @@ app.include_router(citizen_router)
 from app.routes.rule_engine_routes import router as rule_engine_router
 app.include_router(rule_engine_router)
 
+# ── Stage 9: Workflow & Authoritative Matter State Machine Router ───────────
+from app.workflow.routes import router as workflow_router
+app.include_router(workflow_router, prefix="/api")
+app.include_router(workflow_router)
+
 # ── Mock database ─────────────────────────────────────────────────────────────
 # 5 hero cases engineered to hit distinct agent decision branches.
 # All data is synthetic see Nyaya_Mitra_Master_Roadmap_v2.md §8, Step 1.1.
@@ -1557,7 +1562,7 @@ def file_case_in_court(
     case_id: str,
     filing_reference: Optional[str] = None,
     current_user: AuthUser = Depends(require_role(
-        Role.SUPERVISING_LEGAL_OFFICER,
+        Role.DEFENSE_ADVOCATE, Role.SUPERVISING_LEGAL_OFFICER, Role.INTEGRATION_SERVICE,
     ))
 ):
     """

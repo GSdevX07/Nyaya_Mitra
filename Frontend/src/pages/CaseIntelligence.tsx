@@ -20,6 +20,11 @@ import {
   ShieldCheck,
   Building2,
   UserCheck,
+  Bot,
+  Cpu,
+  GitBranch,
+  ChevronRight,
+  Check,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
@@ -38,6 +43,10 @@ import {
   submitCaseComment,
   assignCaseCounsel,
   exportCaseFile,
+  fetchMatterState,
+  fetchAvailableTransitions,
+  requestMatterTransition,
+  fetchMatterHandoffSummary,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { jsPDF } from "jspdf";
@@ -82,14 +91,51 @@ export function CaseIntelligence() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [pendingDocType, setPendingDocType] = useState<string | null>(null);
 
+  // ── Stage 9: Authoritative Matter Lifecycle & Handoff State ─────────────
+  const [matterState, setMatterState] = useState<string | null>(null);
+  const [matterVersion, setMatterVersion] = useState<number | null>(null);
+  const [availableTransitions, setAvailableTransitions] = useState<any[]>([]);
+  const [handoffSummary, setHandoffSummary] = useState<any | null>(null);
+  const [transitioningAction, setTransitioningAction] = useState<string | null>(null);
+
+  const CANONICAL_STATES = [
+    "INTAKE",
+    "VERIFICATION",
+    "REVIEW",
+    "LEGAL_AID_REQUIRED",
+    "ASSIGNED",
+    "DOCUMENT_PENDING",
+    "ANALYSIS_READY",
+    "HUMAN_REVIEW",
+    "SUBMITTED",
+    "APPROVED",
+    "FILED",
+    "HEARING_SCHEDULED",
+    "ORDER_RECEIVED",
+    "RELEASE_WORKFLOW",
+    "POST_RELEASE_FOLLOW_UP",
+    "CLOSED",
+  ];
+
+  const EXCEPTION_STATES = [
+    "MANUAL_REVIEW_REQUIRED",
+    "TRANSITION_BLOCKED",
+    "DATA_CONFLICT",
+    "EXTERNAL_SYNC_FAILED",
+  ];
+
+
   const load = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     setError(null);
     try {
-      const [data, docData] = await Promise.all([
+      const [data, docData, stateData, transData, handoffData] = await Promise.all([
         fetchCaseById(id),
         fetchCaseDocuments(id),
+        fetchMatterState(id).catch(() => null),
+        fetchAvailableTransitions(id).catch(() => null),
+        fetchMatterHandoffSummary(id).catch(() => null),
       ]);
       if (!data) throw new Error("Not found");
       setCaseData(data);
@@ -98,6 +144,16 @@ export function CaseIntelligence() {
       }
       if (data.advocate_signed_off) {
         setAdvocateSignedOff(true);
+      }
+      if (stateData) {
+        setMatterState(stateData.canonical_state);
+        setMatterVersion(stateData.version_number);
+      }
+      if (transData) {
+        setAvailableTransitions(transData.available_transitions || []);
+      }
+      if (handoffData) {
+        setHandoffSummary(handoffData);
       }
       if (data.draft?.drafted_document) {
         setEditableDraft((data.draft.drafted_document as string).replaceAll("**", ""));
@@ -633,6 +689,27 @@ export function CaseIntelligence() {
     }
   };
 
+
+  const handleWorkflowTransition = async (action: string, payload?: Record<string, any>, comment?: string) => {
+    if (!id) return;
+    setTransitioningAction(action);
+    try {
+      const res = await requestMatterTransition(id, action, payload, comment, matterVersion || undefined);
+      setActionBanner({
+        type: "success",
+        text: `State transitioned to ${res.current_state} (Version ${res.version_number}) via ${action}.`,
+      });
+      await load();
+    } catch (err: any) {
+      setActionBanner({
+        type: "error",
+        text: err.message || `Transition '${action}' failed.`,
+      });
+    } finally {
+      setTransitioningAction(null);
+    }
+  };
+
   const handleAssignCounsel = async () => {
     if (!caseData?.case_id || !selectedLawyerId) return;
     try {
@@ -757,6 +834,9 @@ export function CaseIntelligence() {
                 </button>
               )}
             </div>
+
+      
+
           ) : isDlsa ? (
             <>
               <button
@@ -781,6 +861,119 @@ export function CaseIntelligence() {
           )}
         </div>
       </div>
+
+      {/* ── Stage 9: Canonical Lifecycle Progression Track ───────────────── */}
+      <div className="p-4 border border-border bg-card rounded-sm space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground">
+              Matter Lifecycle Progression:
+            </span>
+            <span className="px-2.5 py-0.5 rounded text-xs font-bold font-mono bg-primary/15 text-primary border border-primary/30">
+              {matterState || c.status || "INTAKE"}
+            </span>
+            {matterVersion && (
+              <span className="px-2 py-0.5 rounded text-[11px] font-mono text-muted-foreground bg-secondary border border-border">
+                v{matterVersion} (Optimistic Locked)
+              </span>
+            )}
+          </div>
+          {availableTransitions.filter(t => t.user_has_permission).length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-mono text-muted-foreground">Permitted Actions:</span>
+              {availableTransitions.filter(t => t.user_has_permission).slice(0, 3).map(t => (
+                <button
+                  key={t.action}
+                  onClick={() => handleWorkflowTransition(t.action)}
+                  disabled={transitioningAction === t.action}
+                  className="px-2.5 py-1 text-[11px] font-mono font-bold rounded bg-secondary hover:bg-muted border border-border text-foreground transition-colors flex items-center gap-1"
+                >
+                  {transitioningAction === t.action ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                  {t.action.replace(/_/g, " ")}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 16-State Horizontal Stepper */}
+        <div className="overflow-x-auto pb-1">
+          <div className="flex items-center min-w-[1100px] gap-1 text-[10px] font-mono">
+            {CANONICAL_STATES.map((st, i) => {
+              const currentIdx = CANONICAL_STATES.indexOf(matterState || c.status || "INTAKE");
+              const isPast = currentIdx !== -1 && i < currentIdx;
+              const isCurrent = currentIdx !== -1 && i === currentIdx;
+              return (
+                <div key={st} className="flex items-center gap-1">
+                  <div
+                    className={`px-2 py-1 rounded flex items-center gap-1 whitespace-nowrap transition-colors ${
+                      isCurrent
+                        ? "bg-primary text-primary-foreground font-bold shadow-sm"
+                        : isPast
+                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                        : "bg-secondary/40 text-muted-foreground/70 border border-border/40"
+                    }`}
+                  >
+                    {isPast ? <Check className="w-2.5 h-2.5 shrink-0" /> : <span className="w-2.5 text-center">{i + 1}</span>}
+                    <span>{st.replace(/_/g, " ")}</span>
+                  </div>
+                  {i < CANONICAL_STATES.length - 1 && (
+                    <ChevronRight className={`w-3 h-3 shrink-0 ${isPast ? "text-emerald-500" : "text-muted-foreground/40"}`} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Exception State Banner if active */}
+      {matterState && EXCEPTION_STATES.includes(matterState) && (
+        <div className="p-4 rounded-sm border border-rose-500/40 bg-rose-500/10 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0" />
+            <div>
+              <h4 className="font-bold text-sm text-rose-600 dark:text-rose-400 font-serif">
+                Workflow Exception Active: {matterState.replace(/_/g, " ")}
+              </h4>
+              <p className="text-xs text-muted-foreground">
+                Progress is halted pending supervisory institutional review. A Supervising Legal Officer must resolve the exception condition.
+              </p>
+            </div>
+          </div>
+          {hasRole("SUPERVISING_LEGAL_OFFICER") && (
+            <button
+              onClick={() => handleWorkflowTransition("RESOLVE_EXCEPTION", { resolution_notes: "Exception reviewed and resolved by supervisor." })}
+              disabled={transitioningAction === "RESOLVE_EXCEPTION"}
+              className="px-3 py-1.5 rounded-sm bg-rose-600 hover:bg-rose-700 text-white text-xs font-mono font-bold flex items-center gap-1.5 shadow-sm"
+            >
+              {transitioningAction === "RESOLVE_EXCEPTION" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+              Resolve Exception & Restore Workflow
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Case Handoff / Reassignment Banner if present */}
+      {handoffSummary?.latest_handoff && (
+        <div className="p-3.5 rounded-sm border border-border bg-secondary/20 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <GitBranch className="w-4 h-4 text-primary shrink-0" />
+            <div className="text-xs">
+              <span className="font-bold text-foreground">Handoff Record: </span>
+              <span className="text-muted-foreground">
+                Reassigned from {handoffSummary.latest_handoff.initiated_by} ({handoffSummary.latest_handoff.from_role}) to {handoffSummary.latest_handoff.to_user_id} ({handoffSummary.latest_handoff.to_role}).
+              </span>
+              <span className="text-primary font-mono ml-2">Reason: {handoffSummary.originating_reason}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
+            <span>Completed Milestones: {handoffSummary.completed_milestones?.length || 0}</span>
+            <span>•</span>
+            <span>Pending Requirements: {handoffSummary.pending_requirements?.length || 0}</span>
+          </div>
+        </div>
+      )}
 
       {/* Identified Legal Needs Alerts (Hidden for Police Officers to protect defense strategy) */}
       {!isPolice && legalNeeds.length > 0 && (
@@ -1533,7 +1726,37 @@ export function CaseIntelligence() {
                   <div className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-primary border-2 border-card" />
                   <div className="p-4 border border-border rounded-sm bg-secondary/30 space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-bold text-xs text-foreground font-serif">{event.title}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs text-foreground font-serif">{event.title}</span>
+                        {(() => {
+                          const badge = (event as any).provenance_badge || (event.source?.includes("AI") ? "AI" : event.source?.includes("Sync") ? "EXTERNAL_SYNC" : event.is_human_verified ? "USER" : "SYSTEM");
+                          if (badge === "AI") {
+                            return (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 flex items-center gap-1">
+                                <Bot className="w-3 h-3" /> AI
+                              </span>
+                            );
+                          } else if (badge === "EXTERNAL_SYNC") {
+                            return (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 flex items-center gap-1">
+                                <RefreshCw className="w-3 h-3" /> Sync
+                              </span>
+                            );
+                          } else if (badge === "SYSTEM") {
+                            return (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-secondary text-foreground border border-border flex items-center gap-1">
+                                <Cpu className="w-3 h-3" /> System
+                              </span>
+                            );
+                          } else {
+                            return (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                                <User className="w-3 h-3" /> User
+                              </span>
+                            );
+                          }
+                        })()}
+                      </div>
                       <span className="font-mono text-[10px] text-muted-foreground">
                         {new Date(event.timestamp).toLocaleString()}
                       </span>

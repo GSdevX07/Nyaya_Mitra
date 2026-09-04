@@ -66,7 +66,60 @@ class DataSourceStatus(str, Enum):
     FUTURE_GOVERNMENT_API = "FUTURE_GOVERNMENT_API"
 
 
+class MatterState(str, Enum):
+    """Canonical 16-state matter lifecycle and 4 explicit exception states."""
+    # Canonical Matter Lifecycle (16 States)
+    INTAKE = "INTAKE"
+    VERIFICATION = "VERIFICATION"
+    REVIEW = "REVIEW"
+    LEGAL_AID_REQUIRED = "LEGAL_AID_REQUIRED"
+    ASSIGNED = "ASSIGNED"
+    DOCUMENT_PENDING = "DOCUMENT_PENDING"
+    ANALYSIS_READY = "ANALYSIS_READY"
+    HUMAN_REVIEW = "HUMAN_REVIEW"
+    APPROVED = "APPROVED"
+    SUBMITTED = "SUBMITTED"
+    FILED = "FILED"
+    HEARING_SCHEDULED = "HEARING_SCHEDULED"
+    ORDER_RECEIVED = "ORDER_RECEIVED"
+    RELEASE_WORKFLOW = "RELEASE_WORKFLOW"
+    POST_RELEASE_FOLLOW_UP = "POST_RELEASE_FOLLOW_UP"
+    CLOSED = "CLOSED"
+
+    # Explicit Exception States (4 States)
+    MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
+    TRANSITION_BLOCKED = "TRANSITION_BLOCKED"
+    DATA_CONFLICT = "DATA_CONFLICT"
+    EXTERNAL_SYNC_FAILED = "EXTERNAL_SYNC_FAILED"
+
+
 class CaseState(str, Enum):
+    """Procedural states across the case lifecycle with backward compatibility."""
+    # Canonical States
+    INTAKE = "INTAKE"
+    VERIFICATION = "VERIFICATION"
+    REVIEW = "REVIEW"
+    LEGAL_AID_REQUIRED = "LEGAL_AID_REQUIRED"
+    ASSIGNED = "ASSIGNED"
+    DOCUMENT_PENDING = "DOCUMENT_PENDING"
+    ANALYSIS_READY = "ANALYSIS_READY"
+    HUMAN_REVIEW = "HUMAN_REVIEW"
+    APPROVED = "APPROVED"
+    SUBMITTED = "SUBMITTED"
+    FILED = "FILED"
+    HEARING_SCHEDULED = "HEARING_SCHEDULED"
+    ORDER_RECEIVED = "ORDER_RECEIVED"
+    RELEASE_WORKFLOW = "RELEASE_WORKFLOW"
+    POST_RELEASE_FOLLOW_UP = "POST_RELEASE_FOLLOW_UP"
+    CLOSED = "CLOSED"
+
+    # Explicit Exception States
+    MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
+    TRANSITION_BLOCKED = "TRANSITION_BLOCKED"
+    DATA_CONFLICT = "DATA_CONFLICT"
+    EXTERNAL_SYNC_FAILED = "EXTERNAL_SYNC_FAILED"
+
+    # Legacy Backward-Compatibility Enums
     INTAKE_PENDING = "INTAKE_PENDING"
     DETECTED = "DETECTED"
     LEGAL_NEED_IDENTIFIED = "LEGAL_NEED_IDENTIFIED"
@@ -77,14 +130,41 @@ class CaseState(str, Enum):
     DRAFT_READY = "DRAFT_READY"
     LAWYER_REVIEW = "LAWYER_REVIEW"
     APPROVED_READY_FOR_FILING = "APPROVED_READY_FOR_FILING"
-    FILED = "FILED"
-    HEARING_SCHEDULED = "HEARING_SCHEDULED"
     ORDER_PASSED = "ORDER_PASSED"
     RELEASE_PROCESSING = "RELEASE_PROCESSING"
     RELEASED = "RELEASED"
     POST_RELEASE_PRESERVED = "POST_RELEASE_PRESERVED"
     APPEAL_PENDING = "APPEAL_PENDING"
-    CLOSED = "CLOSED"
+
+    @classmethod
+    def to_canonical(cls, state: Any) -> MatterState:
+        if isinstance(state, Enum):
+            val = state.value
+        else:
+            val = str(state)
+        legacy_map = {
+            "INTAKE_PENDING": MatterState.INTAKE,
+            "DETECTED": MatterState.INTAKE,
+            "LEGAL_NEED_IDENTIFIED": MatterState.LEGAL_AID_REQUIRED,
+            "DOCUMENTS_MISSING": MatterState.DOCUMENT_PENDING,
+            "DOCUMENTS_COMPLETE": MatterState.VERIFICATION,
+            "MANUAL_REVIEW": MatterState.MANUAL_REVIEW_REQUIRED,
+            "ELIGIBLE": MatterState.ANALYSIS_READY,
+            "DRAFT_READY": MatterState.ANALYSIS_READY,
+            "LAWYER_REVIEW": MatterState.HUMAN_REVIEW,
+            "APPROVED_READY_FOR_FILING": MatterState.APPROVED,
+            "ORDER_PASSED": MatterState.ORDER_RECEIVED,
+            "RELEASE_PROCESSING": MatterState.RELEASE_WORKFLOW,
+            "RELEASED": MatterState.RELEASE_WORKFLOW,
+            "POST_RELEASE_PRESERVED": MatterState.POST_RELEASE_FOLLOW_UP,
+            "APPEAL_PENDING": MatterState.HUMAN_REVIEW,
+        }
+        if val in legacy_map:
+            return legacy_map[val]
+        try:
+            return MatterState(val)
+        except ValueError:
+            return MatterState.MANUAL_REVIEW_REQUIRED
 
 
 class AuditAction(str, Enum):

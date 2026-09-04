@@ -422,6 +422,36 @@ class WorkflowStateMachine:
             elif key == "assigned_advocate_id":
                 if not (payload.get("assigned_advocate_id") or payload.get("assigned_advocate_name") or payload.get("advocate_id")):
                     missing_keys.append("assigned_advocate_id (or assigned_advocate_name)")
+            elif key == "reason":
+                val = payload.get("reason") or payload.get("comment") or payload.get("notes") or payload.get("justification")
+                if not val:
+                    missing_keys.append("reason")
+                else:
+                    payload["reason"] = val
+            elif key == "conflict_details":
+                val = payload.get("conflict_details") or payload.get("details") or payload.get("conflict") or payload.get("comment")
+                if not val:
+                    missing_keys.append("conflict_details")
+                else:
+                    payload["conflict_details"] = val
+            elif key == "block_reason":
+                val = payload.get("block_reason") or payload.get("reason") or payload.get("comment") or payload.get("justification")
+                if not val:
+                    missing_keys.append("block_reason")
+                else:
+                    payload["block_reason"] = val
+            elif key == "resolution_notes":
+                val = payload.get("resolution_notes") or payload.get("notes") or payload.get("comment") or payload.get("resolution")
+                if not val:
+                    missing_keys.append("resolution_notes")
+                else:
+                    payload["resolution_notes"] = val
+            elif key == "closure_reason":
+                val = payload.get("closure_reason") or payload.get("reason") or payload.get("comment")
+                if not val:
+                    missing_keys.append("closure_reason")
+                else:
+                    payload["closure_reason"] = val
             elif key not in payload or payload[key] is None or payload[key] == "":
                 missing_keys.append(key)
 

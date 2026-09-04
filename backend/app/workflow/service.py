@@ -81,6 +81,8 @@ class WorkflowService:
         """
         if payload is None:
             payload = {}
+        if comment and "comment" not in payload:
+            payload["comment"] = comment
 
         current_state, current_version, case_data = cls.get_case_state(case_id)
 

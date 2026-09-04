@@ -25,6 +25,7 @@ import {
   GitBranch,
   ChevronRight,
   Check,
+  X,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
@@ -97,6 +98,15 @@ export function CaseIntelligence() {
   const [availableTransitions, setAvailableTransitions] = useState<any[]>([]);
   const [handoffSummary, setHandoffSummary] = useState<any | null>(null);
   const [transitioningAction, setTransitioningAction] = useState<string | null>(null);
+  const [activeTransitionModal, setActiveTransitionModal] = useState<{
+    action: string;
+    target_state?: string;
+    description?: string;
+    required_payload_keys: string[];
+    is_exception?: boolean;
+  } | null>(null);
+  const [transitionFormData, setTransitionFormData] = useState<Record<string, string>>({});
+  const [transitionComment, setTransitionComment] = useState("");
 
   const CANONICAL_STATES = [
     "INTAKE",
@@ -710,6 +720,47 @@ export function CaseIntelligence() {
     }
   };
 
+  const handleTransitionButtonClick = (t: any) => {
+    // If the transition requires payload keys, open the interactive modal
+    if (t.required_payload_keys && t.required_payload_keys.length > 0) {
+      const initialForm: Record<string, string> = {};
+      t.required_payload_keys.forEach((key: string) => {
+        if (key === "hearing_date" || key === "order_date" || key === "release_date") {
+          initialForm[key] = new Date().toISOString().split("T")[0];
+        } else if (key === "order_type") {
+          initialForm[key] = "BAIL_GRANTED";
+        } else {
+          initialForm[key] = "";
+        }
+      });
+      setTransitionFormData(initialForm);
+      setTransitionComment("");
+      setActiveTransitionModal(t);
+    } else {
+      // Direct execution for transitions with no required input
+      handleWorkflowTransition(t.action);
+    }
+  };
+
+  const handleTransitionFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeTransitionModal) return;
+
+    // Check required fields
+    for (const key of activeTransitionModal.required_payload_keys) {
+      if (!transitionFormData[key] || !transitionFormData[key].trim()) {
+        alert(`Required field missing: ${key.replace(/_/g, " ")}`);
+        return;
+      }
+    }
+
+    const action = activeTransitionModal.action;
+    const payload = { ...transitionFormData };
+    const comment = transitionComment.trim() || undefined;
+    setActiveTransitionModal(null);
+    await handleWorkflowTransition(action, payload, comment);
+  };
+
   const handleAssignCounsel = async () => {
     if (!caseData?.case_id || !selectedLawyerId) return;
     try {
@@ -879,16 +930,31 @@ export function CaseIntelligence() {
             )}
           </div>
           {availableTransitions.filter(t => t.user_has_permission).length > 0 && (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[11px] font-mono text-muted-foreground">Permitted Actions:</span>
-              {availableTransitions.filter(t => t.user_has_permission).slice(0, 3).map(t => (
+              {/* Forward workflow transitions */}
+              {availableTransitions.filter(t => t.user_has_permission && !t.is_exception).map(t => (
                 <button
                   key={t.action}
-                  onClick={() => handleWorkflowTransition(t.action)}
+                  onClick={() => handleTransitionButtonClick(t)}
                   disabled={transitioningAction === t.action}
-                  className="px-2.5 py-1 text-[11px] font-mono font-bold rounded bg-secondary hover:bg-muted border border-border text-foreground transition-colors flex items-center gap-1"
+                  className="px-2.5 py-1 text-[11px] font-mono font-bold rounded bg-secondary hover:bg-muted border border-border text-foreground transition-colors flex items-center gap-1 shadow-sm"
+                  title={t.description}
                 >
                   {transitioningAction === t.action ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                  {t.action.replace(/_/g, " ")}
+                </button>
+              ))}
+              {/* Exception transitions */}
+              {availableTransitions.filter(t => t.user_has_permission && t.is_exception && t.action !== "RESOLVE_EXCEPTION").map(t => (
+                <button
+                  key={t.action}
+                  onClick={() => handleTransitionButtonClick(t)}
+                  disabled={transitioningAction === t.action}
+                  className="px-2 py-1 text-[10px] font-mono font-bold rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
+                  title={t.description}
+                >
+                  <AlertTriangle className="w-3 h-3 shrink-0" />
                   {t.action.replace(/_/g, " ")}
                 </button>
               ))}
@@ -943,7 +1009,16 @@ export function CaseIntelligence() {
           </div>
           {hasRole("SUPERVISING_LEGAL_OFFICER") && (
             <button
-              onClick={() => handleWorkflowTransition("RESOLVE_EXCEPTION", { resolution_notes: "Exception reviewed and resolved by supervisor." })}
+              onClick={() => {
+                const resolveRule = availableTransitions.find(t => t.action === "RESOLVE_EXCEPTION") || {
+                  action: "RESOLVE_EXCEPTION",
+                  target_state: "HUMAN_REVIEW",
+                  description: "Supervising Legal Officer resolves exception condition and restores matter to active workflow.",
+                  required_payload_keys: ["resolution_notes"],
+                  is_exception: true,
+                };
+                handleTransitionButtonClick(resolveRule);
+              }}
               disabled={transitioningAction === "RESOLVE_EXCEPTION"}
               className="px-3 py-1.5 rounded-sm bg-rose-600 hover:bg-rose-700 text-white text-xs font-mono font-bold flex items-center gap-1.5 shadow-sm"
             >
@@ -2109,6 +2184,277 @@ export function CaseIntelligence() {
               </div>
             </div>
           )}
+        </div>
+      )}
+      {/* Interactive Workflow Transition Modal for Required Prerequisites */}
+      {activeTransitionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div
+            className="w-full max-w-lg bg-card border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+            style={{ boxShadow: "0 0 50px rgba(0,0,0,0.4)" }}
+          >
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-secondary/30">
+              <div className="flex items-center gap-2.5">
+                {activeTransitionModal.is_exception ? (
+                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+                ) : (
+                  <ShieldCheck className="w-5 h-5 text-primary shrink-0" />
+                )}
+                <div>
+                  <h3 className="text-sm font-serif font-bold text-foreground">
+                    {activeTransitionModal.action.replace(/_/g, " ")}
+                  </h3>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Target State: <span className="font-mono font-bold text-primary">{activeTransitionModal.target_state}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTransitionModal(null)}
+                className="w-7 h-7 rounded-lg hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleTransitionFormSubmit} className="p-6 space-y-4 overflow-y-auto">
+              {activeTransitionModal.description && (
+                <div className="p-3 bg-secondary/40 border border-border/60 rounded-lg text-xs text-muted-foreground">
+                  {activeTransitionModal.description}
+                </div>
+              )}
+
+              {activeTransitionModal.required_payload_keys.map((key) => {
+                if (key === "reason") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Reason for Manual Escalation <span className="text-rose-500">*</span>
+                      </label>
+                      <textarea
+                        required
+                        rows={3}
+                        value={transitionFormData[key] || ""}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        placeholder="Detail the statutory ambiguity, complex provisos, health or custody issues requiring human supervisor intervention..."
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  );
+                }
+                if (key === "conflict_details") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Data Conflict Details <span className="text-rose-500">*</span>
+                      </label>
+                      <textarea
+                        required
+                        rows={3}
+                        value={transitionFormData[key] || ""}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        placeholder="Specify conflicting custody dates, FIR numbers, charges, or biometric/identity discrepancies across Police, Jail, or Court records..."
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  );
+                }
+                if (key === "block_reason") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Administrative Block Justification <span className="text-rose-500">*</span>
+                      </label>
+                      <textarea
+                        required
+                        rows={3}
+                        value={transitionFormData[key] || ""}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        placeholder="State the institutional, legal stay, or statutory grounds for placing a hard block on this matter..."
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  );
+                }
+                if (key === "resolution_notes") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Supervisory Resolution Notes <span className="text-rose-500">*</span>
+                      </label>
+                      <textarea
+                        required
+                        rows={3}
+                        value={transitionFormData[key] || ""}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        placeholder="Document how the exception was verified and resolved before restoring the matter to active workflow..."
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  );
+                }
+                if (key === "closure_reason") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Matter Closure Justification <span className="text-rose-500">*</span>
+                      </label>
+                      <textarea
+                        required
+                        rows={2}
+                        value={transitionFormData[key] || ""}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        placeholder="Reason for concluding legal-aid and supervisory oversight..."
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  );
+                }
+                if (key === "filing_reference") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Court CNR / E-Filing Acknowledgement Number <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        required
+                        type="text"
+                        value={transitionFormData[key] || ""}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        placeholder="e.g., DLCT01-001234-2026 or EF-DEL-2026-098"
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  );
+                }
+                if (key === "hearing_date") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Scheduled Hearing Date <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        required
+                        type="date"
+                        value={transitionFormData[key] || ""}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  );
+                }
+                if (key === "order_type") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Court Order Pronouncement <span className="text-rose-500">*</span>
+                      </label>
+                      <select
+                        required
+                        value={transitionFormData[key] || "BAIL_GRANTED"}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      >
+                        <option value="BAIL_GRANTED">Bail Granted</option>
+                        <option value="BAIL_REJECTED">Bail Rejected</option>
+                        <option value="INTERIM_RELIEF">Interim Bail Granted</option>
+                        <option value="STATUTORY_BAIL_479">Section 479 Statutory Bail Granted</option>
+                        <option value="DISCHARGED">Discharged / Quashed</option>
+                      </select>
+                    </div>
+                  );
+                }
+                if (key === "order_date") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Date of Court Order <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        required
+                        type="date"
+                        value={transitionFormData[key] || ""}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  );
+                }
+                if (key === "release_date") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Prison Release Date <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        required
+                        type="date"
+                        value={transitionFormData[key] || ""}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  );
+                }
+                return (
+                  <div key={key}>
+                    <label className="block text-xs font-semibold text-foreground mb-1">
+                      {key.replace(/_/g, " ")} <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      required
+                      type="text"
+                      value={transitionFormData[key] || ""}
+                      onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                      className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                    />
+                  </div>
+                );
+              })}
+
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1">
+                  Audit Trail Comment (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={transitionComment}
+                  onChange={(e) => setTransitionComment(e.target.value)}
+                  placeholder="Optional explanatory notes for institutional audit log..."
+                  className="w-full p-2 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setActiveTransitionModal(null)}
+                  className="px-4 py-2 border border-border rounded-lg text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={transitioningAction === activeTransitionModal.action}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold font-mono text-white shadow-sm flex items-center gap-1.5 transition-colors ${
+                    activeTransitionModal.is_exception
+                      ? "bg-amber-600 hover:bg-amber-700"
+                      : "bg-primary hover:bg-primary/90 text-primary-foreground"
+                  }`}
+                >
+                  {transitioningAction === activeTransitionModal.action ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" />
+                  )}
+                  Confirm & Execute Transition
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

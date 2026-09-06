@@ -406,11 +406,37 @@ export async function signOffCase(caseId: string, draftText?: string) {
     });
     if (!res.ok) {
       const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.detail || "Counsel sign-off failed");
+      const detailMsg = typeof errJson.detail === "string" ? errJson.detail : (errJson.detail?.message || "Counsel sign-off failed");
+      const errorObj = new Error(detailMsg) as any;
+      errorObj.status = res.status;
+      errorObj.detail = errJson.detail;
+      throw errorObj;
     }
     return await res.json();
   } catch (err) {
     console.error("Error signing off case:", err);
+    throw err;
+  }
+}
+
+export async function saveCaseDraft(caseId: string, draftText: string) {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/save-draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ draft_text: draftText }),
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      const detailMsg = typeof errJson.detail === "string" ? errJson.detail : (errJson.detail?.message || "Failed to save draft changes");
+      const errorObj = new Error(detailMsg) as any;
+      errorObj.status = res.status;
+      errorObj.detail = errJson.detail;
+      throw errorObj;
+    }
+    return await res.json();
+  } catch (err) {
+    console.error("Error saving case draft:", err);
     throw err;
   }
 }
@@ -445,11 +471,17 @@ export async function fileCaseInCourt(caseId: string, filingRef?: string) {
 export async function fetchCaseById(caseId: string) {
   try {
     const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}`);
-    if (!res.ok) throw new Error(`Failed to fetch case ${caseId}`);
+    if (!res.ok) {
+      if (res.status === 403) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.detail || "Access Restricted: You are not authorized to access this case dossier.");
+      }
+      throw new Error(`Failed to fetch case ${caseId}`);
+    }
     return await res.json();
   } catch (err) {
     console.warn(`Backend API failed for case ${caseId}:`, err);
-    return null;
+    throw err;
   }
 }
 
@@ -651,6 +683,22 @@ export async function fetchNotifications() {
   } catch (err) {
     console.warn("Backend API notifications unavailable:", err);
     return [];
+  }
+}
+
+export async function clearNotificationsApi(notificationId?: string) {
+  try {
+    const url = notificationId
+      ? `${API_BASE_URL}/notifications?id=${encodeURIComponent(notificationId)}`
+      : `${API_BASE_URL}/notifications`;
+    const res = await authFetch(url, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to clear notifications");
+    return await res.json();
+  } catch (err) {
+    console.warn("Backend API clear notifications error:", err);
+    return { status: "cleared_locally", cleared_count: 0 };
   }
 }
 
@@ -1238,6 +1286,15 @@ export async function assignCaseCounsel(
   return await res.json();
 }
 
+export async function getEligibleCounsel(caseId: string) {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/eligible-counsel`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Fetch eligible counsel failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
 // ── Stage 9: Matter Lifecycle, Approvals & Handoff APIs ─────────────────────
 
 export async function requestMatterTransition(
@@ -1259,7 +1316,11 @@ export async function requestMatterTransition(
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Transition '${transition}' failed: HTTP ${res.status}`);
+    const detailMsg = typeof err.detail === "string" ? err.detail : (err.detail?.message || `Transition '${transition}' failed: HTTP ${res.status}`);
+    const errorObj = new Error(detailMsg) as any;
+    errorObj.status = res.status;
+    errorObj.detail = err.detail;
+    throw errorObj;
   }
   return await res.json();
 }
@@ -1410,5 +1471,65 @@ export async function syncMatterExternal(
   }
   return await res.json();
 }
+
+export async function generateBailDraft(caseId: string): Promise<{
+  case_id: string;
+  draft_text: string;
+  version_id: string;
+  version_number: number;
+  provenance: string;
+  message: string;
+}> {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/draft/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to generate bail draft: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export interface DocumentContentPreview {
+  id: string;
+  case_id: string;
+  document_type: string;
+  file_name: string;
+  extracted_text: string;
+  summary: string;
+  file_hash: string;
+  uploaded_by: string;
+  uploaded_at: string;
+  document_status: string;
+  ocr_engine?: string;
+}
+
+export async function fetchDocumentContent(docId: string): Promise<DocumentContentPreview> {
+  const res = await authFetch(`${API_BASE_URL}/documents/${encodeURIComponent(docId)}/content`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch document content: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function downloadCaseDocument(docId: string, fileName: string = "document.txt"): Promise<void> {
+  const res = await authFetch(`${API_BASE_URL}/documents/download/${encodeURIComponent(docId)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to download document: HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}
+
 
 

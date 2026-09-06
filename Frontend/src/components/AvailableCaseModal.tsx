@@ -78,10 +78,10 @@ export function AvailableCaseModal({
     (user?.linked_case_id && c.case_id === user?.linked_case_id);
   const isEligible = item.eligibility ? item.eligibility.is_eligible : item.days_overdue > 0;
   const threshold = item.eligibility?.threshold_days ?? 0;
-  const relativeName = c.relative_name || "Ramesh Kumar";
-  const relativeRelation = c.relative_relation || "Father / Guardian";
-  const relativePhone = c.relative_phone || "+91 98765 11001";
-  const permanentAddress = c.permanent_address || "Plot 42, Gandhi Nagar, Sector 4, Chennai, TN - 600001";
+  const relativeName = c.relative_name || "Not Recorded";
+  const relativeRelation = c.relative_relation || "Not Recorded";
+  const relativePhone = c.relative_phone || "Not Provided";
+  const permanentAddress = c.permanent_address || "Not Recorded";
 
   return (
     <AnimatePresence>

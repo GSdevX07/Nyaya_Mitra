@@ -35,14 +35,29 @@ def test_approve_case_rejected_if_documents_missing():
         update_case_status("UTP-0001", CaseState.DOCUMENTS_MISSING)
         res = client.post("/cases/UTP-0001/approve", headers=headers)
         assert res.status_code == 400
-        assert "mandatory case documents are missing" in res.json()["detail"]
+        assert "Illegal transition" in res.json()["detail"] or "mandatory case documents are missing" in res.json()["detail"]
     finally:
         update_case_status("UTP-0001", original_status)
 
 
+def _get_advocate_headers():
+    user = get_user_by_email("advocate@demo.nyayamitra.in")
+    assert user is not None
+    token = create_access_token(
+        subject=user.id,
+        role=user.role.value,
+        org_id=user.org_id,
+        extra_claims={
+            "full_name": user.full_name,
+            "district": user.district,
+        }
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_file_case_rejected_if_not_approved():
     """State Machine: Cannot file a case in court unless it has been formally approved."""
-    headers = _get_supervisor_headers()
+    headers = _get_advocate_headers()
     case = get_case("UTP-0001")
     assert case is not None
     original_status = case.status
@@ -50,7 +65,7 @@ def test_file_case_rejected_if_not_approved():
         update_case_status("UTP-0001", CaseState.DOCUMENTS_MISSING)
         res = client.post("/cases/UTP-0001/file", headers=headers)
         assert res.status_code == 400
-        assert "cannot be filed" in res.json()["detail"]
+        assert "Illegal transition" in res.json()["detail"] or "cannot be filed" in res.json()["detail"]
     finally:
         update_case_status("UTP-0001", original_status)
 

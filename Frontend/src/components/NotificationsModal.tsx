@@ -1,4 +1,4 @@
-import { Bell, AlertTriangle, CheckCircle, Info, ShieldAlert, X } from "lucide-react";
+import { Bell, AlertTriangle, CheckCircle, Info, ShieldAlert, X, Trash2, BellOff, CheckCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 
 export interface NotificationItem {
@@ -17,6 +17,8 @@ interface NotificationsModalProps {
   notifications: NotificationItem[];
   onMarkAllRead: () => void;
   onMarkItemRead: (id: string) => void;
+  onClearAll?: () => void;
+  onClearItem?: (id: string) => void;
   loading?: boolean;
 }
 
@@ -26,6 +28,8 @@ export function NotificationsModal({
   notifications,
   onMarkAllRead,
   onMarkItemRead,
+  onClearAll,
+  onClearItem,
   loading = false,
 }: NotificationsModalProps) {
   if (!isOpen) return null;
@@ -69,18 +73,33 @@ export function NotificationsModal({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {unreadCount > 0 && (
               <button
+                type="button"
                 onClick={onMarkAllRead}
-                className="text-xs text-accent hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-secondary/50 font-medium"
+                className="text-xs text-accent hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-secondary/50 font-medium flex items-center gap-1"
+                title="Mark all notifications as read"
               >
-                Mark all read
+                <CheckCheck className="w-3.5 h-3.5" />
+                <span>Mark read</span>
+              </button>
+            )}
+            {notifications.length > 0 && onClearAll && (
+              <button
+                type="button"
+                onClick={onClearAll}
+                className="text-xs text-rose-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors px-2 py-1 rounded font-medium flex items-center gap-1"
+                title="Clear all notifications"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear all</span>
               </button>
             )}
             <button
+              type="button"
               onClick={onClose}
-              className="p-1 text-muted-foreground hover:text-foreground rounded-sm hover:bg-secondary transition-colors"
+              className="p-1 text-muted-foreground hover:text-foreground rounded-sm hover:bg-secondary transition-colors ml-1"
             >
               <X className="w-4 h-4" />
             </button>
@@ -93,15 +112,23 @@ export function NotificationsModal({
               Loading alerts from Nyaya Mitra pipeline...
             </div>
           ) : notifications.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">
-              No new notifications.
+            <div className="py-12 px-6 text-center flex flex-col items-center justify-center gap-3 text-muted-foreground">
+              <div className="w-12 h-12 rounded-full bg-secondary/60 flex items-center justify-center text-muted-foreground">
+                <BellOff className="w-6 h-6 opacity-60" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">All notifications cleared</p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-[260px] leading-relaxed">
+                  You are caught up. There are no pending alerts or case notifications for your workspace.
+                </p>
+              </div>
             </div>
           ) : (
             notifications.map((item) => (
               <div
                 key={item.id}
                 onClick={() => onMarkItemRead(item.id)}
-                className={`p-3.5 rounded border transition-all cursor-pointer flex items-start gap-3 ${
+                className={`group p-3.5 rounded border transition-all cursor-pointer flex items-start gap-3 relative ${
                   item.read
                     ? "bg-card shadow-sm border-border opacity-60 hover:opacity-80"
                     : "bg-card/80 border-accent/20 hover:border-accent/40 shadow-sm"
@@ -118,9 +145,24 @@ export function NotificationsModal({
                         <span className="w-1.5 h-1.5 rounded-sm bg-accent shrink-0" />
                       )}
                     </div>
-                    <span className="text-[10px] text-muted-foreground shrink-0">
-                      {item.timestamp}
-                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-[10px] text-muted-foreground">
+                        {item.timestamp}
+                      </span>
+                      {onClearItem && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onClearItem(item.id);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 hover:text-rose-500 hover:bg-rose-500/10 p-1 rounded transition-all"
+                          title="Dismiss notification"
+                        >
+                          <Trash2 className="w-3 h-3 text-muted-foreground hover:text-rose-500" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <p className="text-xs text-muted-foreground leading-relaxed mb-2">
                     {item.message}

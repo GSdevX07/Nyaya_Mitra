@@ -1,12 +1,12 @@
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import {
   ArrowLeft,
   FileText,
   CheckCircle2,
   AlertTriangle,
   AlertCircle,
+  ShieldAlert,
   Calculator,
-  Shield,
   Clock,
   User,
   FileCheck,
@@ -25,14 +25,18 @@ import {
   GitBranch,
   ChevronRight,
   Check,
+  Search,
   X,
+  Eye,
+  Save,
+  Info,
+  Scale,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   fetchCaseById,
-  approveCaseInBackend,
   signOffCase,
-  fileCaseInCourt,
+  saveCaseDraft,
   uploadDocumentFile,
   fetchCaseDocuments,
   verifyUploadedDocument,
@@ -43,14 +47,20 @@ import {
   referJailCaseToDlsa,
   submitCaseComment,
   assignCaseCounsel,
+  getEligibleCounsel,
   exportCaseFile,
   fetchMatterState,
   fetchAvailableTransitions,
   requestMatterTransition,
   fetchMatterHandoffSummary,
+  generateBailDraft,
+  downloadCaseDocument,
 } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
 import { jsPDF } from "jspdf";
+import { useAuth } from "@/lib/auth";
+import { DocumentPreviewModal } from "@/components/DocumentPreviewModal";
+import { ToastContainer, type ToastItem } from "@/components/ToastContainer";
+import { resolveCaseUpdater } from "@/lib/utils";
 
 export function CaseIntelligence() {
   const { user, hasRole, can } = useAuth();
@@ -64,12 +74,21 @@ export function CaseIntelligence() {
   const [caseDocDetails, setCaseDocDetails] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [approving, setApproving] = useState(false);
-  const [filing, setFiling] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
   const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
   const [reviewingDocId, setReviewingDocId] = useState<string | null>(null);
   const [editableDraft, setEditableDraft] = useState<string>("");
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const addToast = (type: ToastItem["type"], title: string, message: string) => {
+    const toastId = "t-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+    setToasts((prev) => [...prev, { id: toastId, type, title, message, timestamp: Date.now() }]);
+  };
+
+  const removeToast = (toastId: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== toastId));
+  };
   const [dlsaComment, setDlsaComment] = useState<string>("");
   const [submittingComment, setSubmittingComment] = useState(false);
   const [activeTab, setActiveTab] = useState<"dossier" | "draft" | "timeline" | "evidence" | "statutes" | "legalaid">("dossier");
@@ -83,9 +102,13 @@ export function CaseIntelligence() {
   const [actionBanner, setActionBanner] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
   const [exportingDossier, setExportingDossier] = useState(false);
+  const [generatingDraft, setGeneratingDraft] = useState(false);
+  const [previewDocId, setPreviewDocId] = useState<string | null>(null);
+  const [previewDocTitle, setPreviewDocTitle] = useState<string>("");
+  const [advocateSearchQuery, setAdvocateSearchQuery] = useState("");
   const [assigningCounsel, setAssigningCounsel] = useState(false);
-  const [selectedLawyerId, setSelectedLawyerId] = useState("LWYR-001");
-  const [selectedLawyerName, setSelectedLawyerName] = useState("Adv. Rajesh Sharma");
+  const [selectedLawyerId, setSelectedLawyerId] = useState("");
+  const [selectedLawyerName, setSelectedLawyerName] = useState("");
   const [assignmentNotes, setAssignmentNotes] = useState("");
   const [assignmentSuccess, setAssignmentSuccess] = useState<string | null>(null);
 
@@ -107,6 +130,9 @@ export function CaseIntelligence() {
   } | null>(null);
   const [transitionFormData, setTransitionFormData] = useState<Record<string, string>>({});
   const [transitionComment, setTransitionComment] = useState("");
+  const [eligibleCounselList, setEligibleCounselList] = useState<any[]>([]);
+  const [loadingEligibleCounsel, setLoadingEligibleCounsel] = useState(false);
+  const [counselSearchQuery, setCounselSearchQuery] = useState("");
 
   const CANONICAL_STATES = [
     "INTAKE",
@@ -140,15 +166,20 @@ export function CaseIntelligence() {
     setLoading(true);
     setError(null);
     try {
-      const [data, docData, stateData, transData, handoffData] = await Promise.all([
+      const canManageCounsel = ["DLSA_OFFICER", "SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN", "GOV_ADMIN"].includes(user?.role || "");
+      const [data, docData, stateData, transData, handoffData, eligibleCounselData] = await Promise.all([
         fetchCaseById(id),
-        fetchCaseDocuments(id),
+        fetchCaseDocuments(id).catch(() => null),
         fetchMatterState(id).catch(() => null),
         fetchAvailableTransitions(id).catch(() => null),
         fetchMatterHandoffSummary(id).catch(() => null),
+        canManageCounsel ? getEligibleCounsel(id).catch(() => null) : Promise.resolve(null),
       ]);
       if (!data) throw new Error("Not found");
       setCaseData(data);
+      if (eligibleCounselData?.counsel_list) {
+        setEligibleCounselList(eligibleCounselData.counsel_list);
+      }
       if (docData && docData.documents_detail) {
         setCaseDocDetails(docData.documents_detail);
       }
@@ -168,12 +199,14 @@ export function CaseIntelligence() {
       if (data.draft?.drafted_document) {
         setEditableDraft((data.draft.drafted_document as string).replaceAll("**", ""));
       }
-    } catch {
-      setError(`Could not load case ${id}. Ensure the backend is online at localhost:8000.`);
+      return data;
+    } catch (err: any) {
+      setError(err?.message || `Could not load case ${id}. Ensure the backend is online at localhost:8000.`);
+      return null;
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, user?.role]);
 
   useEffect(() => {
     load();
@@ -228,8 +261,18 @@ export function CaseIntelligence() {
         type: "success",
         text: "Counsel legal sign-off recorded. The petition draft is stamped as Advocate Work Product and submitted for supervisory review.",
       });
+      addToast("success", "Petition Approved & Submitted", "You have successfully signed off on this bail petition. It is now submitted for official review.");
       await load();
     } catch (err: any) {
+      const errMsg = err.message || "";
+      const isConflict = errMsg.includes("409") || errMsg.toLowerCase().includes("conflict");
+      if (isConflict) {
+        const fresh = await load();
+        const updater = resolveCaseUpdater(err?.detail, fresh || caseData, caseData?.case?.district);
+        addToast("conflict", "Case Already Updated", `${updater} just made updates to this case. We have automatically refreshed your screen to show the latest information.`);
+      } else {
+        addToast("error", "Unable to Sign Off", "Could not complete the sign-off right now. Please check your connection and try again.");
+      }
       setActionBanner({
         type: "error",
         text: "Counsel sign-off failed: " + (err.message || err),
@@ -239,46 +282,34 @@ export function CaseIntelligence() {
     }
   };
 
-  const handleApprove = async () => {
-    if (!id) return;
-    setApproving(true);
+  const handleSaveDraft = async () => {
+    if (!id || !editableDraft) return;
+    setSavingDraft(true);
     setActionBanner(null);
     try {
-      await approveCaseInBackend(id);
-      await load();
-      setActiveTab("draft");
+      await saveCaseDraft(id, editableDraft);
       setActionBanner({
         type: "success",
-        text: "Supervisory sign-off recorded. Case is approved and marked READY FOR FILING.",
+        text: "Bail petition draft changes saved successfully to database.",
       });
-    } catch (err: any) {
-      setActionBanner({
-        type: "error",
-        text: "Approval error: " + (err.message || err),
-      });
-    } finally {
-      setApproving(false);
-    }
-  };
-
-  const handleFileInCourt = async () => {
-    if (!id) return;
-    setFiling(true);
-    setActionBanner(null);
-    try {
-      await fileCaseInCourt(id);
+      addToast("success", "Draft Changes Saved", "Your edits to the bail petition have been safely saved.");
       await load();
-      setActionBanner({
-        type: "success",
-        text: "Procedural court filing recorded in court ledger.",
-      });
     } catch (err: any) {
+      const errMsg = err.message || "";
+      const isConflict = errMsg.includes("409") || errMsg.toLowerCase().includes("conflict");
+      if (isConflict) {
+        const fresh = await load();
+        const updater = resolveCaseUpdater(err?.detail, fresh || caseData, caseData?.case?.district);
+        addToast("conflict", "Draft Already Updated", `${updater} just made updates to this draft. We have refreshed your screen with their latest changes.`);
+      } else {
+        addToast("error", "Could Not Save Draft", "Your changes could not be saved right now. Please check your connection and try again.");
+      }
       setActionBanner({
         type: "error",
-        text: "Filing error: " + (err.message || err),
+        text: "Draft save failed: " + (err.message || err),
       });
     } finally {
-      setFiling(false);
+      setSavingDraft(false);
     }
   };
 
@@ -334,7 +365,24 @@ export function CaseIntelligence() {
   };
 
   const generateBailDraftPDF = () => {
-    if (!c.case_id) return;
+    const currentCase = caseData?.case || {};
+    if (!currentCase.case_id) return;
+    const counselAssigned = Boolean(
+      currentCase.assigned_lawyer_id ||
+      currentCase.assigned_lawyer ||
+      caseData?.counsel_assigned ||
+      caseData?.assigned_lawyer_id ||
+      caseData?.assigned_lawyer ||
+      caseData?.assignment_status === "ASSIGNED"
+    );
+    if (!counselAssigned) {
+      addToast("error", "Counsel Required", "Legal Aid Defense Counsel must be assigned before downloading petition PDF.");
+      return;
+    }
+    if (!editableDraft.trim()) {
+      addToast("error", "Draft Not Ready", "Draft petition text must be generated or saved first.");
+      return;
+    }
     const doc = new jsPDF({
       unit: "mm",
       format: "a4",
@@ -417,10 +465,11 @@ export function CaseIntelligence() {
     doc.text("STATUTORY THRESHOLD:", margin + 100, yPos + 20);
 
     doc.setFont("helvetica", "normal");
-    doc.text(c.jail_location || "Central Jail, Tihar", margin + 140, yPos + 5);
+    doc.text(c.jail_location || "Designated Correctional Facility", margin + 140, yPos + 5);
     doc.text(c.dlsa_reference_number || "DLSA-PENDING", margin + 140, yPos + 10);
     doc.text(`${eligibility.custody_days_served ?? c.custody_days ?? 0} Days Served`, margin + 140, yPos + 15);
-    doc.text(`${eligibility.required_custody_days ?? 120} Days (One-Third Rule)`, margin + 140, yPos + 20);
+    const reqDays = eligibility.required_custody_days ?? (c.max_sentence_days_for_offense ? Math.ceil(c.max_sentence_days_for_offense / 3) : 0);
+    doc.text(reqDays > 0 ? `${reqDays} Days (Statutory Threshold)` : "Statutory Evaluation Pending", margin + 140, yPos + 20);
 
     yPos += 28;
 
@@ -588,21 +637,47 @@ export function CaseIntelligence() {
   }
 
   if (error || !caseData) {
+    const isForbidden = error?.includes("Forbidden") || error?.includes("Access Restricted") || error?.includes("authorized");
     return (
       <div className="p-8 max-w-xl mx-auto flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center">
-        <AlertCircle className="w-12 h-12 text-destructive" />
+        <ToastContainer toasts={toasts} onDismiss={removeToast} />
+        {isForbidden ? (
+          <ShieldAlert className="w-14 h-14 text-amber-500" />
+        ) : (
+          <AlertCircle className="w-12 h-12 text-destructive" />
+        )}
         <div>
-          <h2 className="text-xl font-bold text-foreground mb-2">Dossier Unavailable</h2>
-          <p className="text-muted-foreground text-sm">{error || "Case record could not be loaded."}</p>
+          <h2 className="text-xl font-bold text-foreground mb-2">
+            {isForbidden ? "Procedural Access Restricted" : "Dossier Unavailable"}
+          </h2>
+          <p className="text-muted-foreground text-sm max-w-md mx-auto">
+            {error || "Case record could not be loaded."}
+          </p>
         </div>
-        <button onClick={load} className="px-4 py-2 bg-primary text-primary-foreground rounded-sm text-sm font-semibold flex items-center gap-2">
-          <RefreshCw className="w-4 h-4" /> Retry
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            to={user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE" ? "/advocate" : "/dashboard"}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-sm text-sm font-semibold flex items-center gap-2"
+          >
+            {user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE" ? "Back to Assigned Briefs" : "Back to Dashboard"}
+          </Link>
+          <button onClick={load} className="px-4 py-2 border border-border text-foreground hover:bg-muted rounded-sm text-sm font-semibold flex items-center gap-2">
+            <RefreshCw className="w-4 h-4" /> Retry
+          </button>
+        </div>
       </div>
     );
   }
 
   const c = caseData.case || {};
+  const hasAssignedCounsel = Boolean(
+    c.assigned_lawyer_id ||
+    c.assigned_lawyer ||
+    caseData?.counsel_assigned ||
+    caseData?.assigned_lawyer_id ||
+    caseData?.assigned_lawyer ||
+    caseData?.assignment_status === "ASSIGNED"
+  );
   const eligibility = caseData.eligibility || {};
   const completeness = caseData.completeness || {};
   const retrieval = caseData.retrieval || {};
@@ -610,9 +685,7 @@ export function CaseIntelligence() {
   const legalNeeds: LegalNeedItem[] = c.legal_needs || [];
   const timeline: TimelineEvent[] = c.timeline || [];
 
-  const isReadyForFiling = c.status === "APPROVED_READY_FOR_FILING";
   const isFiled = c.status === "FILED";
-  const approvalDone = isReadyForFiling || isFiled;
 
   const handleBack = () => {
     if (user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE") {
@@ -653,9 +726,11 @@ export function CaseIntelligence() {
         type: "success",
         text: "Institutional review note successfully recorded on case timeline and dispatched to counsel.",
       });
+      addToast("success", "Review Note Sent", "Your note has been added to the case file and shared with the defense counsel.");
       setDlsaComment("");
       await load();
     } catch (err: any) {
+      addToast("error", "Could Not Send Note", "Failed to submit your review note. Please try again.");
       setActionBanner({
         type: "error",
         text: err.message || "Failed to submit review note.",
@@ -665,11 +740,55 @@ export function CaseIntelligence() {
     }
   };
 
-  const PANEL_ADVOCATES = [
-    { id: "LWYR-001", name: "Adv. Rajesh Sharma", bar: "D/1042/2014", specialisation: "Criminal Defense & Remand" },
-    { id: "LWYR-002", name: "Adv. Priya Verma", bar: "D/2180/2018", specialisation: "BNSS Statutory Bail & Trial" },
-    { id: "LWYR-003", name: "Adv. Amit Sen", bar: "D/0891/2016", specialisation: "NALSA Undertrial Representation" },
-  ];
+  const handleGenerateAiDraft = async () => {
+    if (!id) return;
+    const currentCase = caseData?.case || {};
+    const counselAssigned = Boolean(
+      currentCase.assigned_lawyer_id ||
+      currentCase.assigned_lawyer ||
+      caseData?.counsel_assigned ||
+      caseData?.assigned_lawyer_id ||
+      caseData?.assigned_lawyer ||
+      caseData?.assignment_status === "ASSIGNED"
+    );
+    if (!counselAssigned) {
+      addToast("error", "Counsel Required", "Legal Aid Defense Counsel must be assigned before generating a formal bail petition.");
+      return;
+    }
+    try {
+      setGeneratingDraft(true);
+      setActionBanner(null);
+      const res = await generateBailDraft(id);
+      setEditableDraft(res.draft_text);
+      setActionBanner({
+        type: "success",
+        text: `AI Bail Application draft generated successfully (v${res.version_number}, ${res.provenance}). Grounded in Section 479 BNSS.`,
+      });
+      addToast("success", "Draft Generated", "A new bail petition draft has been created based on Section 479 guidelines.");
+      await load();
+    } catch (err: any) {
+      addToast("error", "Draft Creation Failed", "Could not generate draft right now. Please try again.");
+      setActionBanner({
+        type: "error",
+        text: `Draft generation failed: ${err.message || err}`,
+      });
+    } finally {
+      setGeneratingDraft(false);
+    }
+  };
+
+  const handleOpenDocPreview = (docId: string, docTitle?: string) => {
+    setPreviewDocId(docId);
+    setPreviewDocTitle(docTitle || "Official Document");
+  };
+
+  const handleDownloadCaseDoc = async (docId: string, fileName?: string) => {
+    try {
+      await downloadCaseDocument(docId, fileName || "document.txt");
+    } catch (err: any) {
+      alert(`Document download failed: ${err.message || err}`);
+    }
+  };
 
   const handleExportDossier = async () => {
     if (!caseData?.case_id) return;
@@ -689,7 +808,9 @@ export function CaseIntelligence() {
         type: "success",
         text: `Sealed case dossier (${caseData.case_id}) exported with cryptographically verified SHA-256 seal.`,
       });
+      addToast("success", "Case File Downloaded", `Official case dossier document (${caseData.case_id}) downloaded to your device.`);
     } catch (err: any) {
+      addToast("error", "Download Failed", "Unable to download the case file right now. Please try again.");
       setActionBanner({
         type: "error",
         text: `Case Dossier Export failed: ${err.message || err}`,
@@ -709,8 +830,54 @@ export function CaseIntelligence() {
         type: "success",
         text: `State transitioned to ${res.current_state} (Version ${res.version_number}) via ${action}.`,
       });
+
+      const actionUpper = (action || "").toUpperCase();
+      let friendlyTitle = "Case Updated";
+      let friendlyMsg = "The case has been successfully updated.";
+
+      if (actionUpper.includes("APPROVE")) {
+        friendlyTitle = "Case Approved";
+        friendlyMsg = "This bail application has been approved and moved to the next procedural step.";
+      } else if (actionUpper.includes("SIGN_OFF") || actionUpper.includes("SIGN")) {
+        friendlyTitle = "Bail Petition Signed";
+        friendlyMsg = "Legal sign-off has been recorded. The petition is now ready for filing review.";
+      } else if (actionUpper.includes("FILE")) {
+        friendlyTitle = "Filed in Court";
+        friendlyMsg = "The bail petition has been recorded as formally filed in court.";
+      } else if (actionUpper.includes("REQUEST_CHANGES")) {
+        friendlyTitle = "Revisions Requested";
+        friendlyMsg = "Changes were requested on this petition, and the assigned advocate has been notified.";
+      } else if (actionUpper.includes("HEARING")) {
+        friendlyTitle = "Hearing Details Saved";
+        friendlyMsg = "Court hearing notes and next dates have been saved to the case file.";
+      } else if (actionUpper.includes("ASSIGN")) {
+        friendlyTitle = "Advocate Assigned";
+        friendlyMsg = "Legal counsel has been assigned to this undertrial prisoner.";
+      } else if (actionUpper.includes("INTAKE") || actionUpper.includes("VERIF")) {
+        friendlyTitle = "Intake Verified";
+        friendlyMsg = "Undertrial custody details and eligibility status have been verified.";
+      }
+
+      addToast("success", friendlyTitle, friendlyMsg);
       await load();
     } catch (err: any) {
+      const errMsg = err.message || "";
+      const isConflict = errMsg.includes("409") || errMsg.toLowerCase().includes("conflict") || errMsg.toLowerCase().includes("version mismatch");
+      if (isConflict) {
+        const fresh = await load();
+        const updater = resolveCaseUpdater(err?.detail, fresh || caseData, caseData?.case?.district);
+        addToast(
+          "conflict",
+          "Case Already Updated",
+          `${updater} just updated this case. We have automatically refreshed your screen with the latest information.`
+        );
+      } else {
+        addToast(
+          "error",
+          "Action Could Not Be Completed",
+          "Unable to complete this step right now. Please check the details and try again."
+        );
+      }
       setActionBanner({
         type: "error",
         text: err.message || `Transition '${action}' failed.`,
@@ -729,10 +896,37 @@ export function CaseIntelligence() {
           initialForm[key] = new Date().toISOString().split("T")[0];
         } else if (key === "order_type") {
           initialForm[key] = "BAIL_GRANTED";
+        } else if (key === "source_type") {
+          initialForm[key] = "eCourts Daily Cause List";
+        } else if (key === "bench_name") {
+          initialForm[key] = caseData?.court_name || "";
         } else {
           initialForm[key] = "";
         }
       });
+      if (t.action === "ASSIGN_COUNSEL") {
+        setCounselSearchQuery("");
+        if (eligibleCounselList.length > 0) {
+          initialForm.assigned_advocate_id = eligibleCounselList[0].id;
+          initialForm.assigned_advocate_name = eligibleCounselList[0].name;
+        }
+        if (id) {
+          setLoadingEligibleCounsel(true);
+          getEligibleCounsel(id)
+            .then((res) => {
+              if (res?.counsel_list && res.counsel_list.length > 0) {
+                setEligibleCounselList(res.counsel_list);
+                setTransitionFormData((prev) => ({
+                  ...prev,
+                  assigned_advocate_id: prev.assigned_advocate_id || res.counsel_list[0].id,
+                  assigned_advocate_name: prev.assigned_advocate_name || res.counsel_list[0].name,
+                }));
+              }
+            })
+            .catch(() => {})
+            .finally(() => setLoadingEligibleCounsel(false));
+        }
+      }
       setTransitionFormData(initialForm);
       setTransitionComment("");
       setActiveTransitionModal(t);
@@ -789,6 +983,7 @@ export function CaseIntelligence() {
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
       <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".pdf,image/*" />
 
       {/* Top Breadcrumb & Actions */}
@@ -819,32 +1014,6 @@ export function CaseIntelligence() {
 
         {/* Workflow Action Gate */}
         <div className="flex items-center gap-2">
-          {!approvalDone && can("CASE_APPROVE") && (
-            <button
-              onClick={handleApprove}
-              disabled={approving || !eligibility.eligible || !completeness.is_complete}
-              className={`px-4 py-2 rounded-sm text-xs font-bold font-serif uppercase tracking-wider flex items-center gap-2 shadow-sm transition-all ${
-                eligibility.eligible && completeness.is_complete
-                  ? "bg-primary text-primary-foreground hover:opacity-90"
-                  : "bg-muted text-muted-foreground cursor-not-allowed border border-border"
-              }`}
-            >
-              {approving ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck className="w-4 h-4" />}
-              Approve & Mark Ready for Filing
-            </button>
-          )}
-
-          {isReadyForFiling && can("CASE_FILE") && (
-            <button
-              onClick={handleFileInCourt}
-              disabled={filing}
-              title="Record verified court filing details into institutional registry. (Confirms procedural filing before Magistrate; not automated submission)."
-              className="px-4 py-2 rounded-sm text-xs font-bold font-serif uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2 shadow-sm"
-            >
-              {filing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              Record Court Filing Details
-            </button>
-          )}
 
           {isFiled && (
             <span className="px-3 py-1.5 rounded-sm bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold font-mono flex items-center gap-1.5">
@@ -1227,26 +1396,26 @@ export function CaseIntelligence() {
                         Station Police Operational Compliance Record
                       </h3>
                       <span className="text-[11px] font-mono text-muted-foreground">
-                        Jurisdiction: {c.police_station || "Kotwali Police Station"} • {c.district || "Central Delhi"}
+                        Jurisdiction: {c.police_station || "Jurisdiction Police Station"} • {c.district || "Designated District"}
                       </span>
                     </div>
                   </div>
                   <span className="px-2.5 py-1 rounded bg-primary/10 text-primary border border-primary/20 font-mono text-xs font-bold">
-                    {c.fir_number || `FIR-2024-${c.case_id}`}
+                    {c.fir_number || "FIR Pending"}
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                   <div className="p-4 rounded bg-muted/40 border border-border space-y-2">
                     <div className="font-bold font-mono text-[11px] uppercase text-muted-foreground">Investigating Station</div>
-                    <div className="text-foreground font-semibold text-sm">{c.police_station || "Kotwali Police Station"}</div>
-                    <div className="text-muted-foreground">{c.district || "Central District"}, Delhi</div>
+                    <div className="text-foreground font-semibold text-sm">{c.police_station || "Jurisdiction Police Station"}</div>
+                    <div className="text-muted-foreground">{c.district ? `${c.district}${c.state ? `, ${c.state}` : ""}` : (c.state || "Jurisdiction Record")}</div>
                   </div>
 
                   <div className="p-4 rounded bg-muted/40 border border-border space-y-2">
                     <div className="font-bold font-mono text-[11px] uppercase text-muted-foreground">Custodial Remand Metric</div>
                     <div className="text-foreground font-semibold text-sm">{c.custody_days || 0} Days In Custody</div>
-                    <div className="text-muted-foreground">Detention Facility: {c.jail_location || "Central Jail"}</div>
+                    <div className="text-muted-foreground">Detention Facility: {c.jail_location || "Correctional Facility"}</div>
                   </div>
                 </div>
 
@@ -1505,22 +1674,24 @@ export function CaseIntelligence() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 {c.required_docs?.map((docType: string) => {
                   const normDoc = docType.toLowerCase().trim().replace(/ /g, "_");
                   const detail = caseDocDetails.find(
                     (d: any) => d.document_type === normDoc || d.id?.includes(normDoc)
                   );
-                  const isVerified = (detail && detail.document_status === "VERIFIED") || c.present_docs?.includes(docType);
+                  const isVerified = (detail && detail.document_status === "VERIFIED") || c.present_docs?.includes(docType) || c.present_docs?.includes(normDoc);
                   const isReviewed = detail && detail.document_status === "REVIEWED";
-                  const isPending = detail && detail.document_status === "PENDING_VERIFICATION";
+                  const isPending = !isVerified && detail && detail.document_status === "PENDING_VERIFICATION";
+                  const isAvailable = isVerified || isReviewed || Boolean(detail);
                   const isSupervisor = user?.role === "SUPERVISING_LEGAL_OFFICER";
                   const isDlsa = user?.role === "DLSA_OFFICER";
+                  const docId = detail?.actual_doc_id || detail?.id || `DOC-${c.case_id}-${normDoc}`;
 
                   return (
                     <div
                       key={docType}
-                      className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all ${
+                      className={`p-4 rounded-lg border flex flex-col justify-between gap-3 overflow-hidden transition-all shadow-sm ${
                         isVerified
                           ? "bg-emerald-500/5 border-emerald-500/30"
                           : isReviewed
@@ -1530,8 +1701,9 @@ export function CaseIntelligence() {
                           : "bg-destructive/5 border-destructive/20"
                       }`}
                     >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                      {/* Top Header: Icon, Title, and Status Badge */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
                           {isVerified ? (
                             <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
                           ) : isReviewed ? (
@@ -1541,74 +1713,123 @@ export function CaseIntelligence() {
                           ) : (
                             <AlertTriangle className="w-4 h-4 text-destructive shrink-0" />
                           )}
-                          <span className="font-bold text-foreground tracking-tight">
+                          <span className="font-bold text-foreground tracking-tight text-xs font-serif uppercase truncate">
                             {docType.replace(/_/g, " ").toUpperCase()}
                           </span>
-                          {isPending && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 border border-amber-500/30">
-                              PENDING VERIFICATION
+                        </div>
+
+                        {/* Status Badge */}
+                        <div className="shrink-0">
+                          {isVerified && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-600 border border-emerald-500/30">
+                              VERIFIED
                             </span>
                           )}
                           {isReviewed && !isVerified && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-600 border border-blue-500/30">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/20 text-blue-600 border border-blue-500/30">
                               REVIEWED (INTAKE)
                             </span>
                           )}
-                        </div>
-
-                        {/* Uploader Attribution Provenance */}
-                        <div className="text-[11px] text-muted-foreground pl-6">
-                          {isVerified ? (
-                            <span>Origin: <strong className="text-foreground">{detail?.uploaded_by || "Court Registry (Baseline)"}</strong></span>
-                          ) : isReviewed ? (
-                            <span>Status: <strong className="text-foreground">Reviewed for DLSA Intake</strong> &bull; Uploaded by: <strong className="text-foreground">{detail?.uploaded_by || "Institutional Officer"}</strong></span>
-                          ) : isPending ? (
-                            <span>Uploaded by: <strong className="text-foreground">{detail?.uploaded_by || "Institutional Officer"}</strong></span>
-                          ) : (
-                            <span className="text-amber-600/90 font-medium">Missing record &mdash; blocks eligibility determination</span>
+                          {isPending && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                              PENDING VERIFICATION
+                            </span>
+                          )}
+                          {!isVerified && !isReviewed && !isPending && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-destructive/20 text-destructive border border-destructive/30">
+                              RECORD MISSING
+                            </span>
                           )}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                        {/* DLSA Officer: Review Document */}
-                        {isPending && isDlsa && detail?.actual_doc_id && (
-                          <button
-                            onClick={() => handleReviewCaseDoc(detail.actual_doc_id)}
-                            disabled={reviewingDocId === detail.actual_doc_id}
-                            className="px-2.5 py-1 bg-blue-600 text-white rounded text-[11px] font-bold uppercase hover:bg-blue-700 flex items-center gap-1 shadow-sm transition-colors"
-                            title="Mark reviewed for legal-aid intake processing"
-                          >
-                            {reviewingDocId === detail.actual_doc_id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                            Review Document
-                          </button>
+                      {/* Middle: Provenance & Attribution */}
+                      <div className="text-[11px] text-muted-foreground font-mono">
+                        {isVerified ? (
+                          <span>Origin: <strong className="text-foreground">{detail?.uploaded_by || "Court Registry (Baseline)"}</strong></span>
+                        ) : isReviewed ? (
+                          <span>Status: <strong className="text-foreground">Reviewed for DLSA Intake</strong> &bull; Origin: <strong className="text-foreground">{detail?.uploaded_by || "Institutional Officer"}</strong></span>
+                        ) : isPending ? (
+                          <span>Uploaded by: <strong className="text-foreground">{detail?.uploaded_by || "Institutional Officer"}</strong></span>
+                        ) : (
+                          <span className="text-amber-600 dark:text-amber-400 font-medium">Missing record &mdash; blocks eligibility</span>
                         )}
+                      </div>
 
-                        {/* Supervising Legal Officer: Supervisory Verify */}
-                        {(isPending || isReviewed) && !isVerified && isSupervisor && detail?.actual_doc_id && (
-                          <button
-                            onClick={() => handleVerifyCaseDoc(detail.actual_doc_id)}
-                            disabled={verifyingDocId === detail.actual_doc_id}
-                            className="px-2.5 py-1 bg-emerald-600 text-white rounded text-[11px] font-bold uppercase hover:bg-emerald-700 flex items-center gap-1 shadow-sm transition-colors"
-                            title="Supervisory verification: confirm presence and update case completeness"
-                          >
-                            {verifyingDocId === detail.actual_doc_id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCheck className="w-3 h-3" />}
-                            Supervisory Verify
-                          </button>
-                        )}
+                      {/* Bottom: Dedicated Action Footer Bar */}
+                      <div className="pt-2.5 border-t border-border/50 flex flex-wrap items-center justify-between gap-2">
+                        {/* Left: View & Download controls */}
+                        <div className="flex items-center gap-1.5">
+                          {isAvailable ? (
+                            <>
+                              <button
+                                onClick={() => handleOpenDocPreview(docId, docType.replace(/_/g, " ").toUpperCase())}
+                                className="px-2 py-1 bg-secondary hover:bg-muted border border-border text-foreground rounded text-xs font-mono font-medium flex items-center gap-1 shadow-sm transition-colors"
+                                title="Preview document content"
+                              >
+                                <Eye className="w-3.5 h-3.5 text-primary" />
+                                <span>View</span>
+                              </button>
+                              <button
+                                onClick={() => handleDownloadCaseDoc(docId, `${normDoc}_${c.case_id}.txt`)}
+                                className="p-1 hover:bg-secondary border border-border rounded text-muted-foreground hover:text-foreground transition-colors"
+                                title="Download document file"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          ) : (
+                            <span className="text-[10px] font-mono text-muted-foreground italic">
+                              Document pending
+                            </span>
+                          )}
+                        </div>
 
-                        <button
-                          onClick={() => handleUploadDoc(docType)}
-                          disabled={uploadingDoc === docType}
-                          className={`px-2.5 py-1 rounded text-[11px] font-bold uppercase flex items-center gap-1 shadow-sm transition-colors ${
-                            isVerified
-                              ? "bg-secondary text-foreground hover:bg-secondary/80 border border-border"
-                              : "bg-primary text-primary-foreground hover:opacity-90"
-                          }`}
-                        >
-                          {uploadingDoc === docType ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-                          {isVerified ? "Re-upload" : isPending ? "Replace" : "Upload"}
-                        </button>
+                        {/* Right: Operational actions */}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {/* DLSA Officer: Review Document (only when genuinely pending) */}
+                          {isPending && isDlsa && detail?.actual_doc_id && (
+                            <button
+                              onClick={() => handleReviewCaseDoc(detail.actual_doc_id)}
+                              disabled={reviewingDocId === detail.actual_doc_id}
+                              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold uppercase flex items-center gap-1 shadow-sm transition-colors disabled:opacity-50"
+                              title="Mark reviewed for DLSA intake"
+                            >
+                              {reviewingDocId === detail.actual_doc_id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                              Review
+                            </button>
+                          )}
+
+                          {/* Supervising Legal Officer: Supervisory Verify */}
+                          {(isPending || isReviewed) && !isVerified && isSupervisor && detail?.actual_doc_id && (
+                            <button
+                              onClick={() => handleVerifyCaseDoc(detail.actual_doc_id)}
+                              disabled={verifyingDocId === detail.actual_doc_id}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold uppercase flex items-center gap-1 shadow-sm transition-colors disabled:opacity-50"
+                              title="Supervisory verification"
+                            >
+                              {verifyingDocId === detail.actual_doc_id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCheck className="w-3 h-3" />}
+                              Supervisory Verify
+                            </button>
+                          )}
+
+                          {/* Upload / Re-upload Record */}
+                          {can("DOCUMENT_UPLOAD") && (
+                            <button
+                              onClick={() => handleUploadDoc(docType)}
+                              disabled={uploadingDoc === docType}
+                              className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors ${
+                                isVerified
+                                  ? "bg-secondary hover:bg-muted text-foreground border border-border"
+                                  : "bg-primary text-primary-foreground hover:opacity-90 font-bold shadow-sm"
+                              }`}
+                              title={isVerified ? "Upload an updated copy to vault" : "Upload missing record"}
+                            >
+                              {uploadingDoc === docType ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                              <span>{isVerified ? "Re-upload" : isPending ? "Replace" : "Upload"}</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -1639,28 +1860,106 @@ export function CaseIntelligence() {
       {/* TAB 2: BAIL PETITION DRAFT & ADVOCATE REVIEW GATEWAY */}
       {!isPolice && !isJail && activeTab === "draft" && (
         <div className="space-y-6">
-
-          <div className="p-6 border border-border bg-card rounded-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div>
-                <h3 className="font-bold font-serif text-lg text-foreground">
-                  {isDlsa ? "Bail Application Work Product (DLSA Coordination View)" : "Formal Bail Application Draft"}
-                </h3>
-                <p className="text-xs text-muted-foreground">
-                  Under Section 479 of the Bharatiya Nagarik Suraksha Sanhita, 2023
-                </p>
+          {!hasAssignedCounsel ? (
+            <div className="p-8 border border-amber-500/30 bg-amber-500/5 rounded-sm space-y-6">
+              <div className="flex items-start gap-4">
+                <div className="p-3 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 shrink-0">
+                  <ShieldAlert className="w-8 h-8" />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                      Institutional Procedural Hold
+                    </span>
+                    <span className="text-xs font-mono text-muted-foreground">
+                      Stage: LEGAL_AID_REQUIRED
+                    </span>
+                  </div>
+                  <h3 className="font-serif font-bold text-xl text-foreground">
+                    Legal Aid Defense Counsel Not Yet Assigned
+                  </h3>
+                  <p className="text-sm text-muted-foreground max-w-2xl leading-relaxed">
+                    Under Section 479 of the Bharatiya Nagarik Suraksha Sanhita, 2023 institutional protocol, formal bail petition drafting is an <strong className="text-foreground">Advocate Work Product</strong>. Defense counsel must be designated before court-grade petition generation and sign-off can be initiated.
+                  </p>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="p-4 rounded border border-border bg-card/60 space-y-3">
+                <h4 className="text-xs font-mono font-bold uppercase text-foreground flex items-center gap-2">
+                  <Info className="w-4 h-4 text-primary" /> Case Representation Status
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div className="p-3 bg-muted/40 rounded border border-border">
+                    <div className="text-[10px] font-mono uppercase text-muted-foreground">Accused Inmate</div>
+                    <div className="font-bold text-foreground mt-0.5">{c.name || "UTP Inmate"}</div>
+                  </div>
+                  <div className="p-3 bg-muted/40 rounded border border-border">
+                    <div className="text-[10px] font-mono uppercase text-muted-foreground">Custody Duration</div>
+                    <div className="font-bold text-foreground mt-0.5">{c.custody_days ?? 0} days (Detained)</div>
+                  </div>
+                  <div className="p-3 bg-muted/40 rounded border border-border">
+                    <div className="text-[10px] font-mono uppercase text-muted-foreground">Counsel Assignment</div>
+                    <div className="font-bold text-amber-600 dark:text-amber-400 mt-0.5">Pending Panel Allocation</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                {hasRole("DLSA_OFFICER", "SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN") ? (
+                  <button
+                    onClick={() => setActiveTab("legalaid")}
+                    className="px-4 py-2.5 bg-primary text-primary-foreground rounded-sm text-xs font-bold font-mono uppercase tracking-wider flex items-center gap-2 shadow-sm hover:opacity-90 transition-opacity"
+                  >
+                    <UserCheck className="w-4 h-4" />
+                    Go to Counsel Allocation & Assign Defense Advocate
+                  </button>
+                ) : (
+                  <p className="text-xs font-mono text-muted-foreground">
+                    Awaiting DLSA Secretary / Supervisory Legal Officer counsel designation.
+                  </p>
+                )}
                 <button
-                  onClick={generateBailDraftPDF}
-                  className="px-3 py-1.5 border border-border rounded-sm hover:bg-secondary text-xs font-semibold flex items-center gap-1.5"
-                  title={isDlsa ? "Download internal working copy — NOT a filed petition" : "Download PDF petition"}
+                  onClick={() => setActiveTab("dossier")}
+                  className="px-4 py-2.5 border border-border rounded-sm text-xs font-medium hover:bg-secondary text-foreground transition-colors"
                 >
-                  <Download className="w-4 h-4" /> {isDlsa ? "Internal Copy" : "Download PDF"}
+                  Return to Case Dossier
                 </button>
               </div>
             </div>
+          ) : (
+            <div className="p-6 border border-border bg-card rounded-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-border pb-3">
+                <div>
+                  <h3 className="font-bold font-serif text-lg text-foreground">
+                    {isDlsa ? "Bail Application Work Product (DLSA Coordination View)" : "Formal Bail Application Draft"}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Under Section 479 of the Bharatiya Nagarik Suraksha Sanhita, 2023
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+                    <button
+                      onClick={handleGenerateAiDraft}
+                      disabled={generatingDraft || !hasAssignedCounsel}
+                      className="px-3 py-1.5 bg-primary text-primary-foreground rounded-sm hover:opacity-90 text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-opacity disabled:opacity-50"
+                      title="Generate court-ready statutory Section 479 BNSS bail petition draft"
+                    >
+                      {generatingDraft ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
+                      {editableDraft ? "⚡ Regenerate AI Draft" : "⚡ Generate AI Bail Draft"}
+                    </button>
+                  )}
+                  <button
+                    onClick={generateBailDraftPDF}
+                    disabled={!editableDraft.trim() || !hasAssignedCounsel}
+                    className="px-3 py-1.5 border border-border rounded-sm hover:bg-secondary text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50"
+                    title={isDlsa ? "Download internal working copy — NOT a filed petition" : "Download PDF petition"}
+                  >
+                    <Download className="w-4 h-4" /> {isDlsa ? "Internal Copy" : "Download PDF"}
+                  </button>
+                </div>
+              </div>
 
             {/* In-Line Draft Editor — Role-Scoped */}
             {isDlsa ? (
@@ -1724,43 +2023,160 @@ export function CaseIntelligence() {
                     </button>
                   </div>
                 )}
+                {/* DLSA Review Feedback Banner for Advocate */}
+                {(() => {
+                  const reviewEvents = (c.timeline || []).filter(
+                    (ev: any) => ev.event_type === "LEGAL_AID" && (ev.title?.includes("Review Feedback") || ev.title?.includes("Review Note"))
+                  );
+                  if (reviewEvents.length === 0) return null;
+                  const latestFeedback = reviewEvents[reviewEvents.length - 1];
+                  return (
+                    <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-sm space-y-1.5 font-mono text-xs">
+                      <div className="flex items-center gap-2 font-bold text-amber-700 dark:text-amber-400">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        <span>Institutional Review Directive ({latestFeedback.actor_role?.replace(/_/g, " ")}):</span>
+                      </div>
+                      <p className="text-foreground pl-6 whitespace-pre-wrap">{latestFeedback.description}</p>
+                      <div className="text-[10px] text-muted-foreground pl-6">
+                        Submitted by {latestFeedback.actor} &bull; {latestFeedback.timestamp}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-mono font-bold uppercase text-muted-foreground">
                     Editable Petition Text (Reviewed by Defence Counsel):
                   </label>
-                  {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
-                    <span className="text-[11px] font-mono text-primary font-semibold">
-                      Counsel Work Product // Versioned Legal Draft
-                    </span>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+                      <span className="text-[11px] font-mono text-primary font-semibold">
+                        Counsel Work Product // Versioned Legal Draft
+                      </span>
+                    )}
+                    {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+                      <button
+                        onClick={handleSaveDraft}
+                        disabled={savingDraft || !editableDraft.trim()}
+                        className="px-3 py-1 bg-secondary hover:bg-muted text-foreground border border-border rounded-sm text-xs font-mono font-bold flex items-center gap-1.5 shadow-sm transition-colors disabled:opacity-50"
+                        title="Persist draft updates directly to cloud database"
+                      >
+                        {savingDraft ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5 text-primary" />}
+                        {savingDraft ? "Saving Changes..." : "Save Draft Changes"}
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <textarea
                   value={editableDraft}
                   onChange={(e) => setEditableDraft(e.target.value)}
+                  readOnly={!hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE")}
                   rows={16}
-                  className="w-full p-4 font-mono text-xs bg-background border border-border rounded-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed resize-y"
+                  className={`w-full p-4 font-mono text-xs border border-border rounded-sm leading-relaxed resize-y ${
+                    hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE")
+                      ? "bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      : "bg-muted/30 text-foreground cursor-not-allowed"
+                  }`}
                 />
-                {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-border">
-                    <p className="text-[11px] font-mono text-muted-foreground">
-                      Counsel Review Status: {advocateSignedOff ? "✓ Legal Sign-Off Recorded (Awaiting Supervisory Sign-Off)" : "Draft Under Active Counsel Review"}
-                    </p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-border">
+                  <p className="text-[11px] font-mono text-muted-foreground">
+                    {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE")
+                      ? `Counsel Review Status: ${advocateSignedOff ? "✓ Legal Sign-Off Recorded (Awaiting Supervisory Approval)" : "Draft Under Active Counsel Review"}`
+                      : "Draft Petitions are prepared by assigned defense counsel and reviewed by supervisors prior to court filing."}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+                      <>
+                        <button
+                          onClick={handleSaveDraft}
+                          disabled={savingDraft || !editableDraft.trim()}
+                          className="px-3.5 py-2 bg-secondary hover:bg-muted text-foreground border border-border rounded-sm text-xs font-bold font-mono uppercase tracking-wider flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                        >
+                          {savingDraft ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5 text-primary" />}
+                          {savingDraft ? "Saving..." : "Save Draft Changes"}
+                        </button>
+                        <button
+                          onClick={handleSignOff}
+                          disabled={signingOff || advocateSignedOff || !editableDraft.trim()}
+                          className={`px-4 py-2 rounded-sm text-xs font-bold font-serif uppercase tracking-wider flex items-center gap-2 ${
+                            advocateSignedOff
+                              ? "bg-emerald-500/15 text-emerald-600 border border-emerald-500/30 cursor-default"
+                              : "bg-primary text-primary-foreground hover:opacity-90"
+                          }`}
+                        >
+                          {signingOff ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-4 h-4" />
+                          )}
+                          {advocateSignedOff ? "Counsel Signed Off" : signingOff ? "Signing Off..." : "Sign Off & Submit for Supervisory Review"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Level 2: Supervisory Legal Officer Approval Gateway ── */}
+                {hasRole("SUPERVISING_LEGAL_OFFICER") && (matterState === "SUBMITTED" || c.status === "LAWYER_REVIEW" || advocateSignedOff) && matterState !== "APPROVED" && c.status !== "APPROVED_READY_FOR_FILING" && c.status !== "FILED" && (
+                  <div className="p-4 rounded-sm border border-emerald-500/30 bg-emerald-500/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                        <span className="font-bold text-xs font-serif uppercase text-foreground">Supervisory Approval Gateway (Level 2)</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground font-mono">
+                        Counsel legal sign-off has been verified. As Supervisory Legal Officer, issue institutional approval so defense counsel can proceed to file in court.
+                      </p>
+                    </div>
                     <button
-                      onClick={handleSignOff}
-                      disabled={signingOff || advocateSignedOff || !editableDraft.trim()}
-                      className={`px-4 py-2 rounded-sm text-xs font-bold font-serif uppercase tracking-wider flex items-center gap-2 ${
-                        advocateSignedOff
-                          ? "bg-emerald-500/15 text-emerald-600 border border-emerald-500/30 cursor-default"
-                          : "bg-primary text-primary-foreground hover:opacity-90"
-                      }`}
+                      onClick={() => handleWorkflowTransition("SUPERVISORY_APPROVE")}
+                      disabled={transitioningAction === "SUPERVISORY_APPROVE"}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-sm text-xs font-bold font-serif uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-colors shrink-0"
                     >
-                      {signingOff ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="w-4 h-4" />
-                      )}
-                      {advocateSignedOff ? "Counsel Signed Off" : signingOff ? "Signing Off..." : "Sign Off & Submit for Supervisory Review"}
+                      {transitioningAction === "SUPERVISORY_APPROVE" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCheck className="w-3.5 h-3.5" />}
+                      Approve Bail Petition for Filing
                     </button>
+                  </div>
+                )}
+
+                {/* ── Level 3: Defence Legal-Aid Advocate Files In Court ── */}
+                {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (matterState === "APPROVED" || c.status === "APPROVED_READY_FOR_FILING" || c.status === "APPROVED") && c.status !== "FILED" && (
+                  <div className="p-4 rounded-sm border border-blue-500/30 bg-blue-500/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Scale className="w-4 h-4 text-blue-600" />
+                        <span className="font-bold text-xs font-serif uppercase text-foreground">Court Registry Filing Gateway</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground font-mono">
+                        Supervisory sign-off is complete. As designated Legal-Aid Defense Counsel, file this petition in the Court Registry and record the filing reference.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleTransitionButtonClick({ action: "RECORD_FILING", required_payload_keys: ["filing_reference"], description: "Lodge approved petition in court registry" })}
+                      disabled={transitioningAction === "RECORD_FILING"}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-sm text-xs font-bold font-serif uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-colors shrink-0"
+                    >
+                      {transitioningAction === "RECORD_FILING" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                      File Petition in Court Registry
+                    </button>
+                  </div>
+                )}
+
+                {/* ── DLSA / Supervisory Observation Notice ── */}
+                {(isDlsa || hasRole("DLSA_OFFICER")) && (
+                  <div className="p-3 bg-secondary/60 border border-border rounded-sm text-xs font-mono text-muted-foreground space-y-1">
+                    <span className="font-bold text-foreground flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-primary" /> DLSA Coordination &amp; Oversight Status:
+                    </span>
+                    <p>
+                      {c.status === "FILED"
+                        ? "Bail petition has been formally lodged in the Court Registry by the assigned Legal-Aid Advocate."
+                        : c.status === "APPROVED_READY_FOR_FILING" || matterState === "APPROVED"
+                        ? "Petition approved by Supervisory Legal Officer. Awaiting court filing by the assigned Legal-Aid Advocate."
+                        : advocateSignedOff || c.status === "LAWYER_REVIEW" || matterState === "SUBMITTED"
+                        ? "Counsel sign-off recorded. Currently undergoing Level 2 Supervisory Legal Review."
+                        : "Assigned Defense Counsel is currently preparing and reviewing the bail application work product."}
+                    </p>
                   </div>
                 )}
               </div>
@@ -1776,8 +2192,9 @@ export function CaseIntelligence() {
               </p>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
+    )}
 
 
       {/* TAB 3: CHRONOLOGICAL CASE TIMELINE & PROVENANCE */}
@@ -1867,42 +2284,191 @@ export function CaseIntelligence() {
           </div>
 
           <div className="space-y-4">
-            {c.present_docs?.map((docType: string) => {
-              const eviId = `EVI-${c.case_id}-${docType}`;
-              return (
-                <div key={docType} className="p-4 border border-border rounded-sm bg-secondary/30 flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <Shield className="w-5 h-5 text-primary shrink-0" />
-                    <div>
-                      <h4 className="font-bold text-sm font-serif text-foreground">
-                        {docType.replace(/_/g, " ").toUpperCase()}
-                      </h4>
-                      <p className="text-xs font-mono text-muted-foreground">
-                        Evidence ID: {eviId} • Format: PDF / Digitised Court Record
-                      </p>
+            {(() => {
+              const list: any[] = [];
+              const seenTypes = new Set<string>();
+
+              (caseDocDetails || []).forEach((d: any) => {
+                const norm = (d.document_type || "").toLowerCase().trim().replace(/ /g, "_");
+                if (norm && !seenTypes.has(norm)) {
+                  seenTypes.add(norm);
+                  list.push(d);
+                }
+              });
+
+              (c.required_docs || []).forEach((reqDoc: string) => {
+                const norm = reqDoc.toLowerCase().trim().replace(/ /g, "_");
+                if (!seenTypes.has(norm)) {
+                  seenTypes.add(norm);
+                  const isPresent = (c.present_docs || []).includes(reqDoc) || (c.present_docs || []).includes(norm);
+                  list.push({
+                    id: isPresent ? `DOC-${c.case_id}-${norm}` : null,
+                    actual_doc_id: isPresent ? `DOC-${c.case_id}-${norm}` : null,
+                    document_type: norm,
+                    document_title: reqDoc.replace(/_/g, " ").toUpperCase(),
+                    status: isPresent ? "Verified & Present" : "Missing Action Required",
+                    document_status: isPresent ? "VERIFIED" : "MISSING",
+                    is_present: isPresent,
+                    uploaded_by: isPresent ? "Court Registry (Baseline)" : null,
+                    uploaded_at: isPresent ? c.arrest_date : null,
+                    evidence_id: `EVI-${c.case_id}-${norm}`,
+                  });
+                }
+              });
+
+              (c.present_docs || []).forEach((presDoc: string) => {
+                const norm = presDoc.toLowerCase().trim().replace(/ /g, "_");
+                if (!seenTypes.has(norm)) {
+                  seenTypes.add(norm);
+                  list.push({
+                    id: `DOC-${c.case_id}-${norm}`,
+                    actual_doc_id: `DOC-${c.case_id}-${norm}`,
+                    document_type: norm,
+                    document_title: presDoc.replace(/_/g, " ").toUpperCase(),
+                    status: "Verified & Present",
+                    document_status: "VERIFIED",
+                    is_present: true,
+                    uploaded_by: "Court Registry (Baseline)",
+                    uploaded_at: c.arrest_date,
+                    evidence_id: `EVI-${c.case_id}-${norm}`,
+                  });
+                }
+              });
+
+              if (list.length === 0) {
+                return (
+                  <p className="text-xs text-muted-foreground p-4 bg-muted/20 rounded border border-border">
+                    No document records or vault entries currently indexed for this matter.
+                  </p>
+                );
+              }
+
+              return list.map((docItem: any) => {
+                const normDoc = (docItem.document_type || "").toLowerCase().trim().replace(/ /g, "_");
+                const docTitle = docItem.document_title || normDoc.replace(/_/g, " ").toUpperCase();
+                const isVerified = docItem.document_status === "VERIFIED" || (c.present_docs || []).includes(normDoc) || (c.present_docs || []).includes(docItem.document_type);
+                const isReviewed = docItem.document_status === "REVIEWED";
+                const isPending = docItem.document_status === "PENDING_VERIFICATION";
+                const isMissing = !isVerified && !isReviewed && !isPending;
+                const docId = docItem.actual_doc_id || docItem.id || `DOC-${c.case_id}-${normDoc}`;
+                const eviId = docItem.evidence_id || `EVI-${c.case_id}-${normDoc}`;
+
+                return (
+                  <div
+                    key={normDoc}
+                    className={`p-4 border rounded-sm flex flex-wrap items-center justify-between gap-4 transition-all ${
+                      isVerified
+                        ? "border-emerald-500/30 bg-emerald-500/5"
+                        : isReviewed
+                        ? "border-blue-500/30 bg-blue-500/5"
+                        : isPending
+                        ? "border-amber-500/30 bg-amber-500/5"
+                        : "border-destructive/30 bg-destructive/5"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      {isVerified ? (
+                        <ShieldCheck className="w-5 h-5 text-emerald-500 shrink-0" />
+                      ) : isReviewed ? (
+                        <CheckCircle2 className="w-5 h-5 text-blue-500 shrink-0" />
+                      ) : isPending ? (
+                        <Clock className="w-5 h-5 text-amber-500 shrink-0" />
+                      ) : (
+                        <AlertTriangle className="w-5 h-5 text-destructive shrink-0" />
+                      )}
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-sm font-serif text-foreground">
+                            {docTitle}
+                          </h4>
+                          {isVerified && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-600 border border-emerald-500/30">
+                              VERIFIED IN VAULT
+                            </span>
+                          )}
+                          {isReviewed && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-600 border border-blue-500/30">
+                              REVIEWED (INTAKE)
+                            </span>
+                          )}
+                          {isPending && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 border border-amber-500/30">
+                              PENDING VERIFICATION
+                            </span>
+                          )}
+                          {isMissing && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-destructive/20 text-destructive border border-destructive/30">
+                              RECORD MISSING FROM VAULT
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs font-mono text-muted-foreground mt-0.5">
+                          Evidence ID: {eviId} • Format: Digitised Judicial Record
+                          {docItem.uploaded_by && ` • Origin: ${docItem.uploaded_by}`}
+                          {docItem.file_hash && (
+                            <span className="ml-2 font-mono text-[10px] text-muted-foreground/80" title={docItem.file_hash}>
+                              • SHA256: {docItem.file_hash.slice(0, 8)}...
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {!isMissing ? (
+                        <>
+                          <button
+                            onClick={() => handleOpenDocPreview(docId, docTitle)}
+                            className="px-2.5 py-1.5 bg-secondary border border-border text-foreground hover:bg-muted text-xs font-mono font-semibold rounded flex items-center gap-1.5 shadow-sm"
+                            title="Preview document content and integrity seal"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-primary" />
+                            View
+                          </button>
+                          <button
+                            onClick={() => handleDownloadCaseDoc(docId, `${normDoc}_${c.case_id}.txt`)}
+                            className="p-1.5 bg-secondary border border-border text-muted-foreground hover:text-foreground text-xs rounded shadow-sm"
+                            title="Download official file"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                          {hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER") ? (
+                            <button
+                              onClick={() => handleVerifyEvidence(eviId)}
+                              disabled={verifyingEvidenceId === eviId}
+                              className="px-3 py-1.5 bg-secondary border border-border text-foreground hover:bg-muted text-xs font-semibold rounded flex items-center gap-1.5"
+                            >
+                              {verifyingEvidenceId === eviId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                              Verify Document Integrity
+                            </button>
+                          ) : (
+                            <span className="px-2.5 py-1 text-[11px] font-sans text-muted-foreground bg-muted/50 border border-border rounded flex items-center gap-1" title="Evidence verification is performed by DLSA, Supervisory Legal Officer, or Jail Custody Officer">
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                              Custody Verified
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        can("DOCUMENT_UPLOAD") ? (
+                          <button
+                            onClick={() => handleUploadDoc(normDoc)}
+                            disabled={uploadingDoc === normDoc}
+                            className="px-3 py-1.5 bg-primary text-primary-foreground rounded text-xs font-semibold flex items-center gap-1.5 hover:opacity-90 shadow-sm"
+                          >
+                            {uploadingDoc === normDoc ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                            Upload Document
+                          </button>
+                        ) : (
+                          <span className="text-xs font-mono text-destructive">
+                            Awaiting Record Upload
+                          </span>
+                        )
+                      )}
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    {hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER") ? (
-                      <button
-                        onClick={() => handleVerifyEvidence(eviId)}
-                        disabled={verifyingEvidenceId === eviId}
-                        className="px-3 py-1.5 bg-secondary border border-border text-foreground hover:bg-muted text-xs font-semibold rounded flex items-center gap-1.5"
-                      >
-                        {verifyingEvidenceId === eviId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                        Verify Document Integrity
-                      </button>
-                    ) : (
-                      <span className="px-2.5 py-1 text-[11px] font-sans text-muted-foreground bg-muted/50 border border-border rounded flex items-center gap-1" title="Evidence verification is performed by DLSA, Supervisory Legal Officer, or Jail Custody Officer">
-                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                        Custody Verified
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
 
             {evidenceVerificationResult && (
               evidenceVerificationResult.error ? (
@@ -2044,7 +2610,7 @@ export function CaseIntelligence() {
             <div className="p-4 rounded bg-muted/40 border border-border space-y-2">
               <div className="font-bold font-mono text-[11px] uppercase text-muted-foreground">Coordinating Authority</div>
               <div className="text-foreground font-semibold text-sm">District Legal Services Authority (DLSA)</div>
-              <div className="text-muted-foreground">Central Delhi District Court Complex</div>
+              <div className="text-muted-foreground">{c.court_name || (c.district ? `${c.district} Legal Services Authority` : "District Legal Services Authority Complex")}</div>
             </div>
           </div>
 
@@ -2082,7 +2648,7 @@ export function CaseIntelligence() {
           )}
 
           {/* DLSA Counsel Assignment Desk */}
-          {can("CASE_ASSIGN_COUNSEL") && (
+          {can("CASE_ASSIGN_COUNSEL") && (matterState === "LEGAL_AID_REQUIRED" || matterState === "ASSIGNED" || c.assignment_status === "ASSIGNED" || c.status === "ASSIGNED") && (
             <div className="p-5 rounded border border-border bg-card space-y-4 shadow-sm">
               <div className="border-b border-border pb-3 flex items-center justify-between">
                 <div>
@@ -2107,30 +2673,87 @@ export function CaseIntelligence() {
                 </div>
               )}
 
-              <div className="space-y-3 text-xs">
+              <div className="space-y-4 text-xs">
                 <div>
-                  <label className="block text-muted-foreground font-semibold mb-1">
-                    Select Panel Defense Advocate
-                  </label>
-                  <select
-                    value={selectedLawyerId}
-                    onChange={(e) => {
-                      const selected = PANEL_ADVOCATES.find((a) => a.id === e.target.value);
-                      if (selected) {
-                        setSelectedLawyerId(selected.id);
-                        setSelectedLawyerName(selected.name);
-                      } else {
-                        setSelectedLawyerId(e.target.value);
-                      }
-                    }}
-                    className="w-full p-2 border border-border rounded bg-background text-foreground text-xs font-mono"
-                  >
-                    {PANEL_ADVOCATES.map((adv) => (
-                      <option key={adv.id} value={adv.id}>
-                        {adv.name} ({adv.id}) — Bar: {adv.bar} [{adv.specialisation}]
-                      </option>
-                    ))}
-                  </select>
+                  {(() => {
+                    const displayPanelAdvocates = eligibleCounselList.length > 0
+                      ? eligibleCounselList.map((adv: any) => ({
+                          id: adv.id,
+                          name: adv.name,
+                          bar: adv.bar_registration_no,
+                          specialisation: `${adv.matter_type || "Criminal"} • ${adv.district}`,
+                          experience: `${adv.experience_years} yrs`,
+                          activeCases: adv.active_cases,
+                          tier_label: adv.tier_label,
+                        }))
+                      : [];
+                    const filtered = displayPanelAdvocates.filter((a: any) =>
+                      !advocateSearchQuery ||
+                      a.name.toLowerCase().includes(advocateSearchQuery.toLowerCase()) ||
+                      a.bar.toLowerCase().includes(advocateSearchQuery.toLowerCase()) ||
+                      a.specialisation.toLowerCase().includes(advocateSearchQuery.toLowerCase())
+                    );
+                    return (
+                      <>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-muted-foreground font-semibold">
+                            Search &amp; Select Panel Defense Advocate
+                          </label>
+                          <span className="text-[11px] font-mono text-primary font-semibold">
+                            {filtered.length} empanelled counsel available
+                          </span>
+                        </div>
+                        <input
+                          type="text"
+                          value={advocateSearchQuery}
+                          onChange={(e) => setAdvocateSearchQuery(e.target.value)}
+                          placeholder="Search panel counsel by name, bar enrolment, or statutory specialization..."
+                          className="w-full p-2.5 border border-border rounded bg-background text-foreground text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary mb-3"
+                        />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-48 overflow-y-auto pr-1">
+                          {filtered.length === 0 ? (
+                            <div className="col-span-full p-3 text-center text-muted-foreground border border-dashed border-border rounded bg-muted/10 font-sans text-xs">
+                              No empanelled counsel found for this district or query.
+                            </div>
+                          ) : (
+                            filtered.map((adv: any) => {
+                              const isSelected = selectedLawyerId === adv.id;
+                              return (
+                                <div
+                                  key={adv.id}
+                                  onClick={() => {
+                                    setSelectedLawyerId(adv.id);
+                                    setSelectedLawyerName(adv.name);
+                                  }}
+                                  className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                                    isSelected
+                                      ? "bg-primary/10 border-primary shadow-sm ring-1 ring-primary"
+                                      : "bg-secondary/30 border-border hover:bg-secondary/60"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-bold text-foreground">{adv.name}</span>
+                                    {isSelected && (
+                                      <span className="text-[10px] font-mono font-bold text-primary bg-primary/15 px-1.5 py-0.5 rounded border border-primary/30">
+                                        SELECTED
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                                    Bar: <strong className="text-foreground">{adv.bar}</strong> &bull; Exp: {adv.experience}
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground mt-1 flex items-center justify-between">
+                                    <span className="truncate max-w-[180px]">{adv.specialisation}</span>
+                                    <span className="font-mono text-primary font-medium">{adv.activeCases} active cases</span>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2143,7 +2766,7 @@ export function CaseIntelligence() {
                       value={selectedLawyerName}
                       onChange={(e) => setSelectedLawyerName(e.target.value)}
                       className="w-full p-2 border border-border rounded bg-background text-foreground text-xs font-mono"
-                      placeholder="e.g. Adv. Rajesh Sharma"
+                      placeholder="Select or enter advocate name"
                     />
                   </div>
                   <div>
@@ -2155,7 +2778,7 @@ export function CaseIntelligence() {
                       value={selectedLawyerId}
                       onChange={(e) => setSelectedLawyerId(e.target.value)}
                       className="w-full p-2 border border-border rounded bg-background text-foreground text-xs font-mono"
-                      placeholder="e.g. LWYR-001"
+                      placeholder="Select or enter counsel ID / Bar Reg"
                     />
                   </div>
                 </div>
@@ -2399,6 +3022,212 @@ export function CaseIntelligence() {
                     </div>
                   );
                 }
+                if (key === "bench_name") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Court Bench / Courtroom <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        required
+                        type="text"
+                        value={transitionFormData[key] || ""}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        placeholder="e.g., Court No. 4, Sessions Judge, Tis Hazari"
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  );
+                }
+                if (key === "source_type") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Listing Source / Notice Provenance <span className="text-rose-500">*</span>
+                      </label>
+                      <select
+                        required
+                        value={transitionFormData[key] || "eCourts Daily Cause List"}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      >
+                        <option value="eCourts Daily Cause List">eCourts Daily Cause List</option>
+                        <option value="Court Registry Notice">Court Registry Notice</option>
+                        <option value="Urgent Motion / Direct Mention">Urgent Motion / Direct Mention</option>
+                        <option value="Judicial Order Memo">Judicial Order Memo</option>
+                      </select>
+                    </div>
+                  );
+                }
+                if (key === "judge_name") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Presiding Judge Name <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        required
+                        type="text"
+                        value={transitionFormData[key] || ""}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        placeholder="e.g., Hon'ble Sessions Judge S. K. Verma"
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  );
+                }
+                if (key === "order_reference") {
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Certified Order Reference / Dispatch No. <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        required
+                        type="text"
+                        value={transitionFormData[key] || ""}
+                        onChange={(e) => setTransitionFormData({ ...transitionFormData, [key]: e.target.value })}
+                        placeholder="e.g., ORD-2026-DEL-8832 or Cr.M.A. 452/2026"
+                        className="w-full p-2.5 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  );
+                }
+                if (key === "assigned_advocate_id") {
+                  const filteredCounsel = eligibleCounselList.filter((c: any) => {
+                    if (!counselSearchQuery) return true;
+                    const q = counselSearchQuery.toLowerCase();
+                    return (
+                      c.name?.toLowerCase().includes(q) ||
+                      c.district?.toLowerCase().includes(q) ||
+                      c.matter_type?.toLowerCase().includes(q) ||
+                      c.bar_registration_no?.toLowerCase().includes(q) ||
+                      c.dlsa_institution?.toLowerCase().includes(q)
+                    );
+                  });
+                  const selectedAdvId = transitionFormData["assigned_advocate_id"] || "";
+
+                  return (
+                    <div key={key} className="space-y-3">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-semibold text-foreground">
+                            Select Defence Legal-Aid Advocate <span className="text-rose-500">*</span>
+                          </label>
+                          <span className="text-[10px] font-mono text-primary font-bold">
+                            {caseData?.district ? `${caseData.district} DLSA Panel` : "DLSA Jurisdiction"}
+                          </span>
+                        </div>
+                        <div className="relative">
+                          <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-muted-foreground" />
+                          <input
+                            type="text"
+                            value={counselSearchQuery}
+                            onChange={(e) => setCounselSearchQuery(e.target.value)}
+                            placeholder="Search lawyer... ▼"
+                            className="w-full pl-9 pr-4 py-2 bg-background border border-border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:border-primary placeholder:text-muted-foreground/70"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground mb-1.5">
+                          <span>Available lawyers:</span>
+                          <span className="text-[10px] font-mono text-muted-foreground">
+                            {filteredCounsel.length} empanelled
+                          </span>
+                        </div>
+
+                        <div className="max-h-60 overflow-y-auto space-y-2 pr-1 border-t border-b border-border/40 py-2">
+                          {filteredCounsel.length === 0 ? (
+                            <div className="p-4 text-center text-xs text-muted-foreground">
+                              {loadingEligibleCounsel ? "Loading verified DLSA legal aid panel..." : "No eligible legal aid advocates found matching search."}
+                            </div>
+                          ) : (
+                            filteredCounsel.map((counsel: any) => {
+                              const isSelected = selectedAdvId === counsel.id;
+                              return (
+                                <div
+                                  key={counsel.id}
+                                  onClick={() => {
+                                    setTransitionFormData((prev) => ({
+                                      ...prev,
+                                      assigned_advocate_id: counsel.id,
+                                      assigned_advocate_name: counsel.name,
+                                    }));
+                                  }}
+                                  className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                                    isSelected
+                                      ? "bg-primary/10 border-primary shadow-sm ring-1 ring-primary"
+                                      : "bg-card hover:bg-secondary/60 border-border/60"
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="space-y-0.5">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-bold text-xs text-foreground">
+                                          {counsel.name}
+                                        </span>
+                                        {counsel.tier_label && (
+                                          <span
+                                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider ${
+                                              counsel.tier === 1
+                                                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                                                : counsel.tier === 2
+                                                ? "bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30"
+                                                : "bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30"
+                                            }`}
+                                          >
+                                            {counsel.tier_label}
+                                          </span>
+                                        )}
+                                        {isSelected && (
+                                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground font-mono">
+                                            SELECTED
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[11px] text-muted-foreground flex items-center gap-2">
+                                        <span className="font-medium text-foreground/90">{counsel.matter_type || "Criminal"}</span>
+                                        <span>&bull;</span>
+                                        <span>{counsel.district}</span>
+                                        <span>&bull;</span>
+                                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">Panel: {counsel.panel_status || "Active"}</span>
+                                      </div>
+                                      <div className="text-[10px] text-muted-foreground/80 font-mono flex items-center gap-2 pt-0.5">
+                                        <span>Bar: {counsel.bar_registration_no}</span>
+                                        <span>&bull;</span>
+                                        <span>{counsel.experience_years} yrs exp</span>
+                                        <span>&bull;</span>
+                                        <span>{counsel.active_cases} active cases</span>
+                                      </div>
+                                    </div>
+                                    <div className="shrink-0 pt-0.5">
+                                      <div
+                                        className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                                          isSelected
+                                            ? "border-primary bg-primary text-primary-foreground"
+                                            : "border-muted-foreground/40"
+                                        }`}
+                                      >
+                                        {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                      <input
+                        type="hidden"
+                        value={transitionFormData[key] || ""}
+                        required
+                      />
+                    </div>
+                  );
+                }
                 return (
                   <div key={key}>
                     <label className="block text-xs font-semibold text-foreground mb-1">
@@ -2457,6 +3286,13 @@ export function CaseIntelligence() {
           </div>
         </div>
       )}
+      {/* Secure Document Preview Modal */}
+      <DocumentPreviewModal
+        isOpen={!!previewDocId}
+        onClose={() => setPreviewDocId(null)}
+        docId={previewDocId}
+        docTitle={previewDocTitle}
+      />
     </div>
   );
 }

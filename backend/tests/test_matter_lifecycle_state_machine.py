@@ -127,7 +127,29 @@ def test_case_id():
     """, (cid, json.dumps(case_dict), "INTAKE"))
     conn.commit()
     conn.close()
-    return cid
+    yield cid
+    try:
+        c = get_db_connection()
+        cur = c.cursor()
+        cur.execute("DELETE FROM cases WHERE case_id = ?", (cid,))
+        cur.execute("DELETE FROM documents WHERE case_id = ?", (cid,))
+        cur.execute("DELETE FROM matter_approvals WHERE matter_id = ?", (cid,))
+        cur.execute("DELETE FROM notifications WHERE case_id = ?", (cid,))
+        c.commit()
+        c.close()
+    except Exception:
+        pass
+    try:
+        from app.supabase_adapter import get_supabase_client, is_supabase_active
+        if is_supabase_active():
+            s_cli = get_supabase_client()
+            s_cli.table("cases").delete().eq("case_id", cid).execute()
+            s_cli.table("documents").delete().eq("case_id", cid).execute()
+            s_cli.table("matter_approvals").delete().eq("matter_id", cid).execute()
+    except Exception:
+        pass
+
+
 
 
 # ── 1. Canonical 16-State Lifecycle Progression ───────────────────────────────
@@ -157,7 +179,7 @@ def test_canonical_16_state_lifecycle_progression(
     res = client.post(
         f"/api/cases/{cid}/transitions",
         headers={"Authorization": f"Bearer {dlsa_token}"},
-        json={"transition": "SUBMIT_FOR_REVIEW", "comment": "Verification complete; reviewing legal needs."},
+        json={"transition": "SUBMIT_FOR_LEGAL_AID_REVIEW", "comment": "Verification complete; reviewing legal needs."},
     )
     assert res.status_code == 200
     assert res.json()["current_state"] == "REVIEW"
@@ -197,7 +219,7 @@ def test_canonical_16_state_lifecycle_progression(
     res = client.post(
         f"/api/cases/{cid}/transitions",
         headers={"Authorization": f"Bearer {advocate_token}"},
-        json={"transition": "COMPLETE_ANALYSIS", "comment": "Documents complete; statutory analysis ready."},
+        json={"transition": "RUN_ANALYSIS", "comment": "Documents complete; statutory analysis ready."},
     )
     assert res.status_code == 200
     assert res.json()["current_state"] == "ANALYSIS_READY"
@@ -271,7 +293,12 @@ def test_canonical_16_state_lifecycle_progression(
         headers={"Authorization": f"Bearer {advocate_token}"},
         json={
             "transition": "SCHEDULE_HEARING",
-            "payload": {"hearing_date": "2026-09-15", "court_name": "Sessions Court, Tis Hazari"},
+            "payload": {
+                "hearing_date": "2026-09-15",
+                "bench_name": "Court No. 4, Sessions Judge",
+                "source_type": "eCourts Daily Cause List",
+                "court_name": "Sessions Court, Tis Hazari",
+            },
             "comment": "Listed before Court No. 4.",
         },
     )
@@ -284,18 +311,24 @@ def test_canonical_16_state_lifecycle_progression(
         headers={"Authorization": f"Bearer {advocate_token}"},
         json={
             "transition": "RECORD_COURT_ORDER",
-            "payload": {"order_type": "BAIL_GRANTED", "order_date": "2026-09-15", "order_summary": "Bail granted on personal bond."},
+            "payload": {
+                "order_type": "BAIL_GRANTED",
+                "order_date": "2026-09-15",
+                "judge_name": "Hon'ble Sessions Judge S. K. Verma",
+                "order_reference": "ORD-2026-DL-8834",
+                "order_summary": "Bail granted on personal bond.",
+            },
             "comment": "Court granted bail under Section 479 BNSS.",
         },
     )
     assert res.status_code == 200
     assert res.json()["current_state"] == "ORDER_RECEIVED"
 
-    # 13. ORDER_RECEIVED -> RELEASE_WORKFLOW (by JAIL_OFFICER)
+    # 13. ORDER_RECEIVED -> RELEASE_WORKFLOW (Legal release coordination by DLSA_OFFICER)
     res = client.post(
         f"/api/cases/{cid}/transitions",
-        headers={"Authorization": f"Bearer {jail_token}"},
-        json={"transition": "INITIATE_RELEASE", "comment": "Surety verification and prison formalities initiated."},
+        headers={"Authorization": f"Bearer {dlsa_token}"},
+        json={"transition": "COORDINATE_RELEASE", "comment": "Surety verification and legal release formalities initiated."},
     )
     assert res.status_code == 200
     assert res.json()["current_state"] == "RELEASE_WORKFLOW"
@@ -394,13 +427,28 @@ def test_role_ownership_blocks_unauthorized_actors(
 
     # Advance case to HUMAN_REVIEW
     client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "START_VERIFICATION"})
-    client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "SUBMIT_FOR_REVIEW"})
+    client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "SUBMIT_FOR_LEGAL_AID_REVIEW"})
     client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "FLAG_LEGAL_AID_REQUIRED"})
     client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "ASSIGN_COUNSEL", "payload": {"assigned_advocate_id": "L-1"}})
-    client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {advocate_token}"}, json={"transition": "COMPLETE_ANALYSIS"})
+    client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {advocate_token}"}, json={"transition": "RUN_ANALYSIS"})
     client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {advocate_token}"}, json={"transition": "SUBMIT_FOR_HUMAN_REVIEW"})
 
-    # 4. DEFENSE_ADVOCATE blocked from SUPERVISORY_APPROVE (403)
+    # 4a. Supervisor cannot approve directly from HUMAN_REVIEW (400 Bad Request)
+    res_skip = client.post(
+        f"/api/cases/{cid}/transitions",
+        headers={"Authorization": f"Bearer {dlsa_token}"},
+        json={"transition": "SUPERVISORY_APPROVE", "payload": {"artifact_version_id": "ver_dummy"}},
+    )
+    assert res_skip.status_code == 400
+
+    # Advance to SUBMITTED via COUNSEL_SIGN_OFF
+    client.post(
+        f"/api/cases/{cid}/transitions",
+        headers={"Authorization": f"Bearer {advocate_token}"},
+        json={"transition": "COUNSEL_SIGN_OFF", "payload": {"draft_text": "Sample Petition"}},
+    )
+
+    # 4b. DEFENSE_ADVOCATE blocked from SUPERVISORY_APPROVE on SUBMITTED matter (403)
     res = client.post(
         f"/api/cases/{cid}/transitions",
         headers={"Authorization": f"Bearer {advocate_token}"},
@@ -427,25 +475,25 @@ def test_stage8_rules_engine_boundary_enforcement(client, test_case_id, dlsa_tok
     """
     cid = test_case_id
     client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "START_VERIFICATION"})
-    client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "SUBMIT_FOR_REVIEW"})
+    client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "SUBMIT_FOR_LEGAL_AID_REVIEW"})
     client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "FLAG_LEGAL_AID_REQUIRED"})
     client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "ASSIGN_COUNSEL", "payload": {"assigned_advocate_id": "L-1"}})
 
-    # Executing COMPLETE_ANALYSIS moves to ANALYSIS_READY
+    # Executing RUN_ANALYSIS moves to ANALYSIS_READY
     res = client.post(
         f"/api/cases/{cid}/transitions",
         headers={"Authorization": f"Bearer {advocate_token}"},
-        json={"transition": "COMPLETE_ANALYSIS", "payload": {"machine_status": "THRESHOLD_REACHED"}},
+        json={"transition": "RUN_ANALYSIS", "payload": {"machine_status": "THRESHOLD_REACHED"}},
     )
     assert res.status_code == 200
     assert res.json()["current_state"] == "ANALYSIS_READY"
 
-    # AI attempting APPROVE_MATTER directly is blocked with AI Safety Violation
+    # AI attempting SUPERVISORY_APPROVE directly is blocked with AI Safety Violation
     from app.workflow.state_machine import WorkflowStateMachine
     with pytest.raises(PermissionError) as exc:
         WorkflowStateMachine.validate_transition(
             current_state=MatterState.SUBMITTED,
-            action="APPROVE_MATTER",
+            action="SUPERVISORY_APPROVE",
             actor_role=Role.SUPERVISING_LEGAL_OFFICER,
             payload={"artifact_version_id": "v1"},
             is_ai_agent=True,
@@ -463,10 +511,10 @@ def test_stale_artifact_approval_invalidation(client, test_case_id, dlsa_token, 
     cid = test_case_id
     # Advance to HUMAN_REVIEW
     client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "START_VERIFICATION"})
-    client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "SUBMIT_FOR_REVIEW"})
+    client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "SUBMIT_FOR_LEGAL_AID_REVIEW"})
     client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "FLAG_LEGAL_AID_REQUIRED"})
     client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {dlsa_token}"}, json={"transition": "ASSIGN_COUNSEL", "payload": {"assigned_advocate_id": "L-1"}})
-    client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {advocate_token}"}, json={"transition": "COMPLETE_ANALYSIS"})
+    client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {advocate_token}"}, json={"transition": "RUN_ANALYSIS"})
     client.post(f"/api/cases/{cid}/transitions", headers={"Authorization": f"Bearer {advocate_token}"}, json={"transition": "SUBMIT_FOR_HUMAN_REVIEW"})
 
     # 1. Create version 1
@@ -619,3 +667,91 @@ def test_unified_matter_timeline_with_provenance_badges(client, test_case_id, dl
     assert len(timeline) > 0
     badges = {ev.get("provenance_badge") for ev in timeline}
     assert any(b in ("USER", "SYSTEM", "AI", "EXTERNAL_SYNC") for b in badges)
+
+
+# ── 9. On-Demand Drafting & Document Preview/Download Integration ─────────────
+
+def test_ondemand_drafting_and_authorization(client, test_case_id, dlsa_token, advocate_token):
+    """Verify on-demand AI drafting endpoint and role-assignment enforcement."""
+    cid = test_case_id
+
+    # Fast-forward to ASSIGNED
+    client.post(
+        f"/api/cases/{cid}/transitions",
+        headers={"Authorization": f"Bearer {dlsa_token}"},
+        json={"transition": "START_VERIFICATION"},
+    )
+    client.post(
+        f"/api/cases/{cid}/transitions",
+        headers={"Authorization": f"Bearer {dlsa_token}"},
+        json={"transition": "SUBMIT_FOR_LEGAL_AID_REVIEW"},
+    )
+    client.post(
+        f"/api/cases/{cid}/transitions",
+        headers={"Authorization": f"Bearer {dlsa_token}"},
+        json={"transition": "FLAG_LEGAL_AID_REQUIRED"},
+    )
+    client.post(
+        f"/api/cases/{cid}/transitions",
+        headers={"Authorization": f"Bearer {dlsa_token}"},
+        json={
+            "transition": "ASSIGN_COUNSEL",
+            "payload": {
+                "assigned_advocate_id": "demo_advocate",
+                "assigned_advocate_name": "Adv. Rajesh Sharma",
+            },
+        },
+    )
+
+    # Assigned advocate triggers on-demand drafting
+    res = client.post(
+        f"/cases/{cid}/draft/generate",
+        headers={"Authorization": f"Bearer {advocate_token}"},
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert "draft_text" in data
+    assert "Section 479" in data["draft_text"].replace("\u202f", " ")
+    assert data["version_number"] >= 1
+    assert data["provenance"] in ("AI_ASSISTED", "STATUTORY_GROUNDED_FALLBACK")
+
+    # Unassigned advocate attempt is rejected with 403
+    unassigned_tok = get_token(Role.DEFENSE_ADVOCATE, "stranger_adv", "Adv. Stranger")
+    unassigned_res = client.post(
+        f"/cases/{cid}/draft/generate",
+        headers={"Authorization": f"Bearer {unassigned_tok}"},
+    )
+    assert unassigned_res.status_code == 403
+
+
+def test_document_content_and_download_fallback(client, test_case_id, supervisor_token):
+    """Verify in-browser document preview and download fallback."""
+    cid = test_case_id
+    doc_id = f"DOC-{cid}-fir"
+
+    # Preview document content
+    res = client.get(
+        f"/documents/{doc_id}/content",
+        headers={"Authorization": f"Bearer {supervisor_token}"},
+    )
+    assert res.status_code == 200, res.text
+    content = res.json()
+    assert content["id"] == doc_id
+    assert "OFFICIAL INSTITUTIONAL RECORD" in content["extracted_text"]
+    assert content["document_status"] == "VERIFIED"
+
+    # Download document fallback
+    dl_res = client.get(
+        f"/documents/download/{doc_id}",
+        headers={"Authorization": f"Bearer {supervisor_token}"}
+    )
+    assert dl_res.status_code == 200, dl_res.text
+    assert "OFFICIAL INSTITUTIONAL RECORD" in dl_res.text
+
+    # Legacy endpoint delegation: approving at INTAKE must fail with 400 (InvalidTransitionError)
+    legacy_res = client.post(
+        f"/cases/{cid}/approve",
+        headers={"Authorization": f"Bearer {supervisor_token}"},
+    )
+    assert legacy_res.status_code in (400, 409), legacy_res.text
+

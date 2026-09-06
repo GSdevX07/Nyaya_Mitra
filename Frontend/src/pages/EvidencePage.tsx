@@ -161,7 +161,7 @@ export function EvidencePage() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
                 {item.computed_hash ? (
                   item.tampering_detected ? (
                     <span className="text-xs text-destructive font-medium flex items-center gap-1">

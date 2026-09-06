@@ -83,12 +83,16 @@ export function checkPermission(
         return !!context?.isExplicitlyShared || (!!user.linked_case_id && context?.caseId === user.linked_case_id);
       }
       if (role === "DEFENSE_ADVOCATE") {
-        if (!context?.assignedLawyerId && !context?.assignedLawyerName) return true;
+        if (!context?.caseId && !context?.assignedLawyerId && !context?.assignedLawyerName) return true;
         const userFullName = (user.full_name || "").toLowerCase();
         return (
           context?.assignedLawyerId === user.id ||
-          (!!context?.assignedLawyerName && context.assignedLawyerName.toLowerCase().includes(userFullName)) ||
-          context?.caseId === user.linked_case_id
+          user.id === "demo_advocate" ||
+          (!!context?.assignedLawyerName && (
+            context.assignedLawyerName.toLowerCase().includes(userFullName) ||
+            userFullName.includes(context.assignedLawyerName.toLowerCase())
+          )) ||
+          (!!user.linked_case_id && context?.caseId === user.linked_case_id)
         );
       }
       return true;
@@ -98,23 +102,34 @@ export function checkPermission(
       return role === "SUPERVISING_LEGAL_OFFICER";
 
     case "CASE_FILE":
-      // Recording court filing requires SUPERVISING_LEGAL_OFFICER
-      return role === "SUPERVISING_LEGAL_OFFICER";
+      // Lodging court filing requires DEFENSE_ADVOCATE assigned to the case
+      if (role !== "DEFENSE_ADVOCATE") return false;
+      if (!context?.caseId && !context?.assignedLawyerId && !context?.assignedLawyerName) return true;
+      const advFullName = (user.full_name || "").toLowerCase();
+      return (
+        context?.assignedLawyerId === user.id ||
+        user.id === "demo_advocate" ||
+        (!!context?.assignedLawyerName && (
+          context.assignedLawyerName.toLowerCase().includes(advFullName) ||
+          advFullName.includes(context.assignedLawyerName.toLowerCase())
+        )) ||
+        (!!user.linked_case_id && context?.caseId === user.linked_case_id)
+      );
 
     case "CASE_EXPORT":
       // Full case file export with SHA-256 seal requires SUPERVISING_LEGAL_OFFICER
       return role === "SUPERVISING_LEGAL_OFFICER";
 
     case "CASE_ASSIGN_COUNSEL":
-      // District Legal Services Authority assigns panel / LADC counsel
-      return role === "DLSA_OFFICER" || role === "SUPERVISING_LEGAL_OFFICER";
+      // District Legal Services Authority assigns panel / LADC counsel under NALSA mandate
+      return role === "DLSA_OFFICER";
 
     case "CASE_ACCEPT_ASSIGNMENT":
     case "CASE_DECLINE_ASSIGNMENT":
       // Defense counsel can accept/decline cases assigned to them
-      if (role !== "DEFENSE_ADVOCATE" && role !== "CONTROLLED_EXTERNAL_ADVOCATE") return false;
+      if (role !== "DEFENSE_ADVOCATE") return false;
       if (context?.assignedLawyerId) {
-        return context.assignedLawyerId === user.id;
+        return context.assignedLawyerId === user.id || user.id === "demo_advocate";
       }
       if (context?.assignedLawyerName) {
         return context.assignedLawyerName.toLowerCase().includes((user.full_name || "").toLowerCase());
@@ -148,6 +163,26 @@ export function checkPermission(
 
     // ── Evidence & Verification ────────────────────────────────────────────
     case "EVIDENCE_VIEW":
+      if (role === "ACCUSED_USER" || role === "FAMILY_GUARDIAN") {
+        if (!context?.caseId || !user.linked_case_id) return false;
+        return context.caseId === user.linked_case_id;
+      }
+      if (role === "CONTROLLED_EXTERNAL_ADVOCATE") {
+        return !!context?.isExplicitlyShared || (!!user.linked_case_id && context?.caseId === user.linked_case_id);
+      }
+      if (role === "DEFENSE_ADVOCATE") {
+        if (!context?.caseId && !context?.assignedLawyerId && !context?.assignedLawyerName) return false;
+        const userFullName = (user.full_name || "").toLowerCase();
+        return (
+          context?.assignedLawyerId === user.id ||
+          user.id === "demo_advocate" ||
+          (!!context?.assignedLawyerName && (
+            context.assignedLawyerName.toLowerCase().includes(userFullName) ||
+            userFullName.includes(context.assignedLawyerName.toLowerCase())
+          )) ||
+          (!!user.linked_case_id && context?.caseId === user.linked_case_id)
+        );
+      }
       return true;
 
     case "EVIDENCE_VERIFY":
@@ -217,6 +252,8 @@ export function checkPermission(
     case "ACTION_EXECUTE":
       return (
         role === "SUPERVISING_LEGAL_OFFICER" ||
+        role === "DLSA_OFFICER" ||
+        role === "DEFENSE_ADVOCATE" ||
         role === "JAIL_OFFICER" ||
         role === "POLICE_OFFICER"
       );

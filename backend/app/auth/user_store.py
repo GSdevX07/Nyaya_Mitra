@@ -160,7 +160,20 @@ def get_user_by_email(email: str) -> Optional[AuthUser]:
 
 
 def get_user_by_id(user_id: str) -> Optional[AuthUser]:
-    """Fetch user by primary key. Checks local SQLite first for high performance, then Supabase."""
+    """Fetch user by primary key — tries Supabase first, then SQLite fallback, then demo fallback."""
+    # 1. Supabase (Authoritative primary cloud database)
+    try:
+        from app.supabase_adapter import get_supabase_client, is_supabase_active
+        if is_supabase_active():
+            client = get_supabase_client()
+            if client:
+                res = client.table("organization_users").select("*").eq("id", user_id).execute()
+                if res.data:
+                    return _row_to_user(res.data[0])
+    except Exception:
+        pass
+
+    # 2. SQLite local fallback
     try:
         from app.database import get_db_connection
         conn = get_db_connection()
@@ -173,20 +186,6 @@ def get_user_by_id(user_id: str) -> Optional[AuthUser]:
             return _row_to_user(dict(row))
     except Exception:
         pass
-
-    # Skip external network roundtrip for test/demo user identifiers
-    if not (user_id.startswith("test") or user_id.startswith("demo_") or user_id.startswith("usr_")):
-        try:
-            from app.supabase_adapter import get_supabase_client, is_supabase_active
-
-            if is_supabase_active():
-                client = get_supabase_client()
-                if client:
-                    res = client.table("organization_users").select("*").eq("id", user_id).execute()
-                    if res.data:
-                        return _row_to_user(res.data[0])
-        except Exception:
-            pass
 
     # Demo fallback
     from app.auth.config import DEMO_MODE

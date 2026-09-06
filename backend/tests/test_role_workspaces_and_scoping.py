@@ -295,6 +295,10 @@ def test_supervisor_forbidden_actions_rejected():
 
 def test_approval_timeline_provenance_records_supervisor():
     """Approve case timeline event records actor_role=SUPERVISING_LEGAL_OFFICER, not defense advocate."""
+    from app.database import update_case_status
+    from app.models.schemas import CaseState
+    update_case_status("UTP-0001", CaseState.SUBMITTED)
+
     headers = _auth_header(Role.SUPERVISING_LEGAL_OFFICER, "demo_supervising", "supervisor@demo.nyayamitra.in", full_name="Dr. Aruna Roy")
     resp = client.post("/cases/UTP-0001/approve", headers=headers)
     assert resp.status_code == 200

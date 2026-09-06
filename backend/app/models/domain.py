@@ -92,6 +92,10 @@ class MatterState(str, Enum):
     DATA_CONFLICT = "DATA_CONFLICT"
     EXTERNAL_SYNC_FAILED = "EXTERNAL_SYNC_FAILED"
 
+    @classmethod
+    def to_canonical(cls, state: Any) -> "MatterState":
+        return CaseState.to_canonical(state)
+
 
 class CaseState(str, Enum):
     """Procedural states across the case lifecycle with backward compatibility."""
@@ -155,7 +159,7 @@ class CaseState(str, Enum):
             "APPROVED_READY_FOR_FILING": MatterState.APPROVED,
             "ORDER_PASSED": MatterState.ORDER_RECEIVED,
             "RELEASE_PROCESSING": MatterState.RELEASE_WORKFLOW,
-            "RELEASED": MatterState.RELEASE_WORKFLOW,
+            "RELEASED": MatterState.POST_RELEASE_FOLLOW_UP,
             "POST_RELEASE_PRESERVED": MatterState.POST_RELEASE_FOLLOW_UP,
             "APPEAL_PENDING": MatterState.HUMAN_REVIEW,
         }

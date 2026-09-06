@@ -24,6 +24,10 @@ def _auth_header(email: str) -> dict:
 
 
 def test_advocate_sign_off_flow():
+    from app.database import update_case_status
+    from app.models.schemas import CaseState
+    update_case_status("UTP-0001", CaseState.HUMAN_REVIEW)
+
     # 1. Defense Advocate signs off on UTP-0001
     adv_headers = _auth_header("advocate@demo.nyayamitra.in")
     sign_off_res = client.post(
@@ -54,6 +58,7 @@ def test_advocate_sign_off_flow():
     assert unauth_res.status_code == 403
 
     # 4. Verify Controlled External Advocate is permitted to sign off on their assigned case
+    update_case_status("UTP-0001", CaseState.HUMAN_REVIEW)
     ext_headers = _auth_header("extadvocate@demo.nyayamitra.in")
     ext_res = client.post(
         "/cases/UTP-0001/sign-off",

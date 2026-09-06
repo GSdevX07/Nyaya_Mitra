@@ -55,6 +55,23 @@ def supervisor_token():
     return token
 
 
+@pytest.fixture
+def advocate_token():
+    """Generate JWT for demo_advocate."""
+    claims = {
+        "email": "advocate@demo.nyayamitra.in",
+        "full_name": "Advocate Legal Aid (Demo)",
+        "district": "Central Delhi",
+    }
+    token = create_access_token(
+        subject="demo_advocate",
+        role=Role.DEFENSE_ADVOCATE.value,
+        org_id="org_dlsa_central",
+        extra_claims=claims,
+    )
+    return token
+
+
 # ── 1. Operational Mutation Action Blocks ─────────────────────────────────────
 
 def test_gov_admin_cannot_approve_case(gov_token, supervisor_token):
@@ -62,19 +79,25 @@ def test_gov_admin_cannot_approve_case(gov_token, supervisor_token):
     res_gov = client.post("/cases/UTP-0001/approve", headers={"Authorization": f"Bearer {gov_token}"})
     assert res_gov.status_code == 403
 
-    # Supervisor is authorized
+    # Supervisor is authorized when matter is submitted
+    from app.database import update_case_status
+    from app.models.schemas import CaseState
+    update_case_status("UTP-0001", CaseState.SUBMITTED)
     res_sup = client.post("/cases/UTP-0001/approve", headers={"Authorization": f"Bearer {supervisor_token}"})
     assert res_sup.status_code == 200
 
 
-def test_gov_admin_cannot_file_case(gov_token, supervisor_token):
+def test_gov_admin_cannot_file_case(gov_token, advocate_token):
     """GOV_ADMIN must be blocked from recording procedural court filings (403)."""
     res_gov = client.post("/cases/UTP-0001/file", headers={"Authorization": f"Bearer {gov_token}"})
     assert res_gov.status_code == 403
 
-    # Supervisor is authorized
-    res_sup = client.post("/cases/UTP-0001/file", headers={"Authorization": f"Bearer {supervisor_token}"})
-    assert res_sup.status_code == 200
+    # Assigned defense advocate is authorized when matter is approved
+    from app.database import update_case_status
+    from app.models.schemas import CaseState
+    update_case_status("UTP-0001", CaseState.APPROVED)
+    res_adv = client.post("/cases/UTP-0001/file", headers={"Authorization": f"Bearer {advocate_token}"})
+    assert res_adv.status_code == 200
 
 
 def test_gov_admin_cannot_trigger_operational_actions(gov_token):

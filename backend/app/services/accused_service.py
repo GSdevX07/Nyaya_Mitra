@@ -994,7 +994,7 @@ def get_citizen_view(user: AuthUser) -> Dict[str, Any]:
             "is_assigned": True,
             "name": str(assigned_lawyer_val),
             "organization": "District Legal Services Authority (DLSA) Panel",
-            "contact_phone": "+91 11 2338 5000 (DLSA Panel Coordinator)",
+            "contact_phone": primary_case.get("dlsa_contact") or "15100 (National Legal Aid Helpline 24x7)",
             "helpline": "15100 (Toll-Free NALSA Helpline 24x7)",
         }
     else:
@@ -1004,7 +1004,7 @@ def get_citizen_view(user: AuthUser) -> Dict[str, Any]:
             "organization": "District Legal Services Authority (DLSA)",
             "status_message": "Legal-aid counsel assignment is in progress by the DLSA Secretary.",
             "dlsa_helpline": "15100 (Toll-Free NALSA Helpline 24x7)",
-            "dlsa_office_contact": "+91 11 2338 5000",
+            "dlsa_office_contact": primary_case.get("dlsa_contact") or "15100 (National Legal Aid Helpline 24x7)",
         }
 
     # Available Case Documents (Safe list for accused / family)

@@ -87,7 +87,7 @@ export function GovAdminOverview() {
             {overview?.total_monitored_undertrials ?? reports?.overview?.total_undertrials_monitored ?? "—"}
           </div>
           <div className="text-[10px] font-mono text-emerald-600 mt-1">
-            {overview?.dlsa_mapping_coverage_pct ?? reports?.overview?.dlsa_mapping_coverage_pct ?? 94.6}% DLSA Mapped
+            {overview?.dlsa_mapping_coverage_pct ?? reports?.overview?.dlsa_mapping_coverage_pct ?? 0}% DLSA Mapped
           </div>
         </div>
 

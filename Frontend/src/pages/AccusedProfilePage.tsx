@@ -169,7 +169,7 @@ export const AccusedProfilePage: React.FC = () => {
     setEditFullName(profile.full_name || "");
     setEditAliases((profile.alias_names || []).join(", "));
     setEditFatherName(profile.father_name || profile.family_contacts?.find(fc => fc.relation?.toLowerCase().includes("father"))?.name || "");
-    setEditGender(profile.gender || "Male");
+    setEditGender(profile.gender || "");
     setEditAge(profile.age || 0);
     setUpdateReason("");
     setIdentityUpdateSuccess(null);
@@ -575,7 +575,7 @@ export const AccusedProfilePage: React.FC = () => {
                 <div className="bg-secondary/50 p-5 rounded-xl border-2 border-border">
                   <span className="text-xs uppercase font-bold tracking-wider text-muted-foreground block">Examining Medical Officer</span>
                   <span className="text-base font-bold text-foreground mt-1 block">
-                    {profile.medical_record?.medical_officer_name || 'Chief Medical Officer'}
+                    {profile.medical_record?.medical_officer_name || 'Designated Medical Officer'}
                   </span>
                 </div>
 

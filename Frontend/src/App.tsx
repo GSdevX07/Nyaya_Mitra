@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./lib/auth";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AppLayout } from "./layout/AppLayout";
@@ -121,6 +121,10 @@ function App() {
                     <AdvocateWorkspace />
                   </ProtectedRoute>
                 }
+              />
+              <Route
+                path="/advocate-workspace"
+                element={<Navigate to="/advocate" replace />}
               />
               <Route
                 path="/police"

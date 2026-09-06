@@ -6,7 +6,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { NotificationsModal, type NotificationItem } from "@/components/NotificationsModal";
 import { LawyerProfileModal } from "@/components/LawyerProfileModal";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { fetchNotifications } from "@/lib/api";
+import { fetchNotifications, clearNotificationsApi } from "@/lib/api";
 import { useAuth, type Role } from "@/lib/auth";
 
 interface NavItem {
@@ -135,40 +135,36 @@ function getDefaultNotificationsForRole(role?: string): NotificationItem[] {
     case "POLICE_OFFICER":
       return [
         {
-          id: "DEF-POLICE-1",
-          title: "Remand Period Expiry Alert — Sec 187 BNSS",
-          message: "Accused Suresh Kumar (FIR 204/2026, Crime Branch Delhi) initial 15-day police custody remand expires in 48 hours.",
-          timestamp: "Just now",
-          type: "urgent",
-          case_id: "UTP-0001",
+          id: "SYS-POLICE-1",
+          title: "Remand Compliance Monitoring Active",
+          message: "Statutory 15-day police custody and Section 187 BNSS investigation compliance tracking active for jurisdictional police station.",
+          timestamp: "Active",
+          type: "info",
         },
         {
-          id: "DEF-POLICE-2",
-          title: "Pending Investigation Charge Sheet Deadline",
-          message: "Charge Sheet for Case UTP-0015 (FIR 88/2026) due within 14 days under Section 193 BNSS.",
-          timestamp: "2 hrs ago",
-          type: "warning",
-          case_id: "UTP-0015",
+          id: "SYS-POLICE-2",
+          title: "Charge Sheet Statutory Tracking",
+          message: "Automated investigation timeline and charge sheet submission tracker active under Section 193 BNSS.",
+          timestamp: "Active",
+          type: "info",
         },
       ];
 
     case "JAIL_OFFICER":
       return [
         {
-          id: "DEF-JAIL-1",
-          title: "Section 479(2) BNSS Mandatory Bail Application Required",
-          message: "Undertrial prisoner Ramesh Kumar (UTP-0007) has completed 1/3rd sentence duration. Superintendent application to Court required forthwith.",
-          timestamp: "Just now",
-          type: "urgent",
-          case_id: "UTP-0007",
+          id: "SYS-JAIL-1",
+          title: "Custody Threshold Scrutiny Active",
+          message: "All admitted undertrial prisoners are actively tracked for Section 479 BNSS statutory detention eligibility.",
+          timestamp: "Active",
+          type: "info",
         },
         {
-          id: "DEF-JAIL-2",
-          title: "Nominal Roll & Custody Certificate Due",
-          message: "High Court Registry requested verified Nominal Roll and custody conduct certificate for Suresh Kumar (UTP-0001).",
-          timestamp: "1 hr ago",
-          type: "warning",
-          case_id: "UTP-0001",
+          id: "SYS-JAIL-2",
+          title: "Nominal Roll & Custody Verification",
+          message: "Institutional nominal rolls and custody conduct certificates synchronized for judicial requisition.",
+          timestamp: "Active",
+          type: "info",
         },
       ];
 
@@ -176,40 +172,36 @@ function getDefaultNotificationsForRole(role?: string): NotificationItem[] {
     case "CONTROLLED_EXTERNAL_ADVOCATE":
       return [
         {
-          id: "DEF-ADV-1",
-          title: "Bail Application Draft Ready for Filing",
-          message: "Consolidated BNSS Section 479 application package for Suresh Kumar (UTP-0001) generated and verified against 2024 Supreme Court SOP.",
-          timestamp: "10 mins ago",
-          type: "success",
-          case_id: "UTP-0001",
+          id: "SYS-ADV-1",
+          title: "Legal Aid Drafting Desk Synchronized",
+          message: "Assigned undertrial cases are available for BNSS statutory bail petition drafting and dossier compilation.",
+          timestamp: "Active",
+          type: "info",
         },
         {
-          id: "DEF-ADV-2",
-          title: "Client Eligibility Radar Alert",
-          message: "New Section 479(1) Proviso 1 eligibility detected for Ramesh Kumar (UTP-0007, First-time offender threshold reached).",
-          timestamp: "45 mins ago",
-          type: "urgent",
-          case_id: "UTP-0007",
+          id: "SYS-ADV-2",
+          title: "Statutory Eligibility Radar Active",
+          message: "Continuous monitoring for Section 479(1) first-time offender one-third and one-half detention thresholds.",
+          timestamp: "Active",
+          type: "info",
         },
       ];
 
     case "DLSA_OFFICER":
       return [
         {
-          id: "DEF-DLSA-1",
-          title: "Legal Aid Panel Assignment Pending",
-          message: "Indigent undertrial prisoner (UTP-0015) has requested DLSA representation. Panel advocate assignment awaiting endorsement.",
-          timestamp: "20 mins ago",
-          type: "warning",
-          case_id: "UTP-0015",
+          id: "SYS-DLSA-1",
+          title: "Empanelled Counsel Allocation Active",
+          message: "Institutional panel defense advocates and LADCs roster synchronized for district undertrial assignments.",
+          timestamp: "Active",
+          type: "info",
         },
         {
-          id: "DEF-DLSA-2",
-          title: "High Priority Bail Eligibility Flagged",
-          message: "Alert [HIGH]: Case UTP-0007 (Ramesh Kumar) is legally eligible for bail under BNSS 479. Urgency Score: 266.",
-          timestamp: "1 hr ago",
-          type: "urgent",
-          case_id: "UTP-0007",
+          id: "SYS-DLSA-2",
+          title: "Statutory Bail Scrutiny Queue",
+          message: "High-priority Section 479 undertrial cases flagged for timely legal aid review.",
+          timestamp: "Active",
+          type: "info",
         },
       ];
 
@@ -217,32 +209,29 @@ function getDefaultNotificationsForRole(role?: string): NotificationItem[] {
     case "GOV_ADMIN":
       return [
         {
-          id: "DEF-SLSA-1",
-          title: "Statutory Citation Integrity Escalation",
-          message: "Unsupported legal claims detected in advocate filing draft. Routed to Supervising Legal Officer for human verification.",
-          timestamp: "15 mins ago",
-          type: "urgent",
-          case_id: "UTP-0001",
+          id: "SYS-SLSA-1",
+          title: "Supervisory Review Queue Active",
+          message: "Legal aid bail applications requiring institutional supervisory sign-off are monitored in real time.",
+          timestamp: "Active",
+          type: "info",
         },
         {
-          id: "DEF-SLSA-2",
-          title: "Discovered Legal Source Pending Approval",
-          message: "New statutory enactment proposed by DLSA Officer is in 'discovered' state awaiting formal supervisor review.",
-          timestamp: "3 hrs ago",
-          type: "warning",
-          case_id: "src_bnss_2023",
+          id: "SYS-SLSA-2",
+          title: "Statutory Knowledge Grounding",
+          message: "Statutory provisions cross-verified against Bharatiya Nagarik Suraksha Sanhita (BNSS 2023).",
+          timestamp: "Active",
+          type: "info",
         },
       ];
 
     case "READ_ONLY_AUDITOR":
       return [
         {
-          id: "DEF-AUDIT-1",
-          title: "Statutory Compliance Audit Alert",
-          message: "Discrepancy detected in custody days computation between Police FIR arrest log and Prison intake register for UTP-0015.",
-          timestamp: "30 mins ago",
-          type: "warning",
-          case_id: "UTP-0015",
+          id: "SYS-AUDIT-1",
+          title: "Statutory Compliance Audit Log Active",
+          message: "Immutable cryptographic audit trail active across all custody, evidence, and legal aid events.",
+          timestamp: "Active",
+          type: "info",
         },
       ];
 
@@ -250,20 +239,18 @@ function getDefaultNotificationsForRole(role?: string): NotificationItem[] {
     case "FAMILY_GUARDIAN":
       return [
         {
-          id: "DEF-CITIZEN-1",
-          title: "Bail Application Status Update",
-          message: "Your legal aid counsel has submitted an application for bail under Section 479 BNSS. Hearing date set for 2026-09-08.",
-          timestamp: "1 hr ago",
-          type: "success",
-          case_id: "UTP-0001",
+          id: "SYS-CITIZEN-1",
+          title: "Legal Aid Tracking Active",
+          message: "Your case proceedings and legal aid defense status are updated dynamically as actions are recorded.",
+          timestamp: "Active",
+          type: "info",
         },
         {
-          id: "DEF-CITIZEN-2",
-          title: "Assigned Legal Aid Advocate Contact",
-          message: "Adv. Rajesh Sharma (DLSA Panel) has been designated as your defense advocate.",
-          timestamp: "Yesterday",
+          id: "SYS-CITIZEN-2",
+          title: "National Legal Aid Helpline",
+          message: "Call 15100 (Toll-Free 24x7) for round-the-clock free legal aid assistance from NALSA / DLSA.",
+          timestamp: "Active",
           type: "info",
-          case_id: "UTP-0001",
         },
       ];
 
@@ -271,10 +258,10 @@ function getDefaultNotificationsForRole(role?: string): NotificationItem[] {
     default:
       return [
         {
-          id: "DEF-ADMIN-1",
+          id: "SYS-ADMIN-1",
           title: "Database Sync & Health Check",
           message: "PostgreSQL dual-write adapter active. SQLite primary replica synchronized.",
-          timestamp: "5 mins ago",
+          timestamp: "Active",
           type: "info",
         },
       ];
@@ -283,6 +270,7 @@ function getDefaultNotificationsForRole(role?: string): NotificationItem[] {
 
 
 const READ_STORAGE_KEY = "nyaya_read_notification_ids";
+const CLEARED_STORAGE_KEY = "nyaya_cleared_notification_ids";
 
 function getReadIdsFromStorage(): string[] {
   try {
@@ -300,6 +288,22 @@ function saveReadIdsToStorage(ids: string[]) {
   }
 }
 
+function getClearedIdsFromStorage(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(CLEARED_STORAGE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveClearedIdsToStorage(ids: string[]) {
+  try {
+    localStorage.setItem(CLEARED_STORAGE_KEY, JSON.stringify(ids));
+  } catch (err) {
+    console.error("Failed to save cleared notification IDs:", err);
+  }
+}
+
 export function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -314,10 +318,13 @@ export function AppLayout() {
   // Notification state
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
     const readIds = getReadIdsFromStorage();
-    return getDefaultNotificationsForRole(user?.role).map((n) => ({
-      ...n,
-      read: readIds.includes(n.id),
-    }));
+    const clearedIds = getClearedIdsFromStorage();
+    return getDefaultNotificationsForRole(user?.role)
+      .filter((n) => !clearedIds.includes(n.id))
+      .map((n) => ({
+        ...n,
+        read: readIds.includes(n.id),
+      }));
   });
 
   const [notifLoading, setNotifLoading] = useState(false);
@@ -374,19 +381,24 @@ export function AppLayout() {
       .then((data) => {
         if (!isMounted) return;
         const readIds = getReadIdsFromStorage();
+        const clearedIds = getClearedIdsFromStorage();
         if (data && data.length > 0) {
           setNotifications(
-            data.map((n: NotificationItem) => ({
-              ...n,
-              read: readIds.includes(n.id) || !!n.read,
-            }))
+            data
+              .filter((n: NotificationItem) => !clearedIds.includes(n.id))
+              .map((n: NotificationItem) => ({
+                ...n,
+                read: readIds.includes(n.id) || !!n.read,
+              }))
           );
         } else {
           setNotifications(
-            getDefaultNotificationsForRole(user?.role).map((n) => ({
-              ...n,
-              read: readIds.includes(n.id),
-            }))
+            getDefaultNotificationsForRole(user?.role)
+              .filter((n) => !clearedIds.includes(n.id))
+              .map((n) => ({
+                ...n,
+                read: readIds.includes(n.id),
+              }))
           );
         }
       })
@@ -394,11 +406,14 @@ export function AppLayout() {
         console.warn("Could not load backend notifications, falling back to role defaults:", err);
         if (!isMounted) return;
         const readIds = getReadIdsFromStorage();
+        const clearedIds = getClearedIdsFromStorage();
         setNotifications(
-          getDefaultNotificationsForRole(user?.role).map((n) => ({
-            ...n,
-            read: readIds.includes(n.id),
-          }))
+          getDefaultNotificationsForRole(user?.role)
+            .filter((n) => !clearedIds.includes(n.id))
+            .map((n) => ({
+              ...n,
+              read: readIds.includes(n.id),
+            }))
         );
       })
       .finally(() => {
@@ -425,6 +440,32 @@ export function AppLayout() {
       saveReadIdsToStorage(readIds);
       return updated;
     });
+  };
+
+  const handleClearAll = async () => {
+    const currentIds = notifications.map((n) => n.id);
+    const existingCleared = getClearedIdsFromStorage();
+    const mergedCleared = Array.from(new Set([...existingCleared, ...currentIds]));
+    saveClearedIdsToStorage(mergedCleared);
+    setNotifications([]);
+    try {
+      await clearNotificationsApi();
+    } catch (err) {
+      console.warn("Failed to clear notifications on backend:", err);
+    }
+  };
+
+  const handleClearItem = async (id: string) => {
+    const existingCleared = getClearedIdsFromStorage();
+    if (!existingCleared.includes(id)) {
+      saveClearedIdsToStorage([...existingCleared, id]);
+    }
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    try {
+      await clearNotificationsApi(id);
+    } catch (err) {
+      console.warn("Failed to clear notification item on backend:", err);
+    }
   };
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -686,6 +727,8 @@ export function AppLayout() {
         notifications={notifications}
         onMarkAllRead={handleMarkAllRead}
         onMarkItemRead={handleMarkItemRead}
+        onClearAll={handleClearAll}
+        onClearItem={handleClearItem}
         loading={notifLoading}
       />
       <LawyerProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />

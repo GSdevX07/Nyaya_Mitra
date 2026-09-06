@@ -81,7 +81,8 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
   const [docLoading, setDocLoading] = useState(false);
 
   const handleOpenDocStatus = async (docId?: string) => {
-    const target = docId || (data?.case_reference ? `DOC-${data.case_reference}-remand_order` : "UTP-0001");
+    const target = docId || (data?.case_reference ? `DOC-${data.case_reference}-remand_order` : "");
+    if (!target) return;
     setSelectedDocId(target);
     setDocLoading(true);
     try {

@@ -88,7 +88,7 @@ export function HearingsPage() {
               {isPolice ? "Police Judicial Motion Tracker • Station Remand Desk" : "Judicial Motion Tracker"}
             </span>
             <span className="text-xs text-muted-foreground font-mono">
-              {isPolice ? "Kotwali / Central PS Reference" : "Active Judicial Tracker"}
+              {isPolice ? "Jurisdictional Police Station Reference" : "Active Judicial Tracker"}
             </span>
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-primary">
@@ -166,7 +166,7 @@ export function HearingsPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Gavel className="w-3.5 h-3.5 text-primary shrink-0" />
-                    <span>{h.judge || "Hon'ble Special Judicial Magistrate"}</span>
+                    <span>{h.judge || "Designated Judicial Officer"}</span>
                   </div>
                 </div>
 
@@ -276,15 +276,15 @@ export function HearingsPage() {
                           </div>
                           <div>
                             <span className="text-muted-foreground block text-[11px]">FIR Reference:</span>
-                            <strong className="text-primary font-mono">{c.fir_number || "FIR-2024-089"}</strong>
+                            <strong className="text-primary font-mono">{c.fir_number || "Pending Registration"}</strong>
                           </div>
                           <div>
                             <span className="text-muted-foreground block text-[11px]">Police Station:</span>
-                            <span className="text-foreground">{c.police_station || "Kotwali Police Station"}</span>
+                            <span className="text-foreground">{c.police_station || "Not Recorded"}</span>
                           </div>
                           <div>
                             <span className="text-muted-foreground block text-[11px]">Jurisdictional District:</span>
-                            <span className="text-foreground">{c.district || "Central District, Delhi"}</span>
+                            <span className="text-foreground">{c.district || "Not Recorded"}</span>
                           </div>
                         </div>
                       </div>
@@ -305,12 +305,12 @@ export function HearingsPage() {
                           </div>
                           <div>
                             <span className="text-muted-foreground block text-[11px]">Detention Facility:</span>
-                            <span className="text-foreground">{c.jail_location || "Tihar Jail 4"}</span>
+                            <span className="text-foreground">{c.jail_location || "Not Recorded"}</span>
                           </div>
                           <div>
                             <span className="text-muted-foreground block text-[11px]">Penal Code Sections:</span>
                             <span className="font-bold text-foreground">
-                              {c.offense_sections?.join(", ") || "BNS 303(2)"}
+                              {c.offense_sections?.join(", ") || "Under Verification"}
                             </span>
                           </div>
                         </div>
@@ -374,7 +374,7 @@ export function HearingsPage() {
                         <div className="grid grid-cols-2 gap-3 text-xs">
                           <div>
                             <span className="text-muted-foreground block text-[11px]">Court Name:</span>
-                            <span className="text-foreground">{c.court_name || "Chief Metropolitan Magistrate Court"}</span>
+                            <span className="text-foreground">{c.court_name || "Competent Court"}</span>
                           </div>
                           <div>
                             <span className="text-muted-foreground block text-[11px]">Procedural Status:</span>

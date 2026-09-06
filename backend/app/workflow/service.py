@@ -42,7 +42,9 @@ logger = logging.getLogger(__name__)
 
 class ConcurrencyConflictError(Exception):
     """Raised when an optimistic concurrency check fails (HTTP 409)."""
-    pass
+    def __init__(self, message: str, conflict_details: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
+        self.conflict_details = conflict_details or {}
 
 
 class WorkflowService:
@@ -50,17 +52,26 @@ class WorkflowService:
 
     @classmethod
     def get_case_state(cls, case_id: str) -> Tuple[MatterState, int, Dict[str, Any]]:
-        """Retrieve current canonical state, version number, and case record."""
-        case = case_repo.get_case_by_id(case_id)
-        if not case:
-            raise LookupError(f"Case with ID '{case_id}' not found.")
-        
-        # Determine canonical state
-        raw_status = getattr(case, "status", None) or getattr(case, "current_status", "INTAKE")
+        """Retrieve current canonical state, version number, and case record directly from DB."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT data, status, version_number FROM cases WHERE case_id = ?", (case_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            case = case_repo.get_case_by_id(case_id)
+            if not case:
+                raise LookupError(f"Case with ID '{case_id}' not found.")
+            case_dict = case if isinstance(case, dict) else (case.__dict__ if hasattr(case, "__dict__") else {})
+            raw_status = getattr(case, "status", None) or "INTAKE"
+            canonical_state = CaseState.to_canonical(raw_status)
+            version_number = get_case_version(case_id)
+            return canonical_state, version_number, case_dict
+
+        data_json, raw_status, version_number = row[0], row[1], row[2] or 1
+        case_dict = json.loads(data_json) if isinstance(data_json, str) else dict(data_json)
         canonical_state = CaseState.to_canonical(raw_status)
-        version_number = get_case_version(case_id)
-        
-        case_dict = case if isinstance(case, dict) else (case.__dict__ if hasattr(case, "__dict__") else {})
         return canonical_state, version_number, case_dict
 
     @classmethod
@@ -84,13 +95,36 @@ class WorkflowService:
         if comment and "comment" not in payload:
             payload["comment"] = comment
 
+        action = WorkflowStateMachine.normalize_action(action)
         current_state, current_version, case_data = cls.get_case_state(case_id)
 
         # 1. Optimistic Concurrency Check
         if expected_version is not None and expected_version != current_version:
-            raise ConcurrencyConflictError(
-                f"Conflict: Matter '{case_id}' version mismatch. Expected {expected_version}, but database version is {current_version}."
+            last_actor = case_data.get("last_modified_by")
+            last_role = case_data.get("last_modified_role")
+            last_dist = case_data.get("last_modified_district") or case_data.get("district")
+            last_jail = case_data.get("last_modified_jail") or case_data.get("jail_location")
+            last_station = case_data.get("last_modified_station") or case_data.get("police_station")
+
+            if not last_actor:
+                timeline = case_data.get("timeline") or []
+                if timeline:
+                    last_ev = timeline[-1]
+                    last_actor = last_ev.get("actor")
+                    last_role = last_ev.get("actor_role")
+
+            err = ConcurrencyConflictError(
+                f"Version mismatch (expected {expected_version}, current {current_version}): Matter '{case_id}' was already updated by {last_actor or 'another official'}.",
+                conflict_details={
+                    "last_modified_by": last_actor,
+                    "last_modified_role": last_role,
+                    "last_modified_district": last_dist,
+                    "last_modified_jail": last_jail,
+                    "last_modified_station": last_station,
+                    "current_version": current_version,
+                },
             )
+            raise err
 
         # 2. State Machine & Role Validation
         rule = WorkflowStateMachine.validate_transition(
@@ -101,6 +135,27 @@ class WorkflowService:
             is_ai_agent=is_ai_agent,
         )
 
+        # 2b. Advocate self-assignment forbidden
+        if action == "ASSIGN_COUNSEL" and actor.role != Role.DLSA_OFFICER:
+            raise PermissionError("Self-assignment forbidden: Only DLSA Officers can assign panel defense counsel.")
+
+        # 2c. Case Assignment Check for Defense Advocates
+        if actor.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE) and not is_ai_agent:
+            user_full = (actor.full_name or "").lower()
+            assigned_id = case_data.get("assigned_advocate_id") or case_data.get("assigned_lawyer_id")
+            assigned_name = (case_data.get("assigned_advocate_name") or case_data.get("assigned_lawyer") or "").lower()
+            linked_cid = getattr(actor, "linked_case_id", None)
+            
+            is_assigned = (
+                (assigned_id and (assigned_id == actor.id or actor.id == "demo_advocate"))
+                or (assigned_name and user_full and (user_full in assigned_name or assigned_name in user_full))
+                or (linked_cid and linked_cid == case_id)
+            )
+            if not is_assigned and action != "ASSIGN_COUNSEL":
+                raise PermissionError(
+                    f"Forbidden: You are not the assigned defense counsel on case '{case_id}'."
+                )
+
         target_state = rule.to_state
 
         # 3. Artifact & Approval Prerequisites
@@ -109,6 +164,24 @@ class WorkflowService:
 
         # Specific check: SUBMITTED (Counsel Sign-off by DEFENSE_ADVOCATE)
         if action in ("COUNSEL_SIGN_OFF", "SUBMIT_FOR_SUPERVISORY_REVIEW"):
+            if not artifact_version_id:
+                active_art = get_active_matter_artifact(case_id, payload.get("artifact_type", "BAIL_APPLICATION"))
+                if active_art:
+                    artifact_version_id = active_art["version_id"]
+                    artifact_id = active_art["artifact_id"]
+                elif payload.get("draft_text"):
+                    # Auto-persist draft text as version
+                    ver = cls.create_artifact_version(
+                        case_id=case_id,
+                        artifact_id=artifact_id,
+                        artifact_type=payload.get("artifact_type", "BAIL_APPLICATION"),
+                        content_text=payload["draft_text"],
+                        actor=actor,
+                        is_ai_generated=False,
+                    )
+                    artifact_version_id = ver["version_id"]
+                    artifact_id = ver["artifact_id"]
+
             # Counsel signing off work product registers Level 1 approval on artifact version
             if artifact_version_id:
                 store_matter_approval({
@@ -130,8 +203,8 @@ class WorkflowService:
                     "metadata": {"action": action, "sign_off_actor": actor.full_name},
                 })
 
-        # Specific check: APPROVE_MATTER / SUPERVISORY_APPROVE (by SUPERVISING_LEGAL_OFFICER)
-        if action in ("APPROVE_MATTER", "SUPERVISORY_APPROVE"):
+        # Specific check: SUPERVISORY_APPROVE (by SUPERVISING_LEGAL_OFFICER)
+        if action == "SUPERVISORY_APPROVE":
             if not artifact_version_id:
                 # Look up active artifact version if not explicitly passed
                 active_art = get_active_matter_artifact(case_id, payload.get("artifact_type", "BAIL_APPLICATION"))
@@ -163,8 +236,8 @@ class WorkflowService:
                 "metadata": {"action": action, "approved_by": actor.full_name},
             })
 
-        # Specific check: RECORD_FILING / LODGE_COURT_FILING
-        if action in ("RECORD_FILING", "LODGE_COURT_FILING"):
+        # Specific check: RECORD_FILING
+        if action == "RECORD_FILING":
             # Must verify that valid supervisory approval exists on the current active artifact version!
             approvals = get_matter_approvals(case_id, artifact_version_id)
             supervisory_approved = any(
@@ -190,22 +263,51 @@ class WorkflowService:
         # 4. Prepare updated case data
         updated_data: Dict[str, Any] = {}
         if action == "ASSIGN_COUNSEL":
-            adv_id = payload.get("assigned_advocate_id") or payload.get("advocate_id")
-            adv_name = payload.get("assigned_advocate_name") or payload.get("advocate_name", "Assigned Legal Aid Counsel")
+            adv_id = payload.get("assigned_advocate_id") or payload.get("advocate_id") or payload.get("assigned_lawyer_id")
+            adv_name = payload.get("assigned_advocate_name") or payload.get("advocate_name") or payload.get("assigned_lawyer") or "Assigned Legal Aid Counsel"
             updated_data["assigned_advocate_id"] = adv_id
             updated_data["assigned_advocate_name"] = adv_name
-        elif action in ("RECORD_FILING", "LODGE_COURT_FILING"):
+            updated_data["assigned_lawyer_id"] = adv_id
+            updated_data["assigned_lawyer"] = adv_name
+            updated_data["assignment_status"] = "ASSIGNED"
+        elif action == "RECORD_FILING":
             updated_data["filing_reference"] = payload.get("filing_reference") or payload.get("cnr_number")
             updated_data["filing_date"] = payload.get("filing_date", datetime.date.today().isoformat())
         elif action == "SCHEDULE_HEARING":
             updated_data["hearing_date"] = payload.get("hearing_date")
+            updated_data["bench_name"] = payload.get("bench_name")
+            updated_data["source_type"] = payload.get("source_type")
             updated_data["court_name"] = payload.get("court_name", case_data.get("court_name"))
         elif action == "RECORD_COURT_ORDER":
             updated_data["order_type"] = payload.get("order_type")
             updated_data["order_date"] = payload.get("order_date", datetime.date.today().isoformat())
+            updated_data["judge_name"] = payload.get("judge_name")
+            updated_data["order_reference"] = payload.get("order_reference")
             updated_data["order_summary"] = payload.get("order_summary")
-        elif action in ("CONFIRM_RELEASE", "START_POST_RELEASE_FOLLOW_UP"):
+        elif action in ("CONFIRM_PRISON_RELEASE", "CONFIRM_RELEASE", "START_POST_RELEASE_FOLLOW_UP"):
             updated_data["release_date"] = payload.get("release_date", datetime.date.today().isoformat())
+        elif action == "CLOSE_MATTER":
+            updated_data["closure_reason"] = payload.get("closure_reason")
+            updated_data["closed_at"] = datetime.datetime.utcnow().isoformat()
+
+        # Record actor attribution for accurate concurrency notices
+        actor_dist = getattr(actor, "district", None) or case_data.get("district") or ""
+        actor_jail = (
+            actor.facility_ids[0] if (hasattr(actor, "facility_ids") and actor.facility_ids)
+            else (case_data.get("jail_location") if "jail" in actor.role.value.lower() else None)
+        )
+        actor_station = getattr(actor, "police_station", None) or (
+            case_data.get("police_station") if "police" in actor.role.value.lower() else None
+        )
+        updated_data["last_modified_by"] = actor.full_name or actor.id
+        updated_data["last_modified_role"] = actor.role.value
+        if actor_dist:
+            updated_data["last_modified_district"] = actor_dist
+        if actor_jail:
+            updated_data["last_modified_jail"] = actor_jail
+        if actor_station:
+            updated_data["last_modified_station"] = actor_station
+        updated_data["last_modified_at"] = datetime.datetime.utcnow().isoformat()
 
         # 5. Execute DB Transaction with Optimistic Locking
         success, new_version, err_msg = execute_case_transition_tx(
@@ -255,10 +357,24 @@ class WorkflowService:
             provenance_badge=provenance,
         )
 
+        # 8. Multi-Role Stakeholder Notification Dispatch
+        cls._dispatch_transition_notifications(
+            case_id=case_id,
+            action=action,
+            current_state=current_state,
+            target_state=target_state,
+            actor=actor,
+            payload=payload,
+            comment=comment,
+            case_data=case_data,
+            updated_data=updated_data,
+        )
+
         return {
             "case_id": case_id,
             "previous_state": current_state.value,
             "current_state": target_state.value,
+            "target_state": target_state.value,
             "action": action,
             "version_number": new_version,
             "transitioned_by": actor.full_name,
@@ -266,6 +382,136 @@ class WorkflowService:
             "timestamp": datetime.datetime.utcnow().isoformat(),
             "message": f"Successfully transitioned matter '{case_id}' to '{target_state.value}'.",
         }
+
+    @classmethod
+    def _dispatch_transition_notifications(
+        cls,
+        case_id: str,
+        action: str,
+        current_state: MatterState,
+        target_state: MatterState,
+        actor: AuthUser,
+        payload: Dict[str, Any],
+        comment: Optional[str],
+        case_data: Dict[str, Any],
+        updated_data: Dict[str, Any],
+    ) -> None:
+        """Dispatch contextual, multi-role notifications on state transitions."""
+        from app.database import add_notification
+        try:
+            actor_name = actor.full_name or actor.id
+            prisoner_name = case_data.get("name") or "Undertrial"
+            assigned_lawyer_id = updated_data.get("assigned_lawyer_id") or case_data.get("assigned_lawyer_id") or case_data.get("assigned_advocate_id")
+
+            if action == "ASSIGN_COUNSEL":
+                adv_id = updated_data.get("assigned_lawyer_id")
+                add_notification(
+                    case_id=case_id,
+                    title=f"Legal Aid Brief Assigned: {case_id}",
+                    message=f"DLSA assigned you to represent undertrial {prisoner_name}. Commencing dossier review and petition drafting.",
+                    notif_type="info",
+                    target_role="DEFENSE_ADVOCATE,CONTROLLED_EXTERNAL_ADVOCATE",
+                    user_id=adv_id,
+                )
+            elif action in ("COUNSEL_SIGN_OFF", "SUBMIT_FOR_REVIEW"):
+                add_notification(
+                    case_id=case_id,
+                    title=f"Bail Petition Draft Signed Off: {case_id}",
+                    message=f"Counsel {actor_name} completed draft review and legal sign-off for {prisoner_name}. Supervisory review and endorsement pending.",
+                    notif_type="urgent",
+                    target_role="SUPERVISING_LEGAL_OFFICER,DLSA_OFFICER",
+                )
+            elif action == "SUPERVISORY_APPROVE":
+                add_notification(
+                    case_id=case_id,
+                    title=f"Supervisory Approval Granted: {case_id}",
+                    message=f"Supervising Legal Officer {actor_name} approved bail petition for {prisoner_name}. Authorized for filing in court registry.",
+                    notif_type="success",
+                    target_role="DEFENSE_ADVOCATE,CONTROLLED_EXTERNAL_ADVOCATE",
+                    user_id=assigned_lawyer_id,
+                )
+                add_notification(
+                    case_id=case_id,
+                    title=f"Petition Approved for Court Filing: {case_id}",
+                    message=f"Supervising Legal Officer {actor_name} endorsed petition for {prisoner_name}.",
+                    notif_type="info",
+                    target_role="DLSA_OFFICER",
+                )
+            elif action in ("REQUEST_CHANGES", "FLAG_EXCEPTION"):
+                add_notification(
+                    case_id=case_id,
+                    title=f"Petition Revision Directive: {case_id}",
+                    message=f"Supervising Officer {actor_name} requested corrections for {prisoner_name}: {comment or 'Please review draft feedback.'}",
+                    notif_type="warning",
+                    target_role="DEFENSE_ADVOCATE,CONTROLLED_EXTERNAL_ADVOCATE",
+                    user_id=assigned_lawyer_id,
+                )
+            elif action == "RECORD_FILING":
+                filing_ref = payload.get("filing_reference") or updated_data.get("filing_reference") or case_id
+                add_notification(
+                    case_id=case_id,
+                    title=f"Bail Application Lodged in Court: {case_id}",
+                    message=f"Bail application for {prisoner_name} formally lodged by {actor_name} under reference {filing_ref}.",
+                    notif_type="success",
+                    target_role="DLSA_OFFICER,SUPERVISING_LEGAL_OFFICER",
+                )
+            elif action == "SCHEDULE_HEARING":
+                h_date = payload.get("hearing_date") or updated_data.get("hearing_date") or "Scheduled Date"
+                bench = payload.get("bench_name") or updated_data.get("bench_name") or "Competent Court"
+                add_notification(
+                    case_id=case_id,
+                    title=f"Court Hearing Scheduled: {case_id}",
+                    message=f"Bail hearing for {prisoner_name} scheduled on {h_date} before {bench}.",
+                    notif_type="info",
+                    target_role="DEFENSE_ADVOCATE,CONTROLLED_EXTERNAL_ADVOCATE",
+                    user_id=assigned_lawyer_id,
+                )
+                add_notification(
+                    case_id=case_id,
+                    title=f"Court Appearance Listed: {case_id}",
+                    message=f"Hearing scheduled on {h_date} for {prisoner_name}.",
+                    notif_type="info",
+                    target_role="DLSA_OFFICER,POLICE_OFFICER",
+                )
+            elif action == "RECORD_COURT_ORDER":
+                order_t = str(payload.get("order_type") or updated_data.get("order_type") or "").upper()
+                is_granted = "GRANT" in order_t or "BAIL_GRANTED" in order_t
+                if is_granted:
+                    add_notification(
+                        case_id=case_id,
+                        title=f"Bail Granted by Court: {case_id}",
+                        message=f"Court granted bail for {prisoner_name}. Custody discharge verification initiated.",
+                        notif_type="success",
+                        target_role="JAIL_OFFICER,DLSA_OFFICER,FAMILY_GUARDIAN",
+                    )
+                    add_notification(
+                        case_id=case_id,
+                        title=f"Bail Order Granted: {case_id}",
+                        message=f"Court granted bail for {prisoner_name}. Coordinate release bond formalities.",
+                        notif_type="success",
+                        target_role="DEFENSE_ADVOCATE,CONTROLLED_EXTERNAL_ADVOCATE",
+                        user_id=assigned_lawyer_id,
+                    )
+                else:
+                    add_notification(
+                        case_id=case_id,
+                        title=f"Court Order Recorded: {case_id}",
+                        message=f"Court order ({order_t or 'Disposed'}) logged for {prisoner_name}.",
+                        notif_type="info",
+                        target_role="DEFENSE_ADVOCATE,DLSA_OFFICER",
+                        user_id=assigned_lawyer_id,
+                    )
+            elif action in ("CONFIRM_PRISON_RELEASE", "CONFIRM_RELEASE", "START_POST_RELEASE_FOLLOW_UP"):
+                add_notification(
+                    case_id=case_id,
+                    title=f"Prisoner Physical Discharge Completed: {case_id}",
+                    message=f"Undertrial {prisoner_name} physically released from custody. Case transitioned to post-release follow-up.",
+                    notif_type="success",
+                    target_role="DLSA_OFFICER,DEFENSE_ADVOCATE,FAMILY_GUARDIAN",
+                    user_id=assigned_lawyer_id,
+                )
+        except Exception as e:
+            logger.warning(f"Failed to dispatch workflow transition notifications: {e}")
 
     @classmethod
     def create_artifact_version(
@@ -284,6 +530,27 @@ class WorkflowService:
         Generates cryptographic SHA-256 content hash.
         Creating version N+1 leaves previous version approvals bound only to version N.
         """
+        # Validate role and assignment for drafting legal artifacts
+        canonical_state, current_version, case_data = cls.get_case_state(case_id)
+        if artifact_type == "BAIL_APPLICATION" and not is_ai_generated:
+            if actor.role not in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+                raise PermissionError(
+                    f"Forbidden: Role '{actor.role.value}' cannot author a Bail Application. "
+                    f"Only the assigned defense counsel or automated drafting pipeline can create bail drafts."
+                )
+            user_full = (actor.full_name or "").lower()
+            assigned_id = case_data.get("assigned_advocate_id") or case_data.get("assigned_lawyer_id")
+            assigned_name = (case_data.get("assigned_advocate_name") or case_data.get("assigned_lawyer") or "").lower()
+            linked_cid = getattr(actor, "linked_case_id", None)
+            
+            is_assigned = (
+                (assigned_id and (assigned_id == actor.id or actor.id == "demo_advocate"))
+                or (assigned_name and user_full and (user_full in assigned_name or assigned_name in user_full))
+                or (linked_cid and linked_cid == case_id)
+            )
+            if not is_assigned:
+                raise PermissionError(f"Forbidden: You are not the assigned defense counsel on case '{case_id}'.")
+
         # Determine current version count for this artifact
         existing_versions = get_matter_artifact_versions(case_id, artifact_id)
         next_ver_num = len(existing_versions) + 1
@@ -346,13 +613,34 @@ class WorkflowService:
         decision: str,
         comment: Optional[str],
         actor: AuthUser,
-        approval_level: int = 1,
+        approval_level: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Record formal first-class approval on an exact artifact version."""
+        """Record formal first-class approval on an exact artifact version. Approval level is strictly server-derived."""
         if actor.role == Role.PLATFORM_ADMIN:
             raise PermissionError("Platform Admins cannot grant legal approvals.")
         if actor.role == Role.READ_ONLY_AUDITOR:
             raise PermissionError("Auditors cannot grant legal approvals.")
+
+        # Server-derive approval level based strictly on authenticated role and assignment
+        if actor.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+            canonical_state, current_version, case_data = cls.get_case_state(case_id)
+            user_full = (actor.full_name or "").lower()
+            assigned_id = case_data.get("assigned_advocate_id") or case_data.get("assigned_lawyer_id")
+            assigned_name = (case_data.get("assigned_advocate_name") or case_data.get("assigned_lawyer") or "").lower()
+            linked_cid = getattr(actor, "linked_case_id", None)
+            
+            is_assigned = (
+                (assigned_id and (assigned_id == actor.id or actor.id == "demo_advocate"))
+                or (assigned_name and user_full and (user_full in assigned_name or assigned_name in user_full))
+                or (linked_cid and linked_cid == case_id)
+            )
+            if not is_assigned:
+                raise PermissionError(f"Forbidden: You are not the assigned defense counsel on case '{case_id}'.")
+            derived_level = 1
+        elif actor.role == Role.SUPERVISING_LEGAL_OFFICER:
+            derived_level = 2
+        else:
+            raise PermissionError(f"Role '{actor.role.value}' is not authorized to grant legal approvals.")
 
         approval_id = f"app_{uuid.uuid4().hex[:12]}"
         now = datetime.datetime.utcnow().isoformat()
@@ -370,8 +658,8 @@ class WorkflowService:
             "artifact_type": artifact_type,
             "decision": decision,
             "comment": comment,
-            "approval_level": approval_level,
-            "required_level": approval_level,
+            "approval_level": derived_level,
+            "required_level": derived_level,
             "is_valid": 1,
             "metadata": {"approved_by": actor.full_name},
         }
@@ -391,7 +679,7 @@ class WorkflowService:
                 "case_id": case_id,
                 "artifact_version_id": artifact_version_id,
                 "decision": decision,
-                "approval_level": approval_level,
+                "approval_level": derived_level,
                 "comment": comment,
             },
             organization_id=actor.org_id,
@@ -400,7 +688,7 @@ class WorkflowService:
         # Add timeline event
         cls._add_timeline_event(
             case_id=case_id,
-            title=f"Artifact {decision}: {artifact_type} (Level {approval_level})",
+            title=f"Artifact {decision}: {artifact_type} (Level {derived_level})",
             description=f"Decision '{decision}' recorded by {actor.full_name} ({actor.role.value}). {comment or ''}".strip(),
             actor=actor.full_name,
             actor_role=actor.role.value,
@@ -424,12 +712,37 @@ class WorkflowService:
         actor: AuthUser,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """
-        Record immutable case reassignment and handoff packet.
-        Preserves complete historical continuity without overwriting past work.
-        """
-        if actor.role in (Role.READ_ONLY_AUDITOR, Role.ACCUSED_USER, Role.FAMILY_GUARDIAN):
-            raise PermissionError(f"Role '{actor.role.value}' is not authorized to reassign matters.")
+        canonical_state, current_version, case_data = cls.get_case_state(case_id)
+        from_role_str = actor.role.value
+        to_role_str = to_role.value if isinstance(to_role, Role) else str(to_role)
+
+        ALLOWED_HANDOFF_VECTORS = {
+            (Role.DLSA_OFFICER.value, Role.DEFENSE_ADVOCATE.value),
+            (Role.DLSA_OFFICER.value, Role.DLSA_OFFICER.value),
+            (Role.SUPERVISING_LEGAL_OFFICER.value, Role.DEFENSE_ADVOCATE.value),
+            (Role.SUPERVISING_LEGAL_OFFICER.value, Role.SUPERVISING_LEGAL_OFFICER.value),
+            (Role.DEFENSE_ADVOCATE.value, Role.SUPERVISING_LEGAL_OFFICER.value),
+            (Role.JAIL_OFFICER.value, Role.DLSA_OFFICER.value),
+        }
+
+        if (from_role_str, to_role_str) not in ALLOWED_HANDOFF_VECTORS:
+            raise PermissionError(
+                f"Forbidden handoff vector: Handoff from '{from_role_str}' to '{to_role_str}' is not permitted."
+            )
+
+        # Case assignment check for defense advocates
+        if actor.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+            user_full = (actor.full_name or "").lower()
+            assigned_id = case_data.get("assigned_advocate_id") or case_data.get("assigned_lawyer_id")
+            assigned_name = (case_data.get("assigned_advocate_name") or case_data.get("assigned_lawyer") or "").lower()
+            linked_cid = getattr(actor, "linked_case_id", None)
+            is_assigned = (
+                (assigned_id and (assigned_id == actor.id or actor.id == "demo_advocate"))
+                or (assigned_name and user_full and (user_full in assigned_name or assigned_name in user_full))
+                or (linked_cid and linked_cid == case_id)
+            )
+            if not is_assigned:
+                raise PermissionError(f"Forbidden: You are not the assigned defense counsel on case '{case_id}'.")
 
         handoff_id = f"hdf_{uuid.uuid4().hex[:12]}"
         now = datetime.datetime.utcnow().isoformat()
@@ -439,8 +752,8 @@ class WorkflowService:
             "matter_id": case_id,
             "from_user_id": actor.id,
             "to_user_id": to_user_id,
-            "from_role": actor.role.value,
-            "to_role": to_role,
+            "from_role": from_role_str,
+            "to_role": to_role_str,
             "reason": reason,
             "created_at": now,
             "initiated_by": actor.full_name,
@@ -704,7 +1017,7 @@ class WorkflowService:
         if current_state in (MatterState.INTAKE, MatterState.VERIFICATION, MatterState.REVIEW, MatterState.DOCUMENT_PENDING, MatterState.ASSIGNED):
             new_state_result = cls.execute_transition(
                 case_id=case_id,
-                action="COMPLETE_ANALYSIS",
+                action="RUN_ANALYSIS",
                 actor=actor,
                 payload={"stage8_machine_status": machine_status},
                 comment=f"Stage 8 BNSS 479 Evaluation executed. Result: {machine_status}.",

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import {
-  Briefcase, Scale, CheckCircle2, ChevronRight, Loader2, BookOpen, ShieldCheck, FileText
+  Briefcase, Scale, CheckCircle2, ChevronRight, Loader2, BookOpen, ShieldCheck, FileText, AlertTriangle
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { fetchCases, type CaseRecord } from "../lib/api";
@@ -163,7 +163,12 @@ export function AdvocateWorkspace() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 shrink-0">
+                <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                  {((c.timeline || []).some((ev: any) => ev.event_type === "LEGAL_AID" && (ev.title?.includes("Review Feedback") || ev.title?.includes("Review Note")))) && (
+                    <span className="px-2.5 py-1 text-[11px] font-mono font-bold rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" /> DLSA DIRECTIVE PENDING
+                    </span>
+                  )}
                   {c.status === "APPROVED_READY_FOR_FILING" && (
                     <span className="px-2.5 py-1 text-[11px] font-mono font-bold rounded bg-blue-500/10 text-blue-600 border border-blue-500/20">
                       SUPERVISOR APPROVED

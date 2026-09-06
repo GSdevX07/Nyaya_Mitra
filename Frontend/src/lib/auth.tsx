@@ -45,6 +45,8 @@ export interface UserProfile {
   police_station?: string;
   police_station_id?: string;
   jurisdiction_ids?: string[];
+  phone?: string;
+  bar_registration_no?: string;
 }
 
 export interface AuthContextType {

@@ -51,17 +51,17 @@ export function LawyerProfileModal({ isOpen, onClose }: UserProfileModalProps) {
 
   // Active combined profile (database priority, authUser fallback)
   const profile = {
-    id: dbProfile?.id || authUser?.id || "usr_nyaya_officer",
+    id: dbProfile?.id || authUser?.id || "usr_institutional",
     full_name: dbProfile?.full_name || authUser?.full_name || "Institutional User",
     email: dbProfile?.email || authUser?.email || "user@nyayamitra.in",
     role: (dbProfile?.role || authUser?.role || "DLSA_OFFICER") as Role,
-    org_id: dbProfile?.org_id || authUser?.org_id || "org_dlsa_central",
-    district: dbProfile?.district || authUser?.district || "Central Delhi",
-    phone: dbProfile?.phone || "+91 11 2338 1234",
+    org_id: dbProfile?.org_id || authUser?.org_id || "org_default",
+    district: dbProfile?.district || authUser?.district || "Designated District",
+    phone: dbProfile?.phone || authUser?.phone || "Not Provided",
     facility_ids: dbProfile?.facility_ids || authUser?.facility_ids || [],
     linked_case_id: dbProfile?.linked_case_id || authUser?.linked_case_id,
-    bar_registration_no: dbProfile?.bar_registration_no || (
-      authUser?.role === "DEFENSE_ADVOCATE" ? "DL/2018/49281" : undefined
+    bar_registration_no: dbProfile?.bar_registration_no || authUser?.bar_registration_no || (
+      authUser?.role === "DEFENSE_ADVOCATE" ? "Not Recorded" : undefined
     ),
   };
 

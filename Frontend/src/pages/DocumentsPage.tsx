@@ -558,7 +558,7 @@ export function DocumentsPage() {
                   <th className="px-6 py-4">Verification Status</th>
                   <th className="px-6 py-4">Uploaded By / Provenance</th>
                   <th className="px-6 py-4">Facility</th>
-                  <th className="px-6 py-4 text-right">Actions</th>
+                  <th className="px-6 py-4 text-right min-w-[200px]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -600,9 +600,9 @@ export function DocumentsPage() {
                       </div>
                     </td>
                     <td className="px-6 py-4 text-xs">{d.jail_location}</td>
-                    <td className="px-6 py-4 text-right space-x-2">
+                    <td className="px-6 py-4 text-right min-w-[200px]">
                       {d.document_status === "PENDING_VERIFICATION" || (d.document_status === "REVIEWED" && user?.role === "SUPERVISING_LEGAL_OFFICER") ? (
-                        <div className="inline-flex items-center gap-1.5 justify-end">
+                        <div className="flex flex-wrap items-center gap-1.5 justify-end">
                           <button
                             onClick={() => handleOpenEvidenceChain(d.actual_doc_id || d.id, d.document_type)}
                             className="px-2.5 py-1 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-semibold border border-primary/20 transition-colors inline-flex items-center gap-1 shadow-sm"
@@ -711,7 +711,7 @@ export function DocumentsPage() {
                       const caseId = c.case_id || c.id;
                       if (!caseId) return null;
                       const inmateName = c.name || c.prisoner_name || c.accused_name || "Undertrial Inmate";
-                      const dist = c.district || c.jail_location || "Central Delhi";
+                      const dist = c.district || c.jail_location || "Jurisdiction";
                       return (
                         <option key={caseId} value={caseId}>
                           {caseId} — {inmateName} ({dist})

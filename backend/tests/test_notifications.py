@@ -86,3 +86,47 @@ def test_accused_user_sees_only_own_case_notifications():
             assert n["case_id"] == "UTP-0001"
         assert not "Remand Period Expiry" in n["title"]
         assert not "Citation Integrity Escalation" in n["title"]
+
+
+def test_clear_notifications_flow():
+    headers = _auth_headers(Role.POLICE_OFFICER, user_id="usr_police_01")
+    # Verify initial notifications exist
+    res = client.get("/notifications", headers=headers)
+    assert res.status_code == 200
+    initial_data = res.json()
+    assert len(initial_data) > 0
+
+    # Clear all notifications for this police officer
+    del_res = client.delete("/notifications", headers=headers)
+    assert del_res.status_code == 200
+    del_data = del_res.json()
+    assert del_data["status"] == "success"
+    assert del_data["cleared_count"] >= len(initial_data)
+
+    # After clearing, get notifications should return empty list for this user
+    after_res = client.get("/notifications", headers=headers)
+    assert after_res.status_code == 200
+    assert len(after_res.json()) == 0
+
+
+def test_clear_single_notification():
+    headers = _auth_headers(Role.JAIL_OFFICER, user_id="usr_jail_01")
+    res = client.get("/notifications", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data) >= 2
+    
+    target_item = data[0]
+    target_id = target_item["id"]
+    
+    # Delete only that single notification
+    del_res = client.delete(f"/notifications?id={target_id}", headers=headers)
+    assert del_res.status_code == 200
+    assert del_res.json()["cleared_count"] == 1
+    
+    # Verify remaining notifications still exist and target is gone
+    after_res = client.get("/notifications", headers=headers)
+    assert after_res.status_code == 200
+    remaining_ids = [n["id"] for n in after_res.json()]
+    assert target_id not in remaining_ids
+    assert len(remaining_ids) == len(data) - 1

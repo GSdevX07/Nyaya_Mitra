@@ -264,7 +264,7 @@ export const IdentityResolutionPage: React.FC = () => {
                     </div>
                     <div>
                       <span className="text-muted-foreground block text-xs font-bold uppercase tracking-wider">DATE OF BIRTH / AGE</span>
-                      <span className="text-foreground font-semibold text-base block mt-0.5">{selectedCandidate.source_dob || "Estimated 24 Years"}</span>
+                      <span className="text-foreground font-semibold text-base block mt-0.5">{selectedCandidate.source_dob || "Not Recorded"}</span>
                     </div>
                     <div>
                       <span className="text-muted-foreground block text-xs font-bold uppercase tracking-wider">CUSTODY FACILITY</span>
@@ -293,7 +293,7 @@ export const IdentityResolutionPage: React.FC = () => {
                     </div>
                     <div>
                       <span className="text-muted-foreground block text-xs font-bold uppercase tracking-wider">DATE OF BIRTH / AGE</span>
-                      <span className="text-foreground font-semibold text-base block mt-0.5">{selectedCandidate.candidate_dob || "Estimated 24 Years"}</span>
+                      <span className="text-foreground font-semibold text-base block mt-0.5">{selectedCandidate.candidate_dob || "Not Recorded"}</span>
                     </div>
                     <div>
                       <span className="text-muted-foreground block text-xs font-bold uppercase tracking-wider">CUSTODY FACILITY</span>

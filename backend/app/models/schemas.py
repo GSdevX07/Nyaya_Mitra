@@ -91,6 +91,10 @@ class MatterState(str, Enum):
     DATA_CONFLICT = "DATA_CONFLICT"
     EXTERNAL_SYNC_FAILED = "EXTERNAL_SYNC_FAILED"
 
+    @classmethod
+    def to_canonical(cls, state: Any) -> "MatterState":
+        return CaseState.to_canonical(state)
+
 
 class CaseState(str, Enum):
     """Procedural states across the case lifecycle with backward compatibility."""
@@ -154,7 +158,7 @@ class CaseState(str, Enum):
             "APPROVED_READY_FOR_FILING": MatterState.APPROVED,
             "ORDER_PASSED": MatterState.ORDER_RECEIVED,
             "RELEASE_PROCESSING": MatterState.RELEASE_WORKFLOW,
-            "RELEASED": MatterState.RELEASE_WORKFLOW,
+            "RELEASED": MatterState.POST_RELEASE_FOLLOW_UP,
             "POST_RELEASE_PRESERVED": MatterState.POST_RELEASE_FOLLOW_UP,
             "APPEAL_PENDING": MatterState.HUMAN_REVIEW,
         }
@@ -301,10 +305,10 @@ class CaseRecord(BaseModel):
     preferred_language: str = Field(default="en", description="BCP-47 / ISO 639-1 language code, e.g. 'hi', 'ta', 'en'.")
 
     # Authorised Family Contact (Privacy-controlled)
-    relative_name: Optional[str] = Field(default="Not Specified")
-    relative_relation: Optional[str] = Field(default="Parent/Relative")
-    relative_phone: Optional[str] = Field(default="+91 98765 43210")
-    permanent_address: Optional[str] = Field(default="Synthetic Address, District Detention Zone")
+    relative_name: Optional[str] = Field(default=None)
+    relative_relation: Optional[str] = Field(default=None)
+    relative_phone: Optional[str] = Field(default=None)
+    permanent_address: Optional[str] = Field(default=None)
 
     # Legal Aid Assignment Workflow
     assignment_status: str = Field(default="AVAILABLE", description="'AVAILABLE', 'ASSIGNED', or 'DECLINED'.")

@@ -273,7 +273,7 @@ export function JailWorkspace() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2">
                     {!isAssigned && (
                       <button
                         onClick={() => handleReferToDlsa(c.inmate_id)}

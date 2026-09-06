@@ -52,10 +52,31 @@ def test_role_boundary_advocate_cannot_approve():
 
 def test_supervising_officer_can_approve():
     """SUPERVISING_LEGAL_OFFICER role can approve a case."""
+    import hashlib, datetime
+    from app.database import get_db_connection, store_matter_artifact_version
+    with get_db_connection() as conn:
+        conn.execute("UPDATE cases SET status = 'SUBMITTED' WHERE case_id = 'UTP-0001'")
+        conn.commit()
+    store_matter_artifact_version({
+        "version_id": "ver_authz_draft_01",
+        "matter_id": "UTP-0001",
+        "artifact_id": "art_authz_draft",
+        "artifact_type": "BAIL_APPLICATION",
+        "version_number": 1,
+        "version_tag": "v1.0",
+        "content_hash": hashlib.sha256(b"Draft petition for test").hexdigest(),
+        "content_text": "Draft petition for test",
+        "is_ai_generated": 0,
+        "ai_model_name": None,
+        "provenance_tag": "MANUAL",
+        "created_by": "demo_advocate",
+        "created_by_role": "DEFENSE_ADVOCATE",
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    })
     headers = _get_auth_headers(Role.SUPERVISING_LEGAL_OFFICER)
     resp = client.post("/cases/UTP-0001/approve", headers=headers)
     assert resp.status_code == 200
-    assert resp.json()["status"] in ("success", "APPROVED_READY_FOR_FILING")
+    assert resp.json()["status"] in ("success", "APPROVED", "APPROVED_READY_FOR_FILING")
 
 
 def test_jail_officer_cannot_trigger_actions():

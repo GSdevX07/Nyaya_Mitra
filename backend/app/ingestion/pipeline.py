@@ -264,27 +264,35 @@ class IngestionPipeline:
             else:
                 # Create Brand-New Accused Case Record
                 new_case_id = f"UTP-{abs(hash(norm['full_name'] + str(norm.get('arrest_date')))) % 9000 + 1000}"
+                fir_val = norm.get("fir_number")
+                cust_val = int(norm.get("custody_days") or 180)
+                computed_present = list(norm.get("present_docs") or [])
+                if not computed_present:
+                    if fir_val or norm.get("police_station"):
+                        computed_present.append("fir_copy")
+                    if cust_val > 0 or norm.get("arrest_date"):
+                        computed_present.append("remand_order")
                 new_case = CaseRecord(
                     case_id=new_case_id,
-                    name=norm["full_name"],
+                    name=norm.get("full_name") or norm.get("name") or "Unknown Undertrial",
                     prisoner_category=PrisonerCategory.UNDERTRIAL,
                     legal_code=LegalCode(norm.get("legal_code", "BNS_2023")),
                     offense_sections=norm.get("offense_sections", ["BNS 303(2)"]),
                     cnr_number=norm.get("cnr_number") or f"DLCT01-{new_case_id}-2025",
-                    fir_number=norm.get("fir_number") or f"FIR-2025-{new_case_id}",
+                    fir_number=fir_val or f"FIR-2025-{new_case_id}",
                     police_station=norm.get("police_station") or "Kotwali PS",
                     court_name=norm.get("court_name") or "Chief Judicial Magistrate Court",
                     district=norm.get("district") or "Central Delhi",
                     state=norm.get("state") or "Delhi",
                     arrest_date=norm.get("arrest_date") or datetime.date.today().isoformat(),
-                    custody_days=int(norm.get("custody_days") or 180),
+                    custody_days=cust_val,
                     excluded_delay_days=0,
                     max_sentence_days_for_offense=int(norm.get("max_sentence_days_for_offense") or 730),
                     punishable_by_death_or_life=bool(norm.get("punishable_by_death_or_life", False)),
                     multiple_active_cases=bool(norm.get("multiple_active_cases", False)),
                     prior_bail_orders=[],
                     required_docs=norm.get("required_docs") or ["fir_copy", "remand_order", "charge_sheet"],
-                    present_docs=norm.get("present_docs") or ["fir_copy"],
+                    present_docs=computed_present,
                     urgency_flags=UrgencyFlags(
                         age=int(norm.get("age") or 30),
                         health_flag=bool(norm.get("health_flag", False)),
@@ -325,7 +333,7 @@ class IngestionPipeline:
         return batch
 
     def _persist_case(self, case: CaseRecord) -> None:
-        """Write newly discovered ingested case to database."""
+        """Write newly discovered ingested case to database and synchronize document inventory."""
         try:
             conn = get_db_connection()
             conn.execute(
@@ -342,6 +350,8 @@ class IngestionPipeline:
                     case.assigned_lawyer_id,
                 ),
             )
+            from app.database import sync_case_documents_and_evidence
+            sync_case_documents_and_evidence(conn, case.case_id)
             conn.commit()
             conn.close()
         except Exception as e:

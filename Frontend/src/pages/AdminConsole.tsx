@@ -317,7 +317,7 @@ export function AdminConsole() {
                 </div>
                 <div className="flex justify-between">
                   <span>Statutory Provisions Indexed:</span>
-                  <strong className="text-foreground">{healthData?.subsystems.rag_corpus.documents_indexed || 3480} chunks</strong>
+                  <strong className="text-foreground">{healthData?.subsystems.rag_corpus.documents_indexed ?? 0} chunks</strong>
                 </div>
                 <div className="flex justify-between">
                   <span>Statutes Covered:</span>

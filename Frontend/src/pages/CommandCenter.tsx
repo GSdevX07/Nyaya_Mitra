@@ -153,7 +153,7 @@ export function CommandCenter() {
               </span>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-bold font-serif text-emerald-600 dark:text-emerald-400">
-                  {overview?.metrics?.section_479_eligible_signals ?? 2}
+                  {overview?.metrics?.section_479_eligible_signals ?? cases.filter(c => c.status === "APPROVED_READY_FOR_FILING" || c.status === "ANALYSIS_READY").length}
                 </span>
                 <span className="text-xs text-muted-foreground font-mono">eligible</span>
               </div>
@@ -165,7 +165,7 @@ export function CommandCenter() {
               </span>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-bold font-serif text-amber-600 dark:text-amber-400">
-                  {overview?.metrics?.cases_missing_mandatory_documents ?? 1}
+                  {overview?.metrics?.cases_missing_mandatory_documents ?? cases.filter(c => (c.required_docs?.length || 0) > (c.present_docs?.length || 0)).length}
                 </span>
                 <span className="text-xs text-muted-foreground font-mono">cases</span>
               </div>
@@ -177,7 +177,7 @@ export function CommandCenter() {
               </span>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-bold font-serif text-blue-600 dark:text-blue-400">
-                  {overview?.metrics?.filed_in_court_count ?? 1}
+                  {overview?.metrics?.filed_in_court_count ?? cases.filter(c => c.status === "FILED" || c.status === "HEARING_SCHEDULED" || c.status === "BAIL_ORDER_RECORDED").length}
                 </span>
                 <span className="text-xs text-muted-foreground font-mono">petitions</span>
               </div>
@@ -252,7 +252,7 @@ export function CommandCenter() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
                         {c.status === "APPROVED_READY_FOR_FILING" && (
                           <span className="px-2.5 py-1 text-[11px] font-mono font-bold rounded bg-blue-500/10 text-blue-600 border border-blue-500/20">
                             READY FOR FILING
@@ -401,7 +401,7 @@ export function CommandCenter() {
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
                         <Link
                           to={`/cases/${c.case_id}`}
                           className="px-3 py-1.5 bg-primary text-primary-foreground rounded-sm text-xs font-serif font-semibold flex items-center gap-1 hover:opacity-90"
@@ -441,7 +441,9 @@ export function CommandCenter() {
                   <span className="text-xs font-mono text-muted-foreground uppercase font-bold block">
                     District Legal Aid Coverage
                   </span>
-                  <div className="text-2xl font-bold font-serif text-foreground">100%</div>
+                  <div className="text-2xl font-bold font-serif text-foreground">
+                    {cases.length > 0 ? Math.round((cases.filter(c => c.assignment_status === "ASSIGNED").length / cases.length) * 100) : 0}%
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     All active undertrial remand records currently mapped to designated DLSA panel counsel.
                   </p>

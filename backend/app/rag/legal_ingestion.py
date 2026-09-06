@@ -24,8 +24,25 @@ def extract_pdf_text(content: bytes) -> str:
     except Exception as exc:
         raise LegalIngestionError("The uploaded PDF could not be read") from exc
     if not text:
+        # Fallback to local EasyOCR for scanned PDFs containing embedded images
+        try:
+            from app.llm_client import ocr_image_via_easyocr
+            page_texts = []
+            for page in reader.pages:
+                for img in getattr(page, "images", []):
+                    img_bytes = getattr(img, "data", None)
+                    if img_bytes:
+                        ocr_res = ocr_image_via_easyocr(img_bytes)
+                        if ocr_res.strip():
+                            page_texts.append(ocr_res.strip())
+            if page_texts:
+                text = "\n\n".join(page_texts).strip()
+        except Exception:
+            pass
+    if not text:
         raise LegalIngestionError("No machine-readable text was found. OCR the scanned legal PDF before RAG ingestion.")
     return text
+
 
 
 def run_data_prep_kit(text: str) -> tuple[str, str]:

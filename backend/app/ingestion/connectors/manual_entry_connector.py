@@ -93,7 +93,9 @@ class ManualEntryConnector(BaseConnector):
             "permanent_address": raw_record.get("permanent_address") or "",
             "preferred_language": raw_record.get("preferred_language") or "en",
             "required_docs": raw_record.get("required_docs") or ["fir_copy", "remand_order", "charge_sheet"],
-            "present_docs": raw_record.get("present_docs") or ["fir_copy"],
+            "present_docs": raw_record.get("present_docs") or (
+                ["fir_copy", "remand_order"] if int(raw_record.get("custody_days") or 0) > 0 else ["fir_copy"]
+            ),
             "data_source_status": "MANUAL_INSTITUTIONAL_ENTRY",
             "source_provenance": {
                 "source": "MANUAL_CONTROLLED_ENTRY",

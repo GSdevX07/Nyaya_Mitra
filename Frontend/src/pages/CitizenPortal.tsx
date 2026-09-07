@@ -116,7 +116,6 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
       if (err?.message?.includes("404")) {
         setErrorStatus(404);
       } else {
-        // Attempt cached view for offline resilience
         const cached = localStorage.getItem(`nyaya_citizen_cache_${targetLang}`);
         if (cached) {
           try {
@@ -157,7 +156,6 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
       setActionTrackingId(res.id || res.task_id || "REQ-SUBMITTED");
       setActionSubject("");
       setActionDetails("");
-      // Refresh overview
       loadOverview(lang);
     } catch (err: any) {
       alert(err?.message || "Failed to submit citizen request.");
@@ -192,39 +190,39 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
 
   const isFamily = mode === "family" || user?.role === "FAMILY_GUARDIAN";
 
-  // Status Badge Helper
+  // Status Badge Helper matching website palette
   const getStatusBadge = (statusCode: string) => {
     switch (statusCode) {
       case "UNDER_REVIEW":
-        return { label: "UNDER INITIAL REVIEW", color: "bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300" };
+        return { label: "UNDER INITIAL REVIEW", color: "bg-muted text-foreground border-border" };
       case "ELIGIBLE_FOR_REVIEW":
       case "ELIGIBLE":
-        return { label: "ELIGIBLE UNDER SEC 479", color: "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-400" };
+        return { label: "ELIGIBLE UNDER SEC 479", color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" };
       case "COUNSEL_ASSIGNED":
       case "ASSIGNED":
-        return { label: "COUNSEL ASSIGNED", color: "bg-slate-100 text-slate-800 border-slate-400 dark:bg-slate-800 dark:text-slate-200" };
+        return { label: "COUNSEL ASSIGNED", color: "bg-muted text-foreground border-border" };
       case "READY_FOR_FILING":
       case "APPROVED_READY_FOR_FILING":
-        return { label: "DRAFT APPROVED • PENDING FILING", color: "bg-slate-100 text-slate-800 border-slate-400 dark:bg-slate-800 dark:text-slate-200" };
+        return { label: "DRAFT APPROVED • PENDING FILING", color: "bg-rose-500/10 text-rose-600 border-rose-500/20" };
       case "FILED_IN_COURT":
       case "FILED":
-        return { label: "FILED IN COURT", color: "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-400" };
+        return { label: "FILED IN COURT", color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" };
       case "COURT_ORDER_RECEIVED":
-        return { label: "COURT BAIL ORDER ISSUED", color: "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-400" };
+        return { label: "COURT BAIL ORDER ISSUED", color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" };
       case "RELEASE_EXECUTED":
       case "RELEASED":
-        return { label: "PRISON RELEASE EXECUTED", color: "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-400" };
+        return { label: "PRISON RELEASE EXECUTED", color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" };
       default:
-        return { label: statusCode, color: "bg-slate-100 text-slate-700 border-slate-300" };
+        return { label: statusCode, color: "bg-secondary text-foreground border-border" };
     }
   };
 
   if (loading && !data) {
     return (
-      <div className="p-4 md:p-6 max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[60vh] gap-3 text-center">
-        <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin" />
-        <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
-          Loading Legal Aid Dashboard...
+      <div className="p-8 max-w-4xl mx-auto flex flex-col items-center justify-center min-h-[50vh] gap-3 text-center">
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm font-serif text-muted-foreground">
+          Loading authorized legal aid record...
         </p>
       </div>
     );
@@ -232,25 +230,26 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
 
   if (errorStatus === 404 || !data) {
     return (
-      <div className="p-4 md:p-6 max-w-xl mx-auto space-y-4">
-        <div className="bg-card border border-border rounded-xl p-6 text-center space-y-4 shadow-xs">
-          <div className="w-12 h-12 rounded-full bg-rose-50 dark:bg-rose-950/30 text-rose-600 flex items-center justify-center mx-auto">
-            <AlertCircle className="w-6 h-6" />
-          </div>
-          <h2 className="text-lg font-serif font-bold text-foreground">
+      <div className="p-8 max-w-2xl mx-auto space-y-6">
+        <div className="bg-card border-2 border-border rounded-xl text-center p-8 space-y-4 shadow-sm">
+          <AlertCircle className="w-12 h-12 text-rose-600 mx-auto" />
+          <h2 className="text-xl font-serif font-bold text-foreground">
             No Active Case Linked to This Account
           </h2>
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            No authorized legal aid record is currently attached to these credentials. If you or an undertrial family member requires immediate defense representation, please contact the free National Legal Services Helpline (15100) or visit your local District Legal Services Authority (DLSA) office.
+          <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
+            No active legal aid case is currently linked to your credentials. If you or an undertrial family member requires legal representation, please contact the National Legal Services Helpline (15100) or visit your local District Legal Services Authority (DLSA) office.
           </p>
-          <div className="pt-2 border-t border-border flex flex-col sm:flex-row items-center justify-center gap-3">
+          <div className="pt-4 border-t border-border flex flex-col sm:flex-row items-center justify-center gap-3">
             <a
               href="tel:15100"
-              className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-sans font-bold text-xs rounded-lg flex items-center justify-center gap-2 transition-colors"
+              className="px-5 py-2.5 bg-primary text-primary-foreground font-sans font-bold text-xs rounded-lg flex items-center gap-2 hover:bg-primary/90 transition-colors shadow-sm"
             >
               <Phone className="w-4 h-4" />
-              Call NALSA Helpline: 15100 (Toll-Free)
+              Call NALSA Helpline: 15100
             </a>
+            <div className="text-xs text-muted-foreground font-mono">
+              24x7 Toll-Free Free Legal Aid
+            </div>
           </div>
         </div>
       </div>
@@ -260,35 +259,55 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
   const badge = getStatusBadge(data.current_known_status.status_code);
 
   return (
-    <div className="p-3 md:p-6 max-w-2xl mx-auto space-y-4 pb-16 animate-in fade-in duration-200">
+    <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-6 pb-16 animate-in fade-in duration-300">
       
-      {/* ── Low-Bandwidth & Network Status Banner ── */}
-      <div className="flex items-center justify-between bg-card border border-border px-3.5 py-2 rounded-xl text-xs shadow-xs">
-        <div className="flex items-center gap-2">
+      {/* ── Top Bar: Language & Low-Bandwidth Status ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-secondary/50 border border-border px-4 py-2.5 rounded-xl shadow-xs">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Globe className="h-4 w-4 text-primary shrink-0" />
+          <span className="font-medium">Language (भाषा):</span>
+          <div className="flex flex-wrap items-center gap-1">
+            {languages.map((l) => (
+              <button
+                key={l.code}
+                onClick={() => handleLanguageChange(l.code)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                  lang === l.code
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                }`}
+              >
+                {l.native_name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 self-end sm:self-auto">
           {isOffline ? (
             <span className="inline-flex items-center gap-1 font-mono font-bold text-rose-600 text-[11px]">
               <WifiOff className="w-3.5 h-3.5" />
-              Offline View
+              Offline
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 font-mono text-emerald-600 text-[11px]">
-              <Wifi className="w-3.5 h-3.5" />
-              Synced {lastSyncTime ? `@ ${lastSyncTime}` : "Online"}
+            <span className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+              <Wifi className="w-3.5 h-3.5 text-emerald-600" />
+              {lastSyncTime ? `Synced ${lastSyncTime}` : "Online"}
             </span>
           )}
-        </div>
-        <div className="flex items-center gap-2">
+
           <button
             onClick={toggleLowBandwidth}
-            className={`px-2 py-1 rounded text-[11px] font-mono font-bold border transition-colors ${
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold border transition-colors ${
               isLowBandwidth
-                ? "bg-emerald-600 text-white border-emerald-600"
-                : "bg-muted text-muted-foreground border-border hover:text-foreground"
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-card text-muted-foreground border-border hover:text-foreground"
             }`}
-            title="Toggle lightweight plain-text mode to save mobile data"
+            title="Toggle lightweight low-bandwidth mode"
           >
             {isLowBandwidth ? "⚡ Low-Data: ON" : "Low-Data: OFF"}
           </button>
+
           <button
             onClick={() => setNotifModalOpen(true)}
             className="p-1.5 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground transition-colors"
@@ -299,192 +318,250 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         </div>
       </div>
 
-      {/* ── Multi-Language Derived Display Bar ── */}
-      <div className="bg-card border border-border p-3 rounded-xl space-y-2 shadow-xs">
-        <div className="flex items-center justify-between text-xs">
-          <span className="font-mono font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
-            <Globe className="w-3.5 h-3.5 text-emerald-600" />
-            Language Service (भाषा)
-          </span>
-          <span className="text-[10px] font-mono text-muted-foreground">
-            {lang === "en" ? "Authoritative Source: English" : "Derived Accessibility Display"}
-          </span>
+      {/* ── Derived Display Disclaimer Notice ── */}
+      {data.language_meta.is_derived_display && (
+        <div className="bg-secondary/40 border border-border px-4 py-2.5 rounded-xl text-xs text-muted-foreground flex items-start gap-2.5">
+          <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+          <p className="leading-relaxed">
+            <strong>Accessibility Notice:</strong> Translated text is a derived display provided for informational accessibility. The original English court docket remains the authoritative source of legal truth.
+          </p>
         </div>
-        
-        {/* Language Pill Selector */}
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {languages.map((l) => (
-            <button
-              key={l.code}
-              onClick={() => handleLanguageChange(l.code)}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
-                lang === l.code
-                  ? "bg-black text-white dark:bg-white dark:text-black shadow-xs font-bold"
-                  : "bg-muted text-muted-foreground hover:text-foreground border border-border"
-              }`}
-            >
-              {l.native_name} {l.code === "en" ? "(Authoritative)" : ""}
-            </button>
-          ))}
-        </div>
+      )}
 
-        {/* Translation Non-Legal-Truth Statutory Pill */}
-        {data.language_meta.is_derived_display && (
-          <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-lg text-[11px] text-muted-foreground flex items-start gap-2">
-            <Info className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
-            <span>
-              <strong>Derived Display:</strong> Translated text is provided solely for informational accessibility. The original English court record remains the sole legal authority.
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* ── Accused & Case Header Card ── */}
-      <div className="bg-card border border-border p-4 md:p-5 rounded-xl space-y-3 shadow-xs">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-            {isFamily ? "Family & Guardian View" : "Accused Undertrial View"}
+      {/* ── Citizen / Family Welcome Banner ── */}
+      <div className="bg-card border-2 border-border p-6 rounded-xl shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] font-mono font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
+            {isFamily ? "Family & Guardian Assistance Portal" : "Citizen Legal Aid Portal"}
           </span>
-          <span className="text-xs font-mono font-bold text-foreground">
+          <span className="text-xs font-mono font-bold text-muted-foreground">
             Ref: {data.case_reference}
           </span>
         </div>
 
-        <div>
-          <h1 className="text-xl font-serif font-bold text-foreground">
-            {data.accused_name}
-          </h1>
-          <p className="text-xs text-muted-foreground font-mono mt-0.5">
-            {data.court_name} • {data.police_station}
-          </p>
-        </div>
+        <h1 className="text-2xl md:text-3xl font-serif font-black tracking-tight text-foreground">
+          {isFamily ? `Legal Status of ${data.accused_name}` : `Welcome, ${data.accused_name}`}
+        </h1>
 
-        {/* Status Badge & Title */}
-        <div className="p-3 bg-muted/50 border border-border rounded-lg space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-              Current Known Status
-            </span>
-            <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${badge.color}`}>
+        <p className="text-xs md:text-sm text-muted-foreground leading-relaxed">
+          Under Article 39A of the Constitution of India and Section 479 of the Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023, you are entitled to free legal aid representation and periodic judicial custody review without fee.
+        </p>
+      </div>
+
+      {/* ── Main Status Cards 3-Column Grid ── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Card 1: Legal Aid Status */}
+        <div className="bg-card border-2 border-border p-5 rounded-xl shadow-sm space-y-3 flex flex-col justify-between">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Legal Aid Status
+              </span>
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+            </div>
+
+            <div>
+              <div className="text-base font-serif font-bold text-foreground">
+                {data.current_known_status.title}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                {data.current_known_status.detail}
+              </p>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-border">
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[11px] font-mono font-bold border ${badge.color}`}>
               {badge.label}
             </span>
           </div>
-          <div className="text-sm font-serif font-bold text-foreground">
-            {data.current_known_status.title}
-          </div>
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            {data.current_known_status.detail}
-          </p>
         </div>
 
-        {/* Filing & Release Details */}
-        <div className="grid grid-cols-2 gap-2 text-xs font-mono pt-1">
-          <div className="p-2.5 bg-card border border-border rounded-lg space-y-0.5">
-            <span className="text-[10px] text-muted-foreground uppercase">Court Registry Filing</span>
-            <div className="font-bold text-foreground">
-              {data.filing_details.is_filed ? "Lodged in Court" : "Awaiting Filing"}
+        {/* Card 2: Assigned Defense Lawyer */}
+        <div className="bg-card border-2 border-border p-5 rounded-xl shadow-sm space-y-3 flex flex-col justify-between">
+          <div className="space-y-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
+              Assigned Defense Lawyer
+            </span>
+
+            {data.legal_aid_support.is_assigned ? (
+              <div className="space-y-1">
+                <div className="text-base font-serif font-bold text-foreground">
+                  {data.legal_aid_support.lawyer_name}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {data.legal_aid_support.organization}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <div className="text-sm font-semibold text-rose-600 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4" />
+                  Counsel Allocation in Progress
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {data.legal_aid_support.status_message || "DLSA Legal Aid Panel"}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="pt-2 border-t border-border space-y-1 text-xs">
+            <div className="flex items-center gap-1.5 text-foreground font-mono">
+              <Phone className="w-3.5 h-3.5 text-primary" />
+              <span>{data.legal_aid_support.contact_phone || "15100"}</span>
             </div>
-            <div className="text-[10px] text-muted-foreground truncate">
-              {data.filing_details.filing_reference}
+            <div className="text-[11px] text-muted-foreground">
+              Free DLSA Legal Assistance Desk
             </div>
           </div>
-          <div className="p-2.5 bg-card border border-border rounded-lg space-y-0.5">
-            <span className="text-[10px] text-muted-foreground uppercase">Custody Verification</span>
-            <div className="font-bold text-foreground">
-              {data.release_details.is_released ? "Release Confirmed" : "In Custody"}
+        </div>
+
+        {/* Card 3: Next Court Hearing & Remand */}
+        <div className="bg-card border-2 border-border p-5 rounded-xl shadow-sm space-y-3 flex flex-col justify-between">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Next Court Hearing
+              </span>
+              <Calendar className="w-4 h-4 text-primary" />
             </div>
-            <div className="text-[10px] text-muted-foreground truncate">
-              {data.release_details.verification_source}
+
+            <div>
+              <div className="text-lg font-serif font-bold text-foreground">
+                {data.upcoming_known_events && data.upcoming_known_events.length > 0
+                  ? data.upcoming_known_events[0].event_date
+                  : "Awaiting Schedule"}
+              </div>
+              <div className="text-xs text-muted-foreground truncate">{data.court_name}</div>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-border text-[11px] text-muted-foreground flex items-center gap-1.5">
+            <Landmark className="w-3.5 h-3.5 text-primary" />
+            <span>Authoritative Court Record</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Procedural Details: Filing & Custody Status ── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-card border border-border p-4 rounded-xl space-y-2 shadow-sm">
+          <div className="flex items-center gap-2">
+            <Send className="w-4 h-4 text-primary" />
+            <h3 className="font-serif font-bold text-sm text-foreground">
+              Court Filing Status
+            </h3>
+          </div>
+          <div className="text-xs space-y-1 font-mono text-muted-foreground">
+            <div className="flex justify-between">
+              <span>Filing Record:</span>
+              <strong className="text-foreground">
+                {data.filing_details.is_filed ? "FORMALLY LODGED" : "AWAITING SUBMISSION"}
+              </strong>
+            </div>
+            <div className="flex justify-between">
+              <span>Reference:</span>
+              <span className="text-foreground">{data.filing_details.filing_reference}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Jurisdiction:</span>
+              <span className="text-foreground truncate">{data.court_name}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-card border border-border p-4 rounded-xl space-y-2 shadow-sm">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-emerald-600" />
+            <h3 className="font-serif font-bold text-sm text-foreground">
+              Custody & Release Status
+            </h3>
+          </div>
+          <div className="text-xs space-y-1 font-mono text-muted-foreground">
+            <div className="flex justify-between">
+              <span>Custody Status:</span>
+              <strong className="text-foreground">
+                {data.release_details.is_released
+                  ? "RELEASE EXECUTED"
+                  : (data.release_details.release_status === "BAIL_ORDER_ISSUED"
+                      ? "BAIL ORDER ISSUED"
+                      : "IN CUSTODY")}
+              </strong>
+            </div>
+            <div className="flex justify-between">
+              <span>Police Station:</span>
+              <span className="text-foreground truncate">{data.police_station}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Verification:</span>
+              <span className="text-foreground">{data.release_details.verification_source}</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── AI Procedural Explanation (Strict Statutory Disclaimers) ── */}
-      <div className="bg-card border border-border p-4 md:p-5 rounded-xl space-y-3 shadow-xs">
-        <div className="flex items-center justify-between">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700">
-            <HelpCircle className="w-3.5 h-3.5 text-slate-500" />
+      {/* ── AI Procedural Explanation (Prominent Statutory Caution) ── */}
+      <div className="bg-card border-2 border-border p-6 rounded-xl shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] font-mono font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-secondary border border-border text-foreground flex items-center gap-1.5">
+            <HelpCircle className="w-3.5 h-3.5 text-primary" />
             {data.ai_procedural_explanation.disclaimer_label}
           </span>
           {data.ai_procedural_explanation.is_derived_display && (
             <button
               onClick={() => setShowAuthoritativeEnglish(!showAuthoritativeEnglish)}
-              className="text-[11px] font-mono text-emerald-600 hover:underline"
+              className="text-xs font-mono font-bold text-primary hover:underline"
             >
-              {showAuthoritativeEnglish ? "Show Derived Translation" : "Inspect English Record"}
+              {showAuthoritativeEnglish ? "Show Derived Translation" : "Inspect Authoritative English"}
             </button>
           )}
         </div>
 
-        <div className="text-xs text-foreground leading-relaxed bg-muted/30 p-3 rounded-lg border border-border">
+        <div className="text-xs md:text-sm text-foreground leading-relaxed bg-secondary/30 p-4 rounded-lg border border-border">
           {showAuthoritativeEnglish
             ? data.ai_procedural_explanation.authoritative_english_text
             : data.ai_procedural_explanation.explanation_text}
         </div>
 
-        {/* Mandatory Legal Disclaimer */}
-        <div className="flex items-start gap-2 p-2.5 bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 rounded-lg text-[11px] text-rose-800 dark:text-rose-300">
+        {/* Mandatory Statutory Caution Box */}
+        <div className="p-3 bg-rose-50/60 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 rounded-lg text-xs text-rose-800 dark:text-rose-300 flex items-start gap-2.5">
           <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-          <p className="leading-normal">
+          <p className="leading-relaxed">
             <strong>Statutory Caution:</strong> {data.ai_procedural_explanation.disclaimer_text}
           </p>
         </div>
       </div>
 
-      {/* ── Upcoming Known Events Card ── */}
-      {data.upcoming_known_events && data.upcoming_known_events.length > 0 && (
-        <div className="bg-card border border-border p-4 md:p-5 rounded-xl space-y-3 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <Calendar className="w-4 h-4 text-emerald-600" />
-              Upcoming Scheduled Events
-            </span>
-          </div>
-          <div className="space-y-2">
-            {data.upcoming_known_events.map((ev, idx) => (
-              <div key={idx} className="p-3 bg-muted/40 border border-border rounded-lg text-xs space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-serif font-bold text-foreground">{ev.title}</span>
-                  <span className="font-mono text-[11px] font-bold text-emerald-600">
-                    {ev.event_date}
-                  </span>
-                </div>
-                <div className="text-muted-foreground text-[11px]">{ev.court_or_location}</div>
-                <p className="text-[11px] text-muted-foreground leading-relaxed pt-0.5">
-                  {ev.instructions}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* ── Documents Missing From Your Side ── */}
       {data.missing_documents_from_citizen && data.missing_documents_from_citizen.length > 0 && (
-        <div className="bg-card border border-rose-200 dark:border-rose-950/60 p-4 md:p-5 rounded-xl space-y-3 shadow-xs">
+        <div className="bg-card border-2 border-border p-6 rounded-xl shadow-sm space-y-4">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
-              <AlertCircle className="w-4 h-4 text-rose-600" />
+            <h3 className="text-base font-serif font-bold text-foreground flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-rose-600" />
               Documents Needed From Your Side
+            </h3>
+            <span className="text-xs font-mono font-bold text-rose-600">
+              Action Required
             </span>
           </div>
           <p className="text-xs text-muted-foreground">
-            To assist DLSA legal aid counsel in moving your bail representation forward, please prepare the following records:
+            To assist the legal-aid counsel in proceeding with court bail representations, please prepare the following documents:
           </p>
-          <div className="space-y-2.5 pt-1">
+
+          <div className="space-y-3">
             {data.missing_documents_from_citizen.map((doc, idx) => (
-              <div key={idx} className="p-3 bg-rose-50/40 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 rounded-lg text-xs space-y-1">
+              <div key={idx} className="p-4 bg-secondary/30 border border-border rounded-lg space-y-1 text-xs">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-serif font-bold text-foreground">{doc.title}</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900 text-rose-700 dark:text-rose-300 shrink-0">
+                  <span className="font-serif font-bold text-foreground text-sm">{doc.title}</span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-rose-500/10 text-rose-600 border border-rose-500/20 shrink-0">
                     {doc.urgency === "REQUIRED_BEFORE_HEARING" ? "URGENT" : "SUPPORTING"}
                   </span>
                 </div>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                <p className="text-muted-foreground leading-relaxed">
                   <strong>Why needed:</strong> {doc.why_needed}
                 </p>
-                <p className="text-[11px] text-muted-foreground leading-relaxed pt-0.5">
+                <p className="text-muted-foreground leading-relaxed pt-0.5">
                   <strong>How to submit:</strong> {doc.how_to_submit}
                 </p>
               </div>
@@ -493,135 +570,84 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         </div>
       )}
 
-      {/* ── Approved Entitled Documents (With Low-Bandwidth Text Summaries) ── */}
-      <div className="bg-card border border-border p-4 md:p-5 rounded-xl space-y-3 shadow-xs">
+      {/* ── Approved Entitled Case Records ── */}
+      <div className="bg-card border-2 border-border p-6 rounded-xl shadow-sm space-y-4">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <FileText className="w-4 h-4 text-emerald-600" />
-            Approved Case Records Entitled To You
-          </span>
-          <span className="text-[11px] font-mono text-muted-foreground">
-            {data.approved_entitled_documents.length} Available
+          <h3 className="text-base font-serif font-bold text-foreground flex items-center gap-2">
+            <FileText className="w-5 h-5 text-primary" />
+            Verified Case Records Entitled To You
+          </h3>
+          <span className="text-xs font-mono text-muted-foreground">
+            {data.approved_entitled_documents.length} Authorized
           </span>
         </div>
         <p className="text-xs text-muted-foreground">
-          You are entitled to soft copies and text summaries of official police and magisterial orders:
+          Authorized case records verified by the Legal Services Authority. Text summaries allow instant reading on low bandwidth:
         </p>
 
-        <div className="space-y-2 pt-1">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
           {data.approved_entitled_documents.map((doc) => (
             <div
               key={doc.id}
-              className="p-3 bg-muted/40 border border-border rounded-lg text-xs flex flex-col gap-1.5"
+              className="p-4 bg-secondary/30 border border-border rounded-lg text-xs space-y-2 flex flex-col justify-between"
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 truncate">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span className="font-serif font-bold text-foreground truncate">{doc.title}</span>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 truncate">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="font-serif font-bold text-foreground truncate">{doc.title}</span>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 shrink-0">
+                    VERIFIED
+                  </span>
                 </div>
-                <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-                  {doc.file_size_formatted}
-                </span>
+                <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2">
+                  {doc.text_summary}
+                </p>
               </div>
 
-              {/* Text Summary (Instant for Low Bandwidth) */}
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                {doc.text_summary}
-              </p>
-
-              <div className="flex items-center justify-end gap-2 pt-1 border-t border-border/50">
-                <button
-                  onClick={() => setPreviewDoc(doc)}
-                  className="px-2.5 py-1 rounded text-[11px] font-mono font-bold bg-card border border-border hover:bg-muted text-foreground flex items-center gap-1 transition-colors"
-                >
-                  <Eye className="w-3 h-3" />
-                  Text Summary Preview
-                </button>
-                <button
-                  onClick={() => setSelectedProvenanceId(doc.id)}
-                  className="px-2.5 py-1 rounded text-[11px] font-mono font-bold bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 flex items-center gap-1 transition-colors"
-                >
-                  <Shield className="w-3 h-3" />
-                  Provenance
-                </button>
+              <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  Size: {doc.file_size_formatted}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setPreviewDoc(doc)}
+                    className="px-2.5 py-1 rounded text-[11px] font-sans font-bold bg-card border border-border hover:bg-secondary text-foreground flex items-center gap-1 transition-colors"
+                  >
+                    <Eye className="w-3 h-3" />
+                    Text Summary
+                  </button>
+                  <button
+                    onClick={() => setSelectedProvenanceId(doc.id)}
+                    className="px-2.5 py-1 rounded text-[11px] font-sans font-bold bg-primary/10 border border-primary/20 hover:bg-primary/20 text-primary flex items-center gap-1 transition-colors"
+                  >
+                    <Shield className="w-3 h-3" />
+                    Provenance
+                  </button>
+                </div>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* ── Legal Aid Defense Counsel & Contact ── */}
-      <div className="bg-card border border-border p-4 md:p-5 rounded-xl space-y-3 shadow-xs">
+      {/* ── Citizen Action Center (Structured Request Cards) ── */}
+      <div className="bg-card border-2 border-border p-6 rounded-xl shadow-sm space-y-4">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <Landmark className="w-4 h-4 text-emerald-600" />
-            Legal Aid & Defense Support
-          </span>
-          <span className="text-[11px] font-mono text-emerald-600 font-bold">
-            100% Free Service
-          </span>
-        </div>
-
-        <div className="space-y-2 text-xs">
-          {data.legal_aid_support.is_assigned ? (
-            <div className="p-3 bg-muted/40 border border-border rounded-lg space-y-1">
-              <div className="font-serif font-bold text-foreground text-sm">
-                {data.legal_aid_support.lawyer_name}
-              </div>
-              <div className="text-muted-foreground">{data.legal_aid_support.organization}</div>
-              <div className="text-[11px] font-mono text-emerald-600">
-                Contact: {data.legal_aid_support.contact_phone}
-              </div>
-              <div className="text-[11px] text-muted-foreground pt-1">
-                {data.legal_aid_support.office_address}
-              </div>
-            </div>
-          ) : (
-            <div className="p-3 bg-muted/40 border border-border rounded-lg space-y-1">
-              <div className="font-semibold text-rose-600 flex items-center gap-1.5">
-                <Clock className="w-4 h-4" />
-                Counsel Assignment in Progress
-              </div>
-              <p className="text-muted-foreground text-[11px] leading-relaxed">
-                {data.legal_aid_support.status_message}
-              </p>
-            </div>
-          )}
-
-          {/* Toll Free Helpline Call Out */}
-          <div className="p-3 bg-black text-white dark:bg-white dark:text-black rounded-lg flex items-center justify-between gap-3">
-            <div className="space-y-0.5">
-              <div className="font-serif font-bold text-xs">National Legal Aid Helpline</div>
-              <div className="text-[10px] opacity-80">24x7 Toll-Free NALSA Assistance</div>
-            </div>
-            <a
-              href="tel:15100"
-              className="px-3.5 py-1.5 bg-emerald-600 text-white font-sans font-bold text-xs rounded-md flex items-center gap-1.5 hover:bg-emerald-700 transition-colors shrink-0"
-            >
-              <Phone className="w-3.5 h-3.5" />
-              Dial 15100
-            </a>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Citizen Action Center (Structured Actions) ── */}
-      <div className="bg-card border border-border p-4 md:p-5 rounded-xl space-y-3 shadow-xs">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <Send className="w-4 h-4 text-emerald-600" />
+          <h3 className="text-base font-serif font-bold text-foreground flex items-center gap-2">
+            <Send className="w-5 h-5 text-primary" />
             Citizen Action Center
-          </span>
-          <span className="text-[10px] font-mono text-muted-foreground">
-            Auditable DLSA Requests
+          </h3>
+          <span className="text-xs font-mono text-muted-foreground">
+            Auditable DLSA Desk
           </span>
         </div>
         <p className="text-xs text-muted-foreground">
-          Submit structured requests directly to the District Legal Services Authority desk:
+          Submit official requests directly to the DLSA Secretary and Jail Welfare Officer:
         </p>
 
-        {/* 4 Action Buttons */}
-        <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             onClick={() => {
               setActionType("REQUEST_DLSA_CONTACT");
@@ -629,13 +655,13 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               setActionDetails("Requesting an in-person or telephonic consultation with the assigned legal aid advocate regarding upcoming hearing.");
               setActionModalOpen(true);
             }}
-            className="p-3 bg-muted/40 hover:bg-muted border border-border rounded-lg text-left transition-colors flex flex-col gap-1"
+            className="p-4 bg-secondary/30 hover:bg-secondary/60 border border-border rounded-lg text-left transition-colors flex items-start gap-3"
           >
-            <span className="font-bold text-foreground flex items-center gap-1.5">
-              <Phone className="w-3.5 h-3.5 text-emerald-600" />
-              Contact DLSA
-            </span>
-            <span className="text-[11px] text-muted-foreground">Request panel counsel contact</span>
+            <Phone className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+            <div>
+              <div className="font-serif font-bold text-sm text-foreground">Contact DLSA Counsel</div>
+              <div className="text-xs text-muted-foreground">Request panel advocate consultation</div>
+            </div>
           </button>
 
           <button
@@ -645,13 +671,13 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               setActionDetails("There is an error in custody calculation or identity attributes recorded in the system.");
               setActionModalOpen(true);
             }}
-            className="p-3 bg-muted/40 hover:bg-muted border border-border rounded-lg text-left transition-colors flex flex-col gap-1"
+            className="p-4 bg-secondary/30 hover:bg-secondary/60 border border-border rounded-lg text-left transition-colors flex items-start gap-3"
           >
-            <span className="font-bold text-foreground flex items-center gap-1.5">
-              <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
-              Flag Discrepancy
-            </span>
-            <span className="text-[11px] text-muted-foreground">Report incorrect dates or names</span>
+            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-serif font-bold text-sm text-foreground">Flag Discrepancy</div>
+              <div className="text-xs text-muted-foreground">Report incorrect dates or details</div>
+            </div>
           </button>
 
           <button
@@ -661,13 +687,13 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               setActionDetails("Requesting certified soft copy of official court or police report.");
               setActionModalOpen(true);
             }}
-            className="p-3 bg-muted/40 hover:bg-muted border border-border rounded-lg text-left transition-colors flex flex-col gap-1"
+            className="p-4 bg-secondary/30 hover:bg-secondary/60 border border-border rounded-lg text-left transition-colors flex items-start gap-3"
           >
-            <span className="font-bold text-foreground flex items-center gap-1.5">
-              <FileQuestion className="w-3.5 h-3.5 text-emerald-600" />
-              Request Copy
-            </span>
-            <span className="text-[11px] text-muted-foreground">Request official document copy</span>
+            <FileQuestion className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+            <div>
+              <div className="font-serif font-bold text-sm text-foreground">Request Document Copy</div>
+              <div className="text-xs text-muted-foreground">Request certified order or report copy</div>
+            </div>
           </button>
 
           <button
@@ -677,30 +703,30 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               setActionDetails("Requesting immediate assistance from Jail Legal Aid Clinic or DLSA Secretary.");
               setActionModalOpen(true);
             }}
-            className="p-3 bg-muted/40 hover:bg-muted border border-border rounded-lg text-left transition-colors flex flex-col gap-1"
+            className="p-4 bg-secondary/30 hover:bg-secondary/60 border border-border rounded-lg text-left transition-colors flex items-start gap-3"
           >
-            <span className="font-bold text-foreground flex items-center gap-1.5">
-              <HelpCircle className="w-3.5 h-3.5 text-emerald-600" />
-              Ask For Help
-            </span>
-            <span className="text-[11px] text-muted-foreground">Urgent welfare assistance</span>
+            <HelpCircle className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+            <div>
+              <div className="font-serif font-bold text-sm text-foreground">Ask For Legal Aid Help</div>
+              <div className="text-xs text-muted-foreground">Urgent welfare / medical consultation</div>
+            </div>
           </button>
         </div>
 
-        {/* Recent Requests Status */}
+        {/* Past Requests History */}
         {data.recent_citizen_requests && data.recent_citizen_requests.length > 0 && (
-          <div className="pt-2 border-t border-border space-y-2">
-            <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-muted-foreground block">
+          <div className="pt-3 border-t border-border space-y-2">
+            <span className="text-xs font-serif font-bold uppercase tracking-wider text-muted-foreground block">
               Your Past Submissions
             </span>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {data.recent_citizen_requests.map((req) => (
-                <div key={req.id} className="p-2.5 bg-muted/30 border border-border rounded-lg text-xs flex items-center justify-between">
+                <div key={req.id} className="p-3 bg-secondary/20 border border-border rounded-lg text-xs flex items-center justify-between">
                   <div className="truncate pr-2">
                     <div className="font-serif font-bold text-foreground truncate">{req.subject}</div>
-                    <div className="text-[10px] font-mono text-muted-foreground">ID: {req.id}</div>
+                    <div className="text-[11px] font-mono text-muted-foreground">Tracking ID: {req.id}</div>
                   </div>
-                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 shrink-0">
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">
                     {req.status}
                   </span>
                 </div>
@@ -710,13 +736,36 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         )}
       </div>
 
+      {/* ── Signature Toll-Free Legal Aid Banner ── */}
+      <div className="bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border-2 border-primary/20 p-6 rounded-xl space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h4 className="text-base font-serif font-bold text-foreground flex items-center gap-2">
+              <Phone className="h-5 w-5 text-primary" />
+              National Legal Services Helpline (NALSA 24x7)
+            </h4>
+            <p className="text-xs text-muted-foreground">
+              Toll-free government assistance for undertrials and family members under the Legal Services Authorities Act.
+            </p>
+          </div>
+
+          <a
+            href="tel:15100"
+            className="px-5 py-2.5 bg-primary text-primary-foreground font-sans font-bold text-sm rounded-lg flex items-center gap-2 hover:bg-primary/90 transition-colors shadow-sm shrink-0"
+          >
+            <Phone className="h-4 w-4" />
+            15100 (Toll-Free)
+          </a>
+        </div>
+      </div>
+
       {/* ── Action Submission Modal ── */}
       {actionModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-xl w-full max-w-lg p-5 space-y-4 shadow-xl animate-in zoom-in-95">
-            <div className="flex items-center justify-between pb-2 border-b border-border">
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-card border-2 border-border rounded-xl w-full max-w-lg p-6 space-y-4 shadow-xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
               <h3 className="font-serif font-bold text-base text-foreground flex items-center gap-2">
-                <Send className="w-4 h-4 text-emerald-600" />
+                <Send className="w-4 h-4 text-primary" />
                 Submit Citizen Request
               </h3>
               <button
@@ -731,28 +780,28 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
             </div>
 
             {actionSuccessMsg ? (
-              <div className="p-4 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs text-center space-y-2">
+              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs text-center space-y-2">
                 <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
-                <p className="font-bold text-emerald-800 dark:text-emerald-300">{actionSuccessMsg}</p>
+                <p className="font-bold text-foreground">{actionSuccessMsg}</p>
                 <p className="font-mono text-muted-foreground">Tracking ID: {actionTrackingId}</p>
                 <button
                   onClick={() => {
                     setActionModalOpen(false);
                     setActionSuccessMsg(null);
                   }}
-                  className="mt-2 px-4 py-1.5 bg-black text-white dark:bg-white dark:text-black font-bold text-xs rounded-md"
+                  className="mt-2 px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-lg"
                 >
-                  Close
+                  Done
                 </button>
               </div>
             ) : (
-              <form onSubmit={handleActionSubmit} className="space-y-3 text-xs">
+              <form onSubmit={handleActionSubmit} className="space-y-4 text-xs">
                 <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Request Type</label>
+                  <label className="block font-bold text-foreground mb-1">Request Type</label>
                   <select
                     value={actionType}
                     onChange={(e: any) => setActionType(e.target.value)}
-                    className="w-full p-2 rounded-lg bg-muted border border-border text-foreground font-mono"
+                    className="w-full p-2.5 rounded-lg bg-input border border-border text-foreground font-mono"
                   >
                     <option value="REQUEST_DLSA_CONTACT">Request DLSA Panel Counsel Contact</option>
                     <option value="FLAG_INCORRECT_INFO">Report Discrepancy / Flag Error</option>
@@ -763,11 +812,11 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
 
                 {actionType === "FLAG_INCORRECT_INFO" && (
                   <div>
-                    <label className="block font-bold text-muted-foreground mb-1">Field with Discrepancy</label>
+                    <label className="block font-bold text-foreground mb-1">Field with Discrepancy</label>
                     <select
                       value={actionField}
                       onChange={(e) => setActionField(e.target.value)}
-                      className="w-full p-2 rounded-lg bg-muted border border-border text-foreground font-mono"
+                      className="w-full p-2.5 rounded-lg bg-input border border-border text-foreground font-mono"
                     >
                       <option value="custody_days">Custody Period / Admission Date</option>
                       <option value="father_name">Parent / Guardian Name</option>
@@ -779,11 +828,11 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
 
                 {actionType === "REQUEST_DOCUMENT_COPY" && (
                   <div>
-                    <label className="block font-bold text-muted-foreground mb-1">Document Requested</label>
+                    <label className="block font-bold text-foreground mb-1">Document Requested</label>
                     <select
                       value={actionDocType}
                       onChange={(e) => setActionDocType(e.target.value)}
-                      className="w-full p-2 rounded-lg bg-muted border border-border text-foreground font-mono"
+                      className="w-full p-2.5 rounded-lg bg-input border border-border text-foreground font-mono"
                     >
                       <option value="charge_sheet">Police Charge Sheet</option>
                       <option value="remand_order">Judicial Remand Order</option>
@@ -794,26 +843,26 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                 )}
 
                 <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Subject</label>
+                  <label className="block font-bold text-foreground mb-1">Subject</label>
                   <input
                     type="text"
                     required
                     value={actionSubject}
                     onChange={(e) => setActionSubject(e.target.value)}
-                    className="w-full p-2 rounded-lg bg-muted border border-border text-foreground"
+                    className="w-full p-2.5 rounded-lg bg-input border border-border text-foreground"
                     placeholder="Brief summary of what you require..."
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Details</label>
+                  <label className="block font-bold text-foreground mb-1">Details</label>
                   <textarea
                     required
                     rows={3}
                     value={actionDetails}
                     onChange={(e) => setActionDetails(e.target.value)}
-                    className="w-full p-2 rounded-lg bg-muted border border-border text-foreground leading-relaxed"
-                    placeholder="Provide specific details so the DLSA officer can verify..."
+                    className="w-full p-2.5 rounded-lg bg-input border border-border text-foreground leading-relaxed"
+                    placeholder="Provide specific details for the DLSA desk..."
                   />
                 </div>
 
@@ -828,7 +877,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                   <button
                     type="submit"
                     disabled={submittingAction}
-                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition-colors flex items-center gap-1.5"
+                    className="px-5 py-2 bg-primary text-primary-foreground font-bold rounded-lg transition-colors"
                   >
                     {submittingAction ? "Submitting..." : "Submit to DLSA"}
                   </button>
@@ -841,11 +890,11 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
 
       {/* ── Notification Preferences Modal ── */}
       {notifModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-xl w-full max-w-md p-5 space-y-4 shadow-xl animate-in zoom-in-95">
-            <div className="flex items-center justify-between pb-2 border-b border-border">
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-card border-2 border-border rounded-xl w-full max-w-md p-6 space-y-4 shadow-xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
               <h3 className="font-serif font-bold text-base text-foreground flex items-center gap-2">
-                <Bell className="w-4 h-4 text-emerald-600" />
+                <Bell className="w-4 h-4 text-primary" />
                 Notification Preferences & Consent
               </h3>
               <button onClick={() => setNotifModalOpen(false)} className="text-muted-foreground hover:text-foreground">
@@ -853,55 +902,54 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               </button>
             </div>
 
-            <form onSubmit={handleSaveNotifPrefs} className="space-y-3 text-xs">
+            <form onSubmit={handleSaveNotifPrefs} className="space-y-4 text-xs">
               <div>
-                <label className="block font-bold text-muted-foreground mb-1">Mobile Number</label>
+                <label className="block font-bold text-foreground mb-1">Registered Mobile Phone</label>
                 <input
                   type="tel"
                   value={notifPhone}
                   onChange={(e) => setNotifPhone(e.target.value)}
-                  className="w-full p-2 rounded-lg bg-muted border border-border text-foreground font-mono"
+                  className="w-full p-2.5 rounded-lg bg-input border border-border text-foreground font-mono"
                   placeholder="+91 98765 43210"
                 />
               </div>
 
-              <div className="space-y-2 pt-1">
-                <label className="flex items-center gap-2 cursor-pointer">
+              <div className="space-y-2.5 pt-1">
+                <label className="flex items-center gap-2.5 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={notifSms}
                     onChange={(e) => setNotifSms(e.target.checked)}
-                    className="rounded border-border"
+                    className="rounded border-border h-4 w-4 text-primary"
                   />
                   <span>SMS Statutory Hearing & Status Notices</span>
                 </label>
-                <label className="flex items-center gap-2 cursor-pointer">
+                <label className="flex items-center gap-2.5 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={notifWhatsapp}
                     onChange={(e) => setNotifWhatsapp(e.target.checked)}
-                    className="rounded border-border"
+                    className="rounded border-border h-4 w-4 text-primary"
                   />
                   <span>WhatsApp Legal Aid Assistance Notices</span>
                 </label>
-                <label className="flex items-center gap-2 cursor-pointer">
+                <label className="flex items-center gap-2.5 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={notifInApp}
                     onChange={(e) => setNotifInApp(e.target.checked)}
-                    className="rounded border-border"
+                    className="rounded border-border h-4 w-4 text-primary"
                   />
                   <span>In-App Status Alerts</span>
                 </label>
               </div>
 
-              {/* Statutory Consent Record Notice */}
-              <div className="p-3 bg-muted/40 border border-border rounded-lg text-[11px] text-muted-foreground leading-relaxed">
-                <strong>Statutory Consent:</strong> By enabling notifications, you consent to receive institutional legal aid notices under Section 12 of the Legal Services Authorities Act, 1987. Carrier dispatch is logged in the statutory audit register.
+              <div className="p-3 bg-secondary/40 border border-border rounded-lg text-[11px] text-muted-foreground leading-relaxed">
+                <strong>Statutory Notice:</strong> Notification delivery is recorded under the Legal Services Authorities Act, 1987. No commercial carrier charges are applied.
               </div>
 
               {notifSavedMsg && (
-                <div className="p-2 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 rounded text-center">
+                <div className="p-2.5 bg-emerald-500/10 text-emerald-600 border border-emerald-500/30 rounded-lg text-center font-bold">
                   {notifSavedMsg}
                 </div>
               )}
@@ -917,7 +965,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                 <button
                   type="submit"
                   disabled={savingNotif}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition-colors"
+                  className="px-5 py-2 bg-primary text-primary-foreground font-bold rounded-lg transition-colors"
                 >
                   {savingNotif ? "Saving..." : "Save Preferences"}
                 </button>
@@ -929,9 +977,9 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
 
       {/* ── Document Text Summary Modal ── */}
       {previewDoc && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-xl w-full max-w-lg p-5 space-y-4 shadow-xl animate-in zoom-in-95">
-            <div className="flex items-center justify-between pb-2 border-b border-border">
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-card border-2 border-border rounded-xl w-full max-w-lg p-6 space-y-4 shadow-xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
               <h3 className="font-serif font-bold text-base text-foreground truncate pr-2">
                 {previewDoc.title}
               </h3>
@@ -940,24 +988,24 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               </button>
             </div>
 
-            <div className="space-y-2 text-xs">
+            <div className="space-y-3 text-xs">
               <div className="flex items-center justify-between font-mono text-[11px] text-muted-foreground">
-                <span>Type: {previewDoc.document_type}</span>
+                <span>Record Type: {previewDoc.document_type}</span>
                 <span>Size: {previewDoc.file_size_formatted}</span>
               </div>
-              <div className="p-3 bg-muted/40 border border-border rounded-lg text-muted-foreground leading-relaxed">
-                <strong className="block text-foreground mb-1">Plain-Language Summary:</strong>
+              <div className="p-4 bg-secondary/30 border border-border rounded-lg text-foreground leading-relaxed">
+                <strong className="block font-serif text-sm mb-1 text-primary">Plain-Language Summary:</strong>
                 {previewDoc.text_summary}
               </div>
-              <p className="text-[11px] text-muted-foreground leading-relaxed pt-1">
-                This document is certified by the Legal Services Authority. Full certified PDF copies can be examined at the DLSA Front Office during court working hours.
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                This document is certified by the Legal Services Authority. Certified paper copies may also be inspected at the DLSA Front Office during court working hours.
               </p>
             </div>
 
-            <div className="pt-2 flex items-center justify-end">
+            <div className="pt-3 flex items-center justify-end">
               <button
                 onClick={() => setPreviewDoc(null)}
-                className="px-4 py-2 bg-black text-white dark:bg-white dark:text-black font-bold text-xs rounded-lg"
+                className="px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-lg"
               >
                 Close Preview
               </button>
@@ -966,7 +1014,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         </div>
       )}
 
-      {/* ── Provenance Modal ── */}
+      {/* ── Role Evidence Provenance Modal ── */}
       <RoleEvidenceProvenanceModal
         isOpen={!!selectedProvenanceId}
         onClose={() => setSelectedProvenanceId(null)}

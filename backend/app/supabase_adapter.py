@@ -560,6 +560,10 @@ def supa_get_task_queue(
         q = q.eq("legal_aid_need", 1 if legal_aid_need else 0)
     if has_data_conflict is not None:
         q = q.eq("has_data_conflict", 1 if has_data_conflict else 0)
+    if hearing_date_from:
+        q = q.gte("hearing_date", hearing_date_from)
+    if hearing_date_to:
+        q = q.lte("hearing_date", hearing_date_to)
     if assignment_status:
         q = q.eq("assignment_status", assignment_status.upper())
     if matter_status:

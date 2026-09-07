@@ -424,3 +424,94 @@ def test_controlled_external_advocate_strictly_barred_from_drafting_signing_fili
     )
     assert file_res.status_code == 403
 
+
+def test_single_source_task_repository_and_all_8_filters():
+    """Verify get_task_repository factory returns repository and supports all 8 filter dimensions."""
+    from app.repositories.task_repository import get_task_repository, BaseTaskRepository
+    from app.auth.dependencies import AuthUser
+
+    repo = get_task_repository()
+    assert isinstance(repo, BaseTaskRepository)
+
+    admin_user = AuthUser(
+        id="test_admin",
+        role=Role.PLATFORM_ADMIN,
+        org_id="org_test",
+        email="admin@test.gov.in",
+        full_name="Platform Admin",
+        facility_ids=[],
+        district="Central Delhi",
+    )
+
+    # 1. Facility filter
+    items_fac = repo.get_task_queue(current_user=admin_user, facility="Tihar")
+    assert isinstance(items_fac, list)
+
+    # 2. District filter
+    items_dist = repo.get_task_queue(current_user=admin_user, district="Delhi")
+    assert isinstance(items_dist, list)
+
+    # 3. Custody duration min
+    items_cust = repo.get_task_queue(current_user=admin_user, custody_duration_min=30)
+    assert isinstance(items_cust, list)
+    for t in items_cust:
+        assert t.get("custody_duration_days", 0) >= 30
+
+    # 4. Document completeness max
+    items_comp = repo.get_task_queue(current_user=admin_user, document_completeness_max=80)
+    assert isinstance(items_comp, list)
+    for t in items_comp:
+        assert t.get("document_completeness_pct", 100) <= 80
+
+    # 5. Legal aid need
+    items_need = repo.get_task_queue(current_user=admin_user, legal_aid_need=True)
+    assert isinstance(items_need, list)
+    for t in items_need:
+        assert t.get("legal_aid_need") == 1
+
+    # 6. Hearing date range
+    items_hearing = repo.get_task_queue(
+        current_user=admin_user,
+        hearing_date_from="2020-01-01",
+        hearing_date_to="2030-12-31",
+    )
+    assert isinstance(items_hearing, list)
+
+    # 7. Unresolved data conflict
+    items_conf = repo.get_task_queue(current_user=admin_user, has_data_conflict=True)
+    assert isinstance(items_conf, list)
+    for t in items_conf:
+        assert t.get("has_data_conflict") == 1
+
+    # 8. Matter status
+    items_matter = repo.get_task_queue(current_user=admin_user, matter_status="INTAKE")
+    assert isinstance(items_matter, list)
+    for t in items_matter:
+        assert t.get("matter_status") == "INTAKE"
+
+
+def test_task_queue_all_8_filters_api(dlsa_tok):
+    """Verify GET /tasks/queue accepts and processes all 8 filter parameters via HTTP API."""
+    res = client.get(
+        "/tasks/queue",
+        params={
+            "facility": "Tihar",
+            "district": "Delhi",
+            "priority": "HIGH",
+            "custody_duration_min": 10,
+            "document_completeness_max": 90,
+            "legal_aid_need": True,
+            "hearing_date_from": "2026-01-01",
+            "hearing_date_to": "2026-12-31",
+            "has_data_conflict": False,
+            "matter_status": "INTAKE",
+            "sort_by": "due_date",
+            "sort_order": "asc",
+        },
+        headers={"Authorization": f"Bearer {dlsa_tok}"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert isinstance(data, list)
+
+

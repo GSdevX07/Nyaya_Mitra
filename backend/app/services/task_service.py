@@ -32,6 +32,7 @@ from app.models.tasks import (
     AccusedProfileUpdateRequest,
     PrisonReleaseConfirmationRequest,
 )
+from app.repositories.task_repository import get_task_repository
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +50,8 @@ class TaskService:
         - SUPERVISING_LEGAL_OFFICER: Supervisory draft review, exception resolution
         - DEFENSE_ADVOCATE: Petition preparation/sign-off, court filing, hearing monitoring
         """
-        should_close = False
-        if conn is None:
-            conn = get_db_connection()
-            should_close = True
-
-        synced_count = 0
+        tasks_to_sync: List[Dict[str, Any]] = []
         try:
-            cursor = conn.cursor()
             cases = get_all_cases()
             today = datetime.date.today()
             today_iso = today.isoformat()
@@ -88,107 +83,127 @@ class TaskService:
                 # 1a. Jail Officer: Custody intake & nominal roll verification
                 if status in ("INTAKE", "VERIFICATION", "DETECTED"):
                     due_date = (today + datetime.timedelta(days=2)).isoformat()
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO task_queue (
-                            id, case_id, accused_name, task_type, title, description,
-                            owner_role, owner_user_id, owner_name, priority, due_date, source, reason,
-                            status, escalation_path, facility, district, custody_duration_days,
-                            document_completeness_pct, has_data_conflict, legal_aid_need,
-                            assignment_status, matter_status, hearing_date, is_consequential, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-                        )
-                    """, (
-                        f"TASK-{cid}-JAIL-VERIF", cid, cname, "CUSTODY_VERIFICATION",
-                        f"Verify Custody & Nominal Roll: {cname}",
-                        f"Custody admission record and verification of nominal roll for inmate {cname} ({cid}).",
-                        "JAIL_OFFICER", None, "Jail Intake Officer", "HIGH" if custody_days > 60 else "MEDIUM",
-                        due_date, "PRISON_INTAKE",
-                        f"Inmate admitted to {facility}. Physical admission registers, biometric logs, and nominal roll must be verified under Model Prison Rules.",
-                        "PENDING_ACTION", "Jail Superintendent -> Inspector General of Prisons",
-                        facility, district, custody_days, completeness_pct, has_conflict, legal_aid_need,
-                        assignment_status, status, hearing_date, 0
-                    ))
-                    synced_count += 1
+                    tasks_to_sync.append({
+                        "id": f"TASK-{cid}-JAIL-VERIF",
+                        "case_id": cid,
+                        "accused_name": cname,
+                        "task_type": "CUSTODY_VERIFICATION",
+                        "title": f"Verify Custody & Nominal Roll: {cname}",
+                        "description": f"Custody admission record and verification of nominal roll for inmate {cname} ({cid}).",
+                        "owner_role": "JAIL_OFFICER",
+                        "owner_user_id": None,
+                        "owner_name": "Jail Intake Officer",
+                        "priority": "HIGH" if custody_days > 60 else "MEDIUM",
+                        "due_date": due_date,
+                        "source": "PRISON_INTAKE",
+                        "reason": f"Inmate admitted to {facility}. Physical admission registers, biometric logs, and nominal roll must be verified under Model Prison Rules.",
+                        "status": "PENDING_ACTION",
+                        "escalation_path": "Jail Superintendent -> Inspector General of Prisons",
+                        "facility": facility,
+                        "district": district,
+                        "custody_duration_days": custody_days,
+                        "document_completeness_pct": completeness_pct,
+                        "has_data_conflict": has_conflict,
+                        "legal_aid_need": legal_aid_need,
+                        "assignment_status": assignment_status,
+                        "matter_status": status,
+                        "hearing_date": hearing_date,
+                        "is_consequential": 0,
+                    })
 
                 # 1b. Jail Officer: Capture Missing Inmate Profile Information (for active detainees)
                 if status not in ("POST_RELEASE_FOLLOW_UP", "CLOSED"):
                     due_date = (today + datetime.timedelta(days=3)).isoformat()
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO task_queue (
-                            id, case_id, accused_name, task_type, title, description,
-                            owner_role, owner_user_id, owner_name, priority, due_date, source, reason,
-                            status, escalation_path, facility, district, custody_duration_days,
-                            document_completeness_pct, has_data_conflict, legal_aid_need,
-                            assignment_status, matter_status, hearing_date, is_consequential, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-                        )
-                    """, (
-                        f"TASK-{cid}-JAIL-PROFILE", cid, cname, "CAPTURE_MISSING_PROFILE",
-                        f"Capture Inmate Profile Records: {cname}",
-                        f"Verify guardian contacts, identification marks, and permanent domicile for {cname}.",
-                        "JAIL_OFFICER", None, "Jail Welfare Officer", "MEDIUM",
-                        due_date, "PRISON_INTAKE_RECORDS",
-                        f"Inmate profile in {facility} requires biometric cross-verification and emergency family contact updates under Prison Rules.",
-                        "PENDING_ACTION", "Jail Superintendent -> DLSA Member Secretary",
-                        facility, district, custody_days, completeness_pct, has_conflict, legal_aid_need,
-                        assignment_status, status, hearing_date, 0
-                    ))
-                    synced_count += 1
+                    tasks_to_sync.append({
+                        "id": f"TASK-{cid}-JAIL-PROFILE",
+                        "case_id": cid,
+                        "accused_name": cname,
+                        "task_type": "CAPTURE_MISSING_PROFILE",
+                        "title": f"Capture Inmate Profile Records: {cname}",
+                        "description": f"Verify guardian contacts, identification marks, and permanent domicile for {cname}.",
+                        "owner_role": "JAIL_OFFICER",
+                        "owner_user_id": None,
+                        "owner_name": "Jail Welfare Officer",
+                        "priority": "MEDIUM",
+                        "due_date": due_date,
+                        "source": "PRISON_INTAKE_RECORDS",
+                        "reason": f"Inmate profile in {facility} requires biometric cross-verification and emergency family contact updates under Prison Rules.",
+                        "status": "PENDING_ACTION",
+                        "escalation_path": "Jail Superintendent -> DLSA Member Secretary",
+                        "facility": facility,
+                        "district": district,
+                        "custody_duration_days": custody_days,
+                        "document_completeness_pct": completeness_pct,
+                        "has_data_conflict": has_conflict,
+                        "legal_aid_need": legal_aid_need,
+                        "assignment_status": assignment_status,
+                        "matter_status": status,
+                        "hearing_date": hearing_date,
+                        "is_consequential": 0,
+                    })
 
                 # 2. DLSA Officer: Legal aid assessment & Panel counsel assignment
                 if legal_aid_need and status not in ("POST_RELEASE_FOLLOW_UP", "CLOSED"):
                     due_date = (today + datetime.timedelta(days=1)).isoformat()
                     is_crit = custody_days >= (max_days // 3)
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO task_queue (
-                            id, case_id, accused_name, task_type, title, description,
-                            owner_role, owner_user_id, owner_name, priority, due_date, source, reason,
-                            status, escalation_path, facility, district, custody_duration_days,
-                            document_completeness_pct, has_data_conflict, legal_aid_need,
-                            assignment_status, matter_status, hearing_date, is_consequential, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-                        )
-                    """, (
-                        f"TASK-{cid}-DLSA-ASSIGN", cid, cname, "ASSIGN_DEFENSE_COUNSEL",
-                        f"Assign Defense Counsel: {cname}",
-                        f"Statutory legal aid defense counsel allocation for unrepresented undertrial {cname} ({cid}).",
-                        "DLSA_OFFICER", None, "DLSA Legal Aid Officer", "CRITICAL" if is_crit else "HIGH",
-                        due_date, "LEGAL_AID_INTAKE_QUEUE",
-                        f"Undertrial has served {custody_days} days without assigned legal counsel. Mandated panel advocate assignment under NALSA Standard Operating Procedures.",
-                        "NEW" if not assigned_id else "COMPLETED", "DLSA Legal Aid Desk -> DLSA Secretary",
-                        facility, district, custody_days, completeness_pct, has_conflict, 1,
-                        assignment_status, status, hearing_date, 0
-                    ))
-                    synced_count += 1
+                    tasks_to_sync.append({
+                        "id": f"TASK-{cid}-DLSA-ASSIGN",
+                        "case_id": cid,
+                        "accused_name": cname,
+                        "task_type": "ASSIGN_DEFENSE_COUNSEL",
+                        "title": f"Assign Defense Counsel: {cname}",
+                        "description": f"Statutory legal aid defense counsel allocation for unrepresented undertrial {cname} ({cid}).",
+                        "owner_role": "DLSA_OFFICER",
+                        "owner_user_id": None,
+                        "owner_name": "DLSA Legal Aid Officer",
+                        "priority": "CRITICAL" if is_crit else "HIGH",
+                        "due_date": due_date,
+                        "source": "LEGAL_AID_INTAKE_QUEUE",
+                        "reason": f"Undertrial has served {custody_days} days without assigned legal counsel. Mandated panel advocate assignment under NALSA Standard Operating Procedures.",
+                        "status": "NEW" if not assigned_id else "COMPLETED",
+                        "escalation_path": "DLSA Legal Aid Desk -> DLSA Secretary",
+                        "facility": facility,
+                        "district": district,
+                        "custody_duration_days": custody_days,
+                        "document_completeness_pct": completeness_pct,
+                        "has_data_conflict": has_conflict,
+                        "legal_aid_need": 1,
+                        "assignment_status": assignment_status,
+                        "matter_status": status,
+                        "hearing_date": hearing_date,
+                        "is_consequential": 0,
+                    })
 
                 # 3. DLSA / Advocate: Missing Document Collection
                 if len(missing_docs) > 0 and status not in ("CLOSED", "POST_RELEASE_FOLLOW_UP"):
                     due_date = (today + datetime.timedelta(days=3)).isoformat()
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO task_queue (
-                            id, case_id, accused_name, task_type, title, description,
-                            owner_role, owner_user_id, owner_name, priority, due_date, source, reason,
-                            status, escalation_path, facility, district, custody_duration_days,
-                            document_completeness_pct, has_data_conflict, legal_aid_need,
-                            assignment_status, matter_status, hearing_date, is_consequential, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-                        )
-                    """, (
-                        f"TASK-{cid}-DOCS-PENDING", cid, cname, "COLLECT_MISSING_DOCUMENTS",
-                        f"Obtain Required Documents: {cname}",
-                        f"Missing defense records ({', '.join(missing_docs[:2])}) blocking formal bail drafting for {cname}.",
-                        "DLSA_OFFICER", None, "DLSA Document Desk", "HIGH",
-                        due_date, "DOCUMENT_VERIFICATION_RADAR",
-                        f"Mandatory evidentiary records missing: {', '.join(missing_docs)}. Required for Section 479 statutory evaluation.",
-                        "WAITING_FOR_DOCUMENTS", "Jail Welfare Officer -> DLSA Secretary",
-                        facility, district, custody_days, completeness_pct, has_conflict, legal_aid_need,
-                        assignment_status, status, hearing_date, 0
-                    ))
-                    synced_count += 1
+                    tasks_to_sync.append({
+                        "id": f"TASK-{cid}-DOCS-PENDING",
+                        "case_id": cid,
+                        "accused_name": cname,
+                        "task_type": "COLLECT_MISSING_DOCUMENTS",
+                        "title": f"Obtain Required Documents: {cname}",
+                        "description": f"Missing defense records ({', '.join(missing_docs[:2])}) blocking formal bail drafting for {cname}.",
+                        "owner_role": "DLSA_OFFICER",
+                        "owner_user_id": None,
+                        "owner_name": "DLSA Document Desk",
+                        "priority": "HIGH",
+                        "due_date": due_date,
+                        "source": "DOCUMENT_VERIFICATION_RADAR",
+                        "reason": f"Mandatory evidentiary records missing: {', '.join(missing_docs)}. Required for Section 479 statutory evaluation.",
+                        "status": "WAITING_FOR_DOCUMENTS",
+                        "escalation_path": "Jail Welfare Officer -> DLSA Secretary",
+                        "facility": facility,
+                        "district": district,
+                        "custody_duration_days": custody_days,
+                        "document_completeness_pct": completeness_pct,
+                        "has_data_conflict": has_conflict,
+                        "legal_aid_need": legal_aid_need,
+                        "assignment_status": assignment_status,
+                        "matter_status": status,
+                        "hearing_date": hearing_date,
+                        "is_consequential": 0,
+                    })
 
                 # 4. Defense Advocate: Draft bail petition & Counsel Sign-Off
                 preliminary_states = (
@@ -204,205 +219,228 @@ class TaskService:
                 ):
                     due_date = (today + datetime.timedelta(days=2)).isoformat()
                     is_crit = custody_days >= (max_days // 2)
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO task_queue (
-                            id, case_id, accused_name, task_type, title, description,
-                            owner_role, owner_user_id, owner_name, priority, due_date, source, reason,
-                            status, escalation_path, facility, district, custody_duration_days,
-                            document_completeness_pct, has_data_conflict, legal_aid_need,
-                            assignment_status, matter_status, hearing_date, is_consequential, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-                        )
-                    """, (
-                        f"TASK-{cid}-ADV-DRAFT", cid, cname, "PREPARE_AND_SIGN_OFF_DRAFT",
-                        f"Draft & Sign-Off Bail Petition: {cname}",
-                        f"Prepare formal Section 479 bail petition and execute Level-1 Counsel Sign-Off for {cname}.",
-                        "DEFENSE_ADVOCATE", assigned_id, assigned_name or "Assigned Defense Counsel", "CRITICAL" if is_crit else "HIGH",
-                        due_date, "BNSS_479_EVALUATION_ENGINE",
-                        f"Section 479 statutory eligibility reached ({custody_days} days served). Advocate drafting and mandatory human counsel sign-off required.",
-                        "PENDING_ACTION", "Assigned Advocate -> Supervising Legal Officer",
-                        facility, district, custody_days, completeness_pct, has_conflict, legal_aid_need,
-                        assignment_status, status, hearing_date, 0
-                    ))
-                    synced_count += 1
+                    tasks_to_sync.append({
+                        "id": f"TASK-{cid}-ADV-DRAFT",
+                        "case_id": cid,
+                        "accused_name": cname,
+                        "task_type": "PREPARE_AND_SIGN_OFF_DRAFT",
+                        "title": f"Draft & Sign-Off Bail Petition: {cname}",
+                        "description": f"Prepare formal Section 479 bail petition and execute Level-1 Counsel Sign-Off for {cname}.",
+                        "owner_role": "DEFENSE_ADVOCATE",
+                        "owner_user_id": assigned_id,
+                        "owner_name": assigned_name or "Assigned Defense Counsel",
+                        "priority": "CRITICAL" if is_crit else "HIGH",
+                        "due_date": due_date,
+                        "source": "BNSS_479_EVALUATION_ENGINE",
+                        "reason": f"Section 479 statutory eligibility reached ({custody_days} days served). Advocate drafting and mandatory human counsel sign-off required.",
+                        "status": "PENDING_ACTION",
+                        "escalation_path": "Assigned Advocate -> Supervising Legal Officer",
+                        "facility": facility,
+                        "district": district,
+                        "custody_duration_days": custody_days,
+                        "document_completeness_pct": completeness_pct,
+                        "has_data_conflict": has_conflict,
+                        "legal_aid_need": legal_aid_need,
+                        "assignment_status": assignment_status,
+                        "matter_status": status,
+                        "hearing_date": hearing_date,
+                        "is_consequential": 0,
+                    })
 
                 # 5. Supervising Legal Officer: Supervisory Review & Institutional Approval
                 if status == "SUBMITTED" and assignment_status == "ASSIGNED":
                     due_date = (today + datetime.timedelta(days=1)).isoformat()
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO task_queue (
-                            id, case_id, accused_name, task_type, title, description,
-                            owner_role, owner_user_id, owner_name, priority, due_date, source, reason,
-                            status, escalation_path, facility, district, custody_duration_days,
-                            document_completeness_pct, has_data_conflict, legal_aid_need,
-                            assignment_status, matter_status, hearing_date, is_consequential, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-                        )
-                    """, (
-                        f"TASK-{cid}-SUP-REVIEW", cid, cname, "SUPERVISORY_DRAFT_REVIEW",
-                        f"Supervisory Draft Review & Approval: {cname}",
-                        f"Level-2 institutional verification of counsel sign-off and SHA-256 petition artifact for {cname}.",
-                        "SUPERVISING_LEGAL_OFFICER", None, "Supervising Legal Officer", "CRITICAL",
-                        due_date, "SUPERVISORY_OVERSIGHT_QUEUE",
-                        f"Counsel draft submitted with Level-1 sign-off. Supervisory legal verification of Section 479 statutory entitlement required prior to court lodgment.",
-                        "UNDER_REVIEW", "Supervising Legal Officer -> SLSA Member Secretary",
-                        facility, district, custody_days, completeness_pct, has_conflict, legal_aid_need,
-                        assignment_status, status, hearing_date, 1
-                    ))
-                    synced_count += 1
+                    tasks_to_sync.append({
+                        "id": f"TASK-{cid}-SUP-REVIEW",
+                        "case_id": cid,
+                        "accused_name": cname,
+                        "task_type": "SUPERVISORY_DRAFT_REVIEW",
+                        "title": f"Supervisory Draft Review & Approval: {cname}",
+                        "description": f"Level-2 institutional verification of counsel sign-off and SHA-256 petition artifact for {cname}.",
+                        "owner_role": "SUPERVISING_LEGAL_OFFICER",
+                        "owner_user_id": None,
+                        "owner_name": "Supervising Legal Officer",
+                        "priority": "CRITICAL",
+                        "due_date": due_date,
+                        "source": "SUPERVISORY_OVERSIGHT_QUEUE",
+                        "reason": f"Counsel draft submitted with Level-1 sign-off. Supervisory legal verification of Section 479 statutory entitlement required prior to court lodgment.",
+                        "status": "UNDER_REVIEW",
+                        "escalation_path": "Supervising Legal Officer -> SLSA Member Secretary",
+                        "facility": facility,
+                        "district": district,
+                        "custody_duration_days": custody_days,
+                        "document_completeness_pct": completeness_pct,
+                        "has_data_conflict": has_conflict,
+                        "legal_aid_need": legal_aid_need,
+                        "assignment_status": assignment_status,
+                        "matter_status": status,
+                        "hearing_date": hearing_date,
+                        "is_consequential": 1,
+                    })
 
                 # 6. Defense Advocate: Lodge Approved Petition in Court
                 if assigned_id and assignment_status == "ASSIGNED" and status in ("APPROVED", "APPROVED_READY_FOR_FILING"):
                     due_date = (today + datetime.timedelta(days=1)).isoformat()
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO task_queue (
-                            id, case_id, accused_name, task_type, title, description,
-                            owner_role, owner_user_id, owner_name, priority, due_date, source, reason,
-                            status, escalation_path, facility, district, custody_duration_days,
-                            document_completeness_pct, has_data_conflict, legal_aid_need,
-                            assignment_status, matter_status, hearing_date, is_consequential, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-                        )
-                    """, (
-                        f"TASK-{cid}-COURT-FILING", cid, cname, "FILE_APPLICATION_IN_COURT",
-                        f"Lodge Approved Petition in Court: {cname}",
-                        f"File approved petition in {getattr(case, 'court_name', 'Competent Court')} and record authentic eFiling/CNR reference.",
-                        "DEFENSE_ADVOCATE", assigned_id, assigned_name or "Assigned Defense Counsel", "CRITICAL",
-                        due_date, "INSTITUTIONAL_APPROVAL_GATEWAY",
-                        f"Supervisory approval granted. Counsel is authorized to file in competent court registry and record formal filing acknowledgement.",
-                        "PENDING_ACTION", "Assigned Advocate -> DLSA Secretary",
-                        facility, district, custody_days, completeness_pct, has_conflict, legal_aid_need,
-                        assignment_status, status, hearing_date, 1
-                    ))
-                    synced_count += 1
+                    tasks_to_sync.append({
+                        "id": f"TASK-{cid}-COURT-FILING",
+                        "case_id": cid,
+                        "accused_name": cname,
+                        "task_type": "FILE_APPLICATION_IN_COURT",
+                        "title": f"Lodge Approved Petition in Court: {cname}",
+                        "description": f"File approved petition in {getattr(case, 'court_name', 'Competent Court')} and record authentic eFiling/CNR reference.",
+                        "owner_role": "DEFENSE_ADVOCATE",
+                        "owner_user_id": assigned_id,
+                        "owner_name": assigned_name or "Assigned Defense Counsel",
+                        "priority": "CRITICAL",
+                        "due_date": due_date,
+                        "source": "INSTITUTIONAL_APPROVAL_GATEWAY",
+                        "reason": f"Supervisory approval granted. Counsel is authorized to file in competent court registry and record formal filing acknowledgement.",
+                        "status": "PENDING_ACTION",
+                        "escalation_path": "Assigned Advocate -> DLSA Secretary",
+                        "facility": facility,
+                        "district": district,
+                        "custody_duration_days": custody_days,
+                        "document_completeness_pct": completeness_pct,
+                        "has_data_conflict": has_conflict,
+                        "legal_aid_need": legal_aid_need,
+                        "assignment_status": assignment_status,
+                        "matter_status": status,
+                        "hearing_date": hearing_date,
+                        "is_consequential": 1,
+                    })
 
                 # 7. Jail Officer: Confirm Prison Release
                 if status in ("RELEASE_WORKFLOW", "ORDER_RECEIVED") and getattr(case, "bail_granted", False):
                     due_date = today_iso
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO task_queue (
-                            id, case_id, accused_name, task_type, title, description,
-                            owner_role, owner_user_id, owner_name, priority, due_date, source, reason,
-                            status, escalation_path, facility, district, custody_duration_days,
-                            document_completeness_pct, has_data_conflict, legal_aid_need,
-                            assignment_status, matter_status, hearing_date, is_consequential, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-                        )
-                    """, (
-                        f"TASK-{cid}-PRISON-RELEASE", cid, cname, "CONFIRM_PRISON_RELEASE",
-                        f"Confirm Prison Release & Discharge: {cname}",
-                        f"Verify solvent surety / release order and confirm physical custody discharge of inmate {cname}.",
-                        "JAIL_OFFICER", None, "Jail Superintendent", "CRITICAL",
-                        due_date, "COURT_RELEASE_ORDER",
-                        f"Competent court granted bail and surety bond verified. Formal prison release memo and gate pass confirmation required from Superintendent.",
-                        "PENDING_ACTION", "Jail Superintendent -> Inspector General of Prisons",
-                        facility, district, custody_days, completeness_pct, has_conflict, 0,
-                        assignment_status, status, hearing_date, 1
-                    ))
-                    synced_count += 1
+                    tasks_to_sync.append({
+                        "id": f"TASK-{cid}-PRISON-RELEASE",
+                        "case_id": cid,
+                        "accused_name": cname,
+                        "task_type": "CONFIRM_PRISON_RELEASE",
+                        "title": f"Confirm Prison Release & Discharge: {cname}",
+                        "description": f"Verify solvent surety / release order and confirm physical custody discharge of inmate {cname}.",
+                        "owner_role": "JAIL_OFFICER",
+                        "owner_user_id": None,
+                        "owner_name": "Jail Superintendent",
+                        "priority": "CRITICAL",
+                        "due_date": due_date,
+                        "source": "COURT_RELEASE_ORDER",
+                        "reason": f"Competent court granted bail and surety bond verified. Formal prison release memo and gate pass confirmation required from Superintendent.",
+                        "status": "PENDING_ACTION",
+                        "escalation_path": "Jail Superintendent -> Inspector General of Prisons",
+                        "facility": facility,
+                        "district": district,
+                        "custody_duration_days": custody_days,
+                        "document_completeness_pct": completeness_pct,
+                        "has_data_conflict": has_conflict,
+                        "legal_aid_need": 0,
+                        "assignment_status": assignment_status,
+                        "matter_status": status,
+                        "hearing_date": hearing_date,
+                        "is_consequential": 1,
+                    })
 
                 # 8. Supervisory: Resolve Data Conflict / Proviso Exception
                 if status in ("DATA_CONFLICT", "MANUAL_REVIEW_REQUIRED", "TRANSITION_BLOCKED"):
                     due_date = (today + datetime.timedelta(days=1)).isoformat()
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO task_queue (
-                            id, case_id, accused_name, task_type, title, description,
-                            owner_role, owner_user_id, owner_name, priority, due_date, source, reason,
-                            status, escalation_path, facility, district, custody_duration_days,
-                            document_completeness_pct, has_data_conflict, legal_aid_need,
-                            assignment_status, matter_status, hearing_date, is_consequential, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-                        )
-                    """, (
-                        f"TASK-{cid}-EXCEPTION-RESOLVE", cid, cname, "RESOLVE_DATA_CONFLICT",
-                        f"Resolve Institutional Conflict / Exception: {cname}",
-                        f"Investigate and resolve data discrepancies across Police/Jail/Court registers for {cname}.",
-                        "SUPERVISING_LEGAL_OFFICER", None, "Supervising Legal Officer", "CRITICAL",
-                        due_date, "DATA_INTEGRITY_AUDITOR",
-                        f"Record discrepancies or statutory provisos block matter progression. Human supervisory review and authoritative determination required.",
-                        "EXCEPTION", "Supervising Legal Officer -> Principal District & Sessions Judge",
-                        facility, district, custody_days, completeness_pct, 1, legal_aid_need,
-                        assignment_status, status, hearing_date, 1
-                    ))
-                    synced_count += 1
+                    tasks_to_sync.append({
+                        "id": f"TASK-{cid}-EXCEPTION-RESOLVE",
+                        "case_id": cid,
+                        "accused_name": cname,
+                        "task_type": "RESOLVE_DATA_CONFLICT",
+                        "title": f"Resolve Institutional Conflict / Exception: {cname}",
+                        "description": f"Investigate and resolve data discrepancies across Police/Jail/Court registers for {cname}.",
+                        "owner_role": "SUPERVISING_LEGAL_OFFICER",
+                        "owner_user_id": None,
+                        "owner_name": "Supervising Legal Officer",
+                        "priority": "CRITICAL",
+                        "due_date": due_date,
+                        "source": "DATA_INTEGRITY_AUDITOR",
+                        "reason": f"Record discrepancies or statutory provisos block matter progression. Human supervisory review and authoritative determination required.",
+                        "status": "EXCEPTION",
+                        "escalation_path": "Supervising Legal Officer -> Principal District & Sessions Judge",
+                        "facility": facility,
+                        "district": district,
+                        "custody_duration_days": custody_days,
+                        "document_completeness_pct": completeness_pct,
+                        "has_data_conflict": 1,
+                        "legal_aid_need": legal_aid_need,
+                        "assignment_status": assignment_status,
+                        "matter_status": status,
+                        "hearing_date": hearing_date,
+                        "is_consequential": 1,
+                    })
 
                 # 9. DLSA: Hearing Follow-up & Court Production
                 if hearing_date and status in ("FILED", "HEARING_SCHEDULED", "ORDER_RECEIVED"):
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO task_queue (
-                            id, case_id, accused_name, task_type, title, description,
-                            owner_role, owner_user_id, owner_name, priority, due_date, source, reason,
-                            status, escalation_path, facility, district, custody_duration_days,
-                            document_completeness_pct, has_data_conflict, legal_aid_need,
-                            assignment_status, matter_status, hearing_date, is_consequential, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-                        )
-                    """, (
-                        f"TASK-{cid}-HEARING-FOLLOWUP", cid, cname, "HEARING_FOLLOW_UP",
-                        f"Track Court Production & Hearing: {cname}",
-                        f"Track scheduled court hearing and inmate production for {cname} ({cid}).",
-                        "DLSA_OFFICER", None, "DLSA Court Production Desk", "HIGH",
-                        hearing_date, "COURT_REGISTRY_SCHEDULE",
-                        f"Matter listed for hearing on {hearing_date}. DLSA coordination of prisoner production and defense representation required under High Court rules.",
-                        "PENDING_ACTION", "DLSA Secretary -> Chief Judicial Magistrate",
-                        facility, district, custody_days, completeness_pct, has_conflict, legal_aid_need,
-                        assignment_status, status, hearing_date, 0
-                    ))
-                    synced_count += 1
+                    tasks_to_sync.append({
+                        "id": f"TASK-{cid}-HEARING-FOLLOWUP",
+                        "case_id": cid,
+                        "accused_name": cname,
+                        "task_type": "HEARING_FOLLOW_UP",
+                        "title": f"Track Court Production & Hearing: {cname}",
+                        "description": f"Track scheduled court hearing and inmate production for {cname} ({cid}).",
+                        "owner_role": "DLSA_OFFICER",
+                        "owner_user_id": None,
+                        "owner_name": "DLSA Court Production Desk",
+                        "priority": "HIGH",
+                        "due_date": hearing_date,
+                        "source": "COURT_REGISTRY_SCHEDULE",
+                        "reason": f"Matter listed for hearing on {hearing_date}. DLSA coordination of prisoner production and defense representation required under High Court rules.",
+                        "status": "PENDING_ACTION",
+                        "escalation_path": "DLSA Secretary -> Chief Judicial Magistrate",
+                        "facility": facility,
+                        "district": district,
+                        "custody_duration_days": custody_days,
+                        "document_completeness_pct": completeness_pct,
+                        "has_data_conflict": has_conflict,
+                        "legal_aid_need": legal_aid_need,
+                        "assignment_status": assignment_status,
+                        "matter_status": status,
+                        "hearing_date": hearing_date,
+                        "is_consequential": 0,
+                    })
 
                 # 10. DLSA: Matter Completion Monitoring
                 if status in ("POST_RELEASE_FOLLOW_UP", "CLOSED"):
                     due_date = (today + datetime.timedelta(days=7)).isoformat()
                     task_st = "COMPLETED" if status == "CLOSED" else "UNDER_REVIEW"
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO task_queue (
-                            id, case_id, accused_name, task_type, title, description,
-                            owner_role, owner_user_id, owner_name, priority, due_date, source, reason,
-                            status, escalation_path, facility, district, custody_duration_days,
-                            document_completeness_pct, has_data_conflict, legal_aid_need,
-                            assignment_status, matter_status, hearing_date, is_consequential, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-                        )
-                    """, (
-                        f"TASK-{cid}-COMPLETION-MONITOR", cid, cname, "MATTER_COMPLETION_MONITORING",
-                        f"Monitor Post-Release & Matter Conclusion: {cname}",
-                        f"Post-release tracking and formal matter file closure review for {cname}.",
-                        "DLSA_OFFICER", None, "DLSA Case Monitoring Desk", "LOW",
-                        due_date, "POST_RELEASE_REGISTER",
-                        f"Accused released / matter transitioned to {status}. Verify trial monitoring records and formal closure checklist.",
-                        task_st, "DLSA Secretary -> State Legal Services Authority",
-                        facility, district, custody_days, completeness_pct, has_conflict, legal_aid_need,
-                        assignment_status, status, hearing_date, 0
-                    ))
-                    synced_count += 1
+                    tasks_to_sync.append({
+                        "id": f"TASK-{cid}-COMPLETION-MONITOR",
+                        "case_id": cid,
+                        "accused_name": cname,
+                        "task_type": "MATTER_COMPLETION_MONITORING",
+                        "title": f"Monitor Post-Release & Matter Conclusion: {cname}",
+                        "description": f"Post-release tracking and formal matter file closure review for {cname}.",
+                        "owner_role": "DLSA_OFFICER",
+                        "owner_user_id": None,
+                        "owner_name": "DLSA Case Monitoring Desk",
+                        "priority": "LOW",
+                        "due_date": due_date,
+                        "source": "POST_RELEASE_REGISTER",
+                        "reason": f"Accused released / matter transitioned to {status}. Verify trial monitoring records and formal closure checklist.",
+                        "status": task_st,
+                        "escalation_path": "DLSA Secretary -> State Legal Services Authority",
+                        "facility": facility,
+                        "district": district,
+                        "custody_duration_days": custody_days,
+                        "document_completeness_pct": completeness_pct,
+                        "has_data_conflict": has_conflict,
+                        "legal_aid_need": legal_aid_need,
+                        "assignment_status": assignment_status,
+                        "matter_status": status,
+                        "hearing_date": hearing_date,
+                        "is_consequential": 0,
+                    })
 
-            conn.commit()
+            if tasks_to_sync:
+                repo = get_task_repository()
+                repo.upsert_tasks(tasks_to_sync)
 
-            # Authoritative Cloud Persistence in Supabase PostgreSQL
-            try:
-                from app.supabase_adapter import is_supabase_active, supa_upsert_task_queue_items
-                if is_supabase_active():
-                    cur_supa = conn.cursor()
-                    cur_supa.row_factory = sqlite3.Row
-                    all_t = [dict(r) for r in cur_supa.execute("SELECT * FROM task_queue").fetchall()]
-                    if all_t:
-                        supa_upsert_task_queue_items(all_t)
-            except Exception as supa_err:
-                logger.warning(f"Supabase task_queue sync note: {supa_err}")
+            return len(tasks_to_sync)
         except Exception as e:
             logger.warning(f"Failed to sync operational tasks: {e}", exc_info=True)
-        finally:
-            if should_close:
-                conn.close()
-
-        return synced_count
+            return 0
 
     @classmethod
     def get_task_queue(
@@ -426,190 +464,28 @@ class TaskService:
     ) -> List[Dict[str, Any]]:
         """
         Retrieve role-scoped, filterable, sortable operational task queue items.
-        Enforces server-side institutional boundaries:
-        - JAIL_OFFICER: sees tasks scoped to their assigned facilities or owner_role=JAIL_OFFICER
-        - DLSA_OFFICER: sees legal aid intake, document, and assignment tasks in their district
-        - SUPERVISING_LEGAL_OFFICER: sees supervisory review, conflict, and oversight tasks
-        - DEFENSE_ADVOCATE: strictly sees tasks for cases assigned to them
-        - POLICE_OFFICER: station-scoped records only
-        - PLATFORM_ADMIN / GOV_ADMIN: systemic oversight
+        Enforces server-side institutional boundaries via authoritative repository.
         """
         cls.sync_operational_tasks()
-
-        # ── Authoritative Primary: Supabase PostgreSQL ────────────────────────
-        try:
-            from app.supabase_adapter import is_supabase_active, supa_get_task_queue
-            if is_supabase_active():
-                role_str = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
-                user_id_str = getattr(current_user, "id", "")
-                user_facs = getattr(current_user, "facility_ids", []) or []
-                user_dist = getattr(current_user, "district", None) or getattr(current_user, "extra_claims", {}).get("district")
-                linked_case = getattr(current_user, "linked_case_id", None)
-                station = getattr(current_user, "police_station", None) or getattr(current_user, "extra_claims", {}).get("police_station", "")
-                supa_items = supa_get_task_queue(
-                    current_user_role=role_str,
-                    user_id=user_id_str,
-                    user_facilities=user_facs,
-                    user_district=user_dist,
-                    linked_case_id=linked_case,
-                    police_station=station,
-                    facility=facility,
-                    district=district,
-                    priority=priority,
-                    custody_duration_min=custody_duration_min,
-                    document_completeness_max=document_completeness_max,
-                    legal_aid_need=legal_aid_need,
-                    hearing_date_from=hearing_date_from,
-                    hearing_date_to=hearing_date_to,
-                    has_data_conflict=has_data_conflict,
-                    assignment_status=assignment_status,
-                    matter_status=matter_status,
-                    status=status,
-                    search=search,
-                    sort_by=sort_by,
-                    sort_order=sort_order,
-                )
-                if supa_items:
-                    return supa_items
-        except Exception as supa_err:
-            logger.warning(f"Supabase get_task_queue error: {supa_err}. Falling back to SQLite.")
-
-        # ── Local Developmental Sandbox: SQLite Fallback ──────────────────────
-        conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
-        try:
-            cursor = conn.cursor()
-
-            role = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
-            user_id = getattr(current_user, "id", "")
-            user_full = (getattr(current_user, "full_name", "") or "").lower()
-            user_facs = getattr(current_user, "facility_ids", []) or []
-            user_dist = getattr(current_user, "district", None) or getattr(current_user, "extra_claims", {}).get("district")
-            linked_case = getattr(current_user, "linked_case_id", None)
-
-            query = "SELECT * FROM task_queue WHERE 1=1"
-            params: List[Any] = []
-
-            # ── Strict Role Boundary Scoping ──────────────────────────────────────
-            if role == "JAIL_OFFICER":
-                query += " AND owner_role = 'JAIL_OFFICER'"
-                if user_facs:
-                    placeholders = ", ".join("?" for _ in user_facs)
-                    query += f" AND facility IN ({placeholders})"
-                    params.extend(user_facs)
-
-            elif role in ("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE"):
-                query += " AND owner_role = 'DEFENSE_ADVOCATE' AND assignment_status = 'ASSIGNED'"
-                query += " AND matter_status NOT IN ('INTAKE', 'INTAKE_PENDING', 'DETECTED', 'VERIFICATION', 'CUSTODY_VERIFIED', 'CUSTODY_PENDING', 'REVIEW', 'LEGAL_AID_REQUIRED', 'LEGAL_NEED_IDENTIFIED', 'PRE_INTAKE', 'DOCUMENTS_MISSING', 'DRAFT_INTAKE')"
-                if user_id == "demo_advocate":
-                    query += " AND (owner_user_id IN ('demo_advocate', 'adv_001', 'adv_rajesh_sharma') OR case_id IN (SELECT case_id FROM cases WHERE assigned_lawyer_id IN ('demo_advocate', 'adv_001', 'adv_rajesh_sharma') UNION SELECT accused_id FROM court_cases WHERE assigned_lawyer_id IN ('demo_advocate', 'adv_001', 'adv_rajesh_sharma')))"
-                elif user_id == "demo_ext_advocate":
-                    query += " AND (owner_user_id IN ('demo_ext_advocate', 'adv_ext_001') OR case_id IN (SELECT case_id FROM cases WHERE assigned_lawyer_id IN ('demo_ext_advocate', 'adv_ext_001') UNION SELECT accused_id FROM court_cases WHERE assigned_lawyer_id IN ('demo_ext_advocate', 'adv_ext_001')))"
-                else:
-                    query += " AND (owner_user_id = ? OR case_id IN (SELECT case_id FROM cases WHERE assigned_lawyer_id = ? UNION SELECT accused_id FROM court_cases WHERE assigned_lawyer_id = ?))"
-                    params.extend([user_id, user_id, user_id])
-
-            elif role == "DLSA_OFFICER":
-                query += " AND owner_role IN ('DLSA_OFFICER', 'SUPERVISING_LEGAL_OFFICER')"
-                if user_dist:
-                    query += " AND district = ?"
-                    params.append(user_dist)
-
-            elif role == "SUPERVISING_LEGAL_OFFICER":
-                query += " AND owner_role IN ('SUPERVISING_LEGAL_OFFICER', 'DLSA_OFFICER')"
-                query += " AND (task_type != 'SUPERVISORY_DRAFT_REVIEW' OR assignment_status = 'ASSIGNED')"
-                if user_dist:
-                    query += " AND district = ?"
-                    params.append(user_dist)
-
-            elif role == "POLICE_OFFICER":
-                station = getattr(current_user, "police_station", None) or getattr(current_user, "extra_claims", {}).get("police_station", "")
-                if station:
-                    query += " AND facility = ?"
-                    params.append(station)
-                else:
-                    query += " AND 1=0"
-
-            elif role in ("ACCUSED_USER", "FAMILY_GUARDIAN"):
-                if linked_case:
-                    query += " AND case_id = ?"
-                    params.append(linked_case)
-                else:
-                    query += " AND 1=0"
-
-            # ── Dynamic Filter Criteria ───────────────────────────────────────────
-            if facility:
-                query += " AND facility LIKE ?"
-                params.append(f"%{facility}%")
-
-            if district:
-                query += " AND district LIKE ?"
-                params.append(f"%{district}%")
-
-            if priority:
-                query += " AND priority = ?"
-                params.append(priority.upper())
-
-            if custody_duration_min is not None:
-                query += " AND custody_duration_days >= ?"
-                params.append(custody_duration_min)
-
-            if document_completeness_max is not None:
-                query += " AND document_completeness_pct <= ?"
-                params.append(document_completeness_max)
-
-            if legal_aid_need is not None:
-                query += " AND legal_aid_need = ?"
-                params.append(1 if legal_aid_need else 0)
-
-            if has_data_conflict is not None:
-                query += " AND has_data_conflict = ?"
-                params.append(1 if has_data_conflict else 0)
-
-            if assignment_status:
-                query += " AND assignment_status = ?"
-                params.append(assignment_status.upper())
-
-            if matter_status:
-                query += " AND matter_status = ?"
-                params.append(matter_status.upper())
-
-            today_iso = datetime.date.today().isoformat()
-            if status:
-                if status.upper() == "OVERDUE":
-                    query += " AND (status = 'OVERDUE' OR (status != 'COMPLETED' AND due_date < ?))"
-                    params.append(today_iso)
-                else:
-                    query += " AND status = ?"
-                    params.append(status.upper())
-
-            if search:
-                s_term = f"%{search.strip()}%"
-                query += " AND (title LIKE ? OR reason LIKE ? OR accused_name LIKE ? OR case_id LIKE ?)"
-                params.extend([s_term, s_term, s_term, s_term])
-
-            # ── Sorting ───────────────────────────────────────────────────────────
-            order_dir = "DESC" if (sort_order or "").lower() == "desc" else "ASC"
-            valid_sort_fields = {
-                "due_date": "due_date",
-                "priority": "CASE priority WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 WHEN 'LOW' THEN 4 ELSE 5 END",
-                "custody_duration_days": "custody_duration_days",
-                "created_at": "created_at",
-                "status": "status",
-            }
-            sort_expr = valid_sort_fields.get(sort_by or "due_date", "due_date")
-            query += f" ORDER BY {sort_expr} {order_dir}"
-
-            rows = cursor.execute(query, params).fetchall()
-            items = []
-            for r in rows:
-                d = dict(r)
-                if d.get("status") not in ("COMPLETED", "EXCEPTION") and d.get("due_date") and d["due_date"] < today_iso:
-                    d["status"] = "OVERDUE"
-                items.append(d)
-            return items
-        finally:
-            conn.close()
+        repo = get_task_repository()
+        return repo.get_task_queue(
+            current_user=current_user,
+            facility=facility,
+            district=district,
+            priority=priority,
+            custody_duration_min=custody_duration_min,
+            document_completeness_max=document_completeness_max,
+            legal_aid_need=legal_aid_need,
+            hearing_date_from=hearing_date_from,
+            hearing_date_to=hearing_date_to,
+            has_data_conflict=has_data_conflict,
+            assignment_status=assignment_status,
+            matter_status=matter_status,
+            status=status,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
 
     @classmethod
     def update_task(
@@ -619,73 +495,41 @@ class TaskService:
         current_user: AuthUser,
     ) -> Dict[str, Any]:
         """Update task status, priority, or owner for safe, non-consequential workflow adjustments."""
-        conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
-        try:
-            cursor = conn.cursor()
+        repo = get_task_repository()
+        task = repo.get_task_by_id(task_id)
+        if not task:
+            raise LookupError(f"Task '{task_id}' not found.")
 
-            task_row = cursor.execute("SELECT * FROM task_queue WHERE id = ?", (task_id,)).fetchone()
-            if not task_row:
-                raise LookupError(f"Task '{task_id}' not found.")
+        # Prohibit mutating consequential tasks through generic task update
+        if task.get("is_consequential") and updates.get("status") in ("COMPLETED", "APPROVED", "FILED", "RELEASED"):
+            raise PermissionError(
+                "Consequential task cannot be completed through generic metadata update. "
+                "Must be executed via authoritative legal or custody transition gateway."
+            )
 
-            task = dict(task_row)
+        clean_updates: Dict[str, Any] = {}
+        if "status" in updates and updates["status"]:
+            clean_updates["status"] = updates["status"]
+            if updates["status"] == "COMPLETED":
+                clean_updates["completed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                clean_updates["completed_by"] = current_user.full_name or current_user.id
 
-            # Prohibit mutating consequential tasks through generic task update
-            if task.get("is_consequential") and updates.get("status") in ("COMPLETED", "APPROVED", "FILED", "RELEASED"):
-                raise PermissionError(
-                    "Consequential task cannot be completed through generic metadata update. "
-                    "Must be executed via authoritative legal or custody transition gateway."
-                )
+        if "priority" in updates and updates["priority"]:
+            clean_updates["priority"] = updates["priority"]
 
-            fields = []
-            vals = []
-            if "status" in updates and updates["status"]:
-                fields.append("status = ?")
-                vals.append(updates["status"])
-                if updates["status"] == "COMPLETED":
-                    fields.append("completed_at = CURRENT_TIMESTAMP")
-                    fields.append("completed_by = ?")
-                    vals.append(current_user.full_name or current_user.id)
+        if "owner_user_id" in updates:
+            clean_updates["owner_user_id"] = updates["owner_user_id"]
 
-            if "priority" in updates and updates["priority"]:
-                fields.append("priority = ?")
-                vals.append(updates["priority"])
+        if "owner_name" in updates:
+            clean_updates["owner_name"] = updates["owner_name"]
 
-            if "owner_user_id" in updates:
-                fields.append("owner_user_id = ?")
-                vals.append(updates["owner_user_id"])
+        if "due_date" in updates and updates["due_date"]:
+            clean_updates["due_date"] = updates["due_date"]
 
-            if "owner_name" in updates:
-                fields.append("owner_name = ?")
-                vals.append(updates["owner_name"])
-
-            if "due_date" in updates and updates["due_date"]:
-                fields.append("due_date = ?")
-                vals.append(updates["due_date"])
-
-            fields.append("updated_at = CURRENT_TIMESTAMP")
-            vals.append(task_id)
-
-            cursor.execute(f"UPDATE task_queue SET {', '.join(fields)} WHERE id = ?", vals)
-            conn.commit()
-
-            # Authoritative Cloud Persistence in Supabase PostgreSQL
-            try:
-                from app.supabase_adapter import is_supabase_active, supa_update_task
-                if is_supabase_active():
-                    supa_updates = {k: v for k, v in updates.items() if k in ("status", "priority", "owner_user_id", "owner_name", "due_date")}
-                    if updates.get("status") == "COMPLETED":
-                        supa_updates["completed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                        supa_updates["completed_by"] = current_user.full_name or current_user.id
-                    supa_updates["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                    supa_update_task(task_id, supa_updates)
-            except Exception as e:
-                logger.warning(f"Supabase task update note: {e}")
-
-            updated_row = cursor.execute("SELECT * FROM task_queue WHERE id = ?", (task_id,)).fetchone()
-            return dict(updated_row)
-        finally:
-            conn.close()
+        updated = repo.update_task(task_id, clean_updates)
+        if not updated:
+            raise LookupError(f"Task '{task_id}' could not be updated.")
+        return updated
 
     @classmethod
     def execute_bulk_action(
@@ -720,94 +564,49 @@ class TaskService:
                 f"Unsupported bulk action '{action}'. Permitted safe bulk actions: {sorted(list(safe_actions))}."
             )
 
-        conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
-        try:
-            cursor = conn.cursor()
+        repo = get_task_repository()
+        updated_ids = []
+        skipped_ids = []
 
-            updated_ids = []
-            skipped_ids = []
+        for tid in task_ids:
+            row = repo.get_task_by_id(tid)
+            if not row:
+                skipped_ids.append(tid)
+                continue
 
-            for tid in task_ids:
-                row = cursor.execute("SELECT * FROM task_queue WHERE id = ?", (tid,)).fetchone()
-                if not row:
+            t = dict(row)
+            item_updates: Dict[str, Any] = {}
+            if act_upper == "ASSIGN_OWNER":
+                item_updates["owner_user_id"] = payload.get("owner_user_id")
+                item_updates["owner_name"] = payload.get("owner_name")
+            elif act_upper == "MARK_REVIEWED":
+                if t.get("is_consequential"):
                     skipped_ids.append(tid)
                     continue
+                item_updates["status"] = "UNDER_REVIEW"
+            elif act_upper == "ACKNOWLEDGE":
+                item_updates["status"] = "PENDING_ACTION" if t.get("status") == "NEW" else t.get("status")
+            elif act_upper == "UPDATE_METADATA":
+                prio = payload.get("priority")
+                if prio:
+                    item_updates["priority"] = prio.upper()
 
-                t = dict(row)
-                if act_upper == "ASSIGN_OWNER":
-                    owner_uid = payload.get("owner_user_id")
-                    owner_nm = payload.get("owner_name")
-                    cursor.execute(
-                        "UPDATE task_queue SET owner_user_id = ?, owner_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (owner_uid, owner_nm, tid),
-                    )
+            if item_updates:
+                res = repo.update_task(tid, item_updates)
+                if res:
                     updated_ids.append(tid)
+                else:
+                    skipped_ids.append(tid)
 
-                elif act_upper == "MARK_REVIEWED":
-                    if t.get("is_consequential"):
-                        skipped_ids.append(tid)
-                        continue
-                    cursor.execute(
-                        "UPDATE task_queue SET status = 'UNDER_REVIEW', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (tid,),
-                    )
-                    updated_ids.append(tid)
-
-                elif act_upper == "ACKNOWLEDGE":
-                    new_status = "PENDING_ACTION" if t.get("status") == "NEW" else t.get("status")
-                    cursor.execute(
-                        "UPDATE task_queue SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (new_status, tid),
-                    )
-                    updated_ids.append(tid)
-
-                elif act_upper == "UPDATE_METADATA":
-                    prio = payload.get("priority")
-                    if prio:
-                        cursor.execute(
-                            "UPDATE task_queue SET priority = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                            (prio.upper(), tid),
-                        )
-                        updated_ids.append(tid)
-
-            conn.commit()
-
-            # Authoritative Cloud Persistence in Supabase PostgreSQL
-            if updated_ids:
-                try:
-                    from app.supabase_adapter import is_supabase_active, supa_bulk_update_tasks
-                    if is_supabase_active():
-                        supa_payload: Dict[str, Any] = {
-                            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
-                        }
-                        if act_upper == "ASSIGN_OWNER":
-                            if payload.get("owner_user_id"):
-                                supa_payload["owner_user_id"] = payload.get("owner_user_id")
-                            if payload.get("owner_name"):
-                                supa_payload["owner_name"] = payload.get("owner_name")
-                        elif act_upper == "MARK_REVIEWED":
-                            supa_payload["status"] = "UNDER_REVIEW"
-                        elif act_upper == "ACKNOWLEDGE":
-                            supa_payload["status"] = "PENDING_ACTION"
-                        elif act_upper == "UPDATE_METADATA":
-                            if payload.get("priority"):
-                                supa_payload["priority"] = payload.get("priority").upper()
-                        supa_bulk_update_tasks(updated_ids, supa_payload)
-                except Exception as supa_bulk_err:
-                    logger.warning(f"Supabase bulk task update note: {supa_bulk_err}")
-
-            return {
-                "action": act_upper,
-                "total_requested": len(task_ids),
-                "updated_count": len(updated_ids),
-                "updated_task_ids": updated_ids,
-                "skipped_count": len(skipped_ids),
-                "skipped_task_ids": skipped_ids,
-                "message": f"Successfully executed safe bulk action '{act_upper}' on {len(updated_ids)} items.",
-            }
-        finally:
-            conn.close()
+        return {
+            "action": act_upper,
+            "total_requested": len(task_ids),
+            "updated_count": len(updated_ids),
+            "updated_task_ids": updated_ids,
+            "skipped_count": len(skipped_ids),
+            "skipped_task_ids": skipped_ids,
+            "message": f"Successfully executed safe bulk action '{act_upper}' on {len(updated_ids)} items.",
+        }
 
     @classmethod
     def intake_new_custody_record(
@@ -1270,77 +1069,40 @@ class TaskService:
         due_date = (today + datetime.timedelta(days=3)).isoformat()
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-        # 1. Create or update operational task in task_queue
+        # 1. Create or update operational task via authoritative task repository
         task_id = f"TASK-{case_id}-EXPEDITE-DOCS"
         task_title = f"Expedite Missing Records for {case.case_id} ({case.name})"
         task_reason = f"DLSA document coordination request: {clean_notes}"
 
-        conn = get_db_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO task_queue (
-                    id, case_id, accused_name, task_type, title, description,
-                    owner_role, owner_user_id, owner_name, priority, due_date,
-                    source, reason, status, escalation_path, facility, district,
-                    custody_duration_days, document_completeness_pct, has_data_conflict,
-                    legal_aid_need, assignment_status, matter_status, is_consequential,
-                    created_at, updated_at
-                ) VALUES (
-                    ?, ?, ?, 'EXPEDITE_MISSING_CHARGE_SHEET', ?, ?,
-                    'DLSA_OFFICER', ?, ?, 'HIGH', ?,
-                    'DLSA Document Coordination Desk', ?, 'PENDING_ACTION',
-                    'Supervising Legal Officer & CMM Court', ?, ?,
-                    ?, ?, 0, 1, ?, ?, 0,
-                    ?, ?
-                )
-            """, (
-                task_id, case.case_id, case.name, task_title, clean_notes,
-                current_user.id, current_user.full_name or "DLSA Legal Aid Officer", due_date,
-                task_reason, case.jail_location or "Designated Correctional Facility",
-                case.district or "Competent Judicial District",
-                case.custody_days, 50, case.assignment_status,
-                case.status.value if hasattr(case.status, "value") else str(case.status),
-                now_iso, now_iso,
-            ))
-            conn.commit()
-
-            # Supabase PostgreSQL sync
-            try:
-                from app.supabase_adapter import get_supabase_client, is_supabase_active
-                if is_supabase_active():
-                    cli = get_supabase_client()
-                    if cli:
-                        cli.table("task_queue").upsert({
-                            "id": task_id,
-                            "case_id": case.case_id,
-                            "accused_name": case.name,
-                            "task_type": "EXPEDITE_MISSING_CHARGE_SHEET",
-                            "title": task_title,
-                            "description": clean_notes,
-                            "owner_role": "DLSA_OFFICER",
-                            "owner_user_id": current_user.id,
-                            "owner_name": current_user.full_name or "DLSA Legal Aid Officer",
-                            "priority": "HIGH",
-                            "due_date": due_date,
-                            "source": "DLSA Document Coordination Desk",
-                            "reason": task_reason,
-                            "status": "PENDING_ACTION",
-                            "escalation_path": "Supervising Legal Officer & CMM Court",
-                            "facility": case.jail_location,
-                            "district": case.district,
-                            "custody_duration_days": case.custody_days,
-                            "document_completeness_pct": 50,
-                            "has_data_conflict": 0,
-                            "legal_aid_need": 1,
-                            "assignment_status": case.assignment_status,
-                            "matter_status": case.status.value if hasattr(case.status, "value") else str(case.status),
-                            "is_consequential": 0,
-                        }).execute()
-            except Exception as supa_err:
-                logger.warning(f"Supabase task_queue expedite sync note: {supa_err}")
-        finally:
-            conn.close()
+        task_item = {
+            "id": task_id,
+            "case_id": case.case_id,
+            "accused_name": case.name,
+            "task_type": "EXPEDITE_MISSING_CHARGE_SHEET",
+            "title": task_title,
+            "description": clean_notes,
+            "owner_role": "DLSA_OFFICER",
+            "owner_user_id": current_user.id,
+            "owner_name": current_user.full_name or "DLSA Legal Aid Officer",
+            "priority": "HIGH",
+            "due_date": due_date,
+            "source": "DLSA Document Coordination Desk",
+            "reason": task_reason,
+            "status": "PENDING_ACTION",
+            "escalation_path": "Supervising Legal Officer & CMM Court",
+            "facility": case.jail_location or "Designated Correctional Facility",
+            "district": case.district or "Competent Judicial District",
+            "custody_duration_days": case.custody_days,
+            "document_completeness_pct": 50,
+            "has_data_conflict": 0,
+            "legal_aid_need": 1,
+            "assignment_status": case.assignment_status,
+            "matter_status": case.status.value if hasattr(case.status, "value") else str(case.status),
+            "is_consequential": 0,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        get_task_repository().upsert_task(task_item)
 
         # 2. Append Timeline Event
         ev = TimelineEvent(

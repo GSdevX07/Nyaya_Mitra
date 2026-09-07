@@ -14,6 +14,10 @@ import {
   Scale,
   RefreshCw,
   ExternalLink,
+  Filter,
+  RotateCcw,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import {
   fetchTaskQueue,
@@ -48,11 +52,61 @@ export function UniversalTaskQueue({
   // Filters
   const [search, setSearch] = useState("");
   const [activePreset, setActivePreset] = useState<"ALL" | "OVERDUE" | "CRITICAL" | "WAITING_DOCS" | "MY_TASKS">("ALL");
-  const filterFacility = initialFilter.facility || "";
+  const [filterFacility, setFilterFacility] = useState(initialFilter.facility || "");
+  const [filterDistrict, setFilterDistrict] = useState(initialFilter.district || "");
   const [filterPriority, setFilterPriority] = useState(initialFilter.priority || "");
+  const [custodyDurationMin, setCustodyDurationMin] = useState<string>(
+    initialFilter.custody_duration_min !== undefined ? String(initialFilter.custody_duration_min) : ""
+  );
+  const [documentCompletenessMax, setDocumentCompletenessMax] = useState<string>(
+    initialFilter.document_completeness_max !== undefined ? String(initialFilter.document_completeness_max) : ""
+  );
+  const [legalAidNeed, setLegalAidNeed] = useState<string>(
+    initialFilter.legal_aid_need !== undefined ? String(initialFilter.legal_aid_need) : ""
+  );
+  const [hearingDateFrom, setHearingDateFrom] = useState<string>(initialFilter.hearing_date_from || "");
+  const [hearingDateTo, setHearingDateTo] = useState<string>(initialFilter.hearing_date_to || "");
+  const [hasDataConflict, setHasDataConflict] = useState<string>(
+    initialFilter.has_data_conflict !== undefined ? String(initialFilter.has_data_conflict) : ""
+  );
+  const [matterStatus, setMatterStatus] = useState<string>(initialFilter.matter_status || "");
   const filterStatus = initialFilter.status || "";
   const [sortBy, setSortBy] = useState("due_date");
-  const sortOrder = "asc";
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">((initialFilter.sort_order as any) || "asc");
+  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
+
+  // Active filters count
+  const activeFilterCount = [
+    Boolean(search.trim()),
+    activePreset !== "ALL",
+    Boolean(filterPriority),
+    Boolean(filterFacility.trim()),
+    Boolean(filterDistrict.trim()),
+    Boolean(custodyDurationMin),
+    Boolean(documentCompletenessMax),
+    Boolean(legalAidNeed),
+    Boolean(hearingDateFrom),
+    Boolean(hearingDateTo),
+    Boolean(hasDataConflict),
+    Boolean(matterStatus),
+  ].filter(Boolean).length;
+
+  const handleClearAllFilters = () => {
+    setSearch("");
+    setActivePreset("ALL");
+    setFilterPriority("");
+    setFilterFacility("");
+    setFilterDistrict("");
+    setCustodyDurationMin("");
+    setDocumentCompletenessMax("");
+    setLegalAidNeed("");
+    setHearingDateFrom("");
+    setHearingDateTo("");
+    setHasDataConflict("");
+    setMatterStatus("");
+    setSortBy("due_date");
+    setSortOrder("asc");
+  };
 
   // Selection for bulk action
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
@@ -71,9 +125,17 @@ export function UniversalTaskQueue({
     try {
       const params: TaskFilterParams = {
         ...initialFilter,
-        search: search || undefined,
-        facility: filterFacility || undefined,
+        search: search.trim() || undefined,
+        facility: filterFacility.trim() || undefined,
+        district: filterDistrict.trim() || undefined,
         priority: filterPriority || undefined,
+        custody_duration_min: custodyDurationMin ? parseInt(custodyDurationMin, 10) : undefined,
+        document_completeness_max: documentCompletenessMax ? parseInt(documentCompletenessMax, 10) : undefined,
+        legal_aid_need: legalAidNeed === "true" ? true : legalAidNeed === "false" ? false : undefined,
+        hearing_date_from: hearingDateFrom || undefined,
+        hearing_date_to: hearingDateTo || undefined,
+        has_data_conflict: hasDataConflict === "true" ? true : hasDataConflict === "false" ? false : undefined,
+        matter_status: matterStatus || undefined,
         status: filterStatus || undefined,
         sort_by: sortBy,
         sort_order: sortOrder,
@@ -108,7 +170,23 @@ export function UniversalTaskQueue({
 
   useEffect(() => {
     loadTasks();
-  }, [search, activePreset, filterFacility, filterPriority, filterStatus, sortBy, sortOrder]);
+  }, [
+    search,
+    activePreset,
+    filterFacility,
+    filterDistrict,
+    filterPriority,
+    custodyDurationMin,
+    documentCompletenessMax,
+    legalAidNeed,
+    hearingDateFrom,
+    hearingDateTo,
+    hasDataConflict,
+    matterStatus,
+    filterStatus,
+    sortBy,
+    sortOrder,
+  ]);
 
   const handleSelectAll = () => {
     if (selectedTaskIds.length === tasks.length) {
@@ -299,8 +377,8 @@ export function UniversalTaskQueue({
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5">
-        <div className="relative md:col-span-2">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5">
+        <div className="relative md:col-span-5">
           <Search className="w-4 h-4 absolute left-3 top-2.5 text-muted-foreground" />
           <input
             type="text"
@@ -311,7 +389,7 @@ export function UniversalTaskQueue({
           />
         </div>
 
-        <div>
+        <div className="md:col-span-2">
           <select
             value={filterPriority}
             onChange={(e) => setFilterPriority(e.target.value)}
@@ -325,7 +403,7 @@ export function UniversalTaskQueue({
           </select>
         </div>
 
-        <div>
+        <div className="md:col-span-3">
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
@@ -337,7 +415,216 @@ export function UniversalTaskQueue({
             <option value="created_at">Sort by Created Date</option>
           </select>
         </div>
+
+        <div className="md:col-span-2 flex items-center gap-1.5">
+          <button
+            onClick={() => setShowFiltersPanel(!showFiltersPanel)}
+            className={`flex-1 py-1.5 px-2.5 text-xs font-mono rounded-sm border flex items-center justify-between transition-colors ${
+              showFiltersPanel || activeFilterCount > 0
+                ? "bg-secondary text-foreground border-primary font-bold"
+                : "bg-card text-muted-foreground border-border hover:text-foreground hover:bg-secondary"
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              <Filter className="w-3.5 h-3.5" />
+              <span>Filters</span>
+              {activeFilterCount > 0 && (
+                <span className="px-1.5 py-0.2 bg-emerald-500/10 text-emerald-600 border border-emerald-500/30 text-[10px] rounded-full font-bold">
+                  {activeFilterCount}
+                </span>
+              )}
+            </span>
+            {showFiltersPanel ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {activeFilterCount > 0 && (
+            <button
+              onClick={handleClearAllFilters}
+              title="Clear all filters"
+              className="p-1.5 bg-secondary text-muted-foreground hover:text-foreground border border-border rounded-sm transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Dedicated Stage 10 Operational Filters Panel */}
+      {showFiltersPanel && (
+        <div className="p-3.5 bg-card border border-border rounded-sm space-y-3 shadow-sm">
+          <div className="flex items-center justify-between border-b border-border pb-2 text-xs font-mono">
+            <div className="flex items-center gap-2 text-foreground font-bold">
+              <Filter className="w-3.5 h-3.5 text-primary" />
+              <span>Stage 10 Operational Filter Criteria</span>
+              {activeFilterCount > 0 && (
+                <span className="px-2 py-0.5 text-[10px] bg-emerald-500/10 text-emerald-600 border border-emerald-500/30 rounded-full font-bold">
+                  {activeFilterCount} active
+                </span>
+              )}
+            </div>
+            {activeFilterCount > 0 && (
+              <button
+                onClick={handleClearAllFilters}
+                className="text-muted-foreground hover:text-foreground text-[11px] flex items-center gap-1 font-mono hover:underline"
+              >
+                <RotateCcw className="w-3 h-3" /> Clear All Filters
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs font-mono">
+            {/* 1. Facility */}
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">
+                1. Facility / Prison
+              </label>
+              <input
+                type="text"
+                value={filterFacility}
+                onChange={(e) => setFilterFacility(e.target.value)}
+                placeholder="e.g. Tihar Jail No. 04"
+                className="w-full px-2.5 py-1.5 bg-secondary border border-border rounded-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-sans text-xs"
+              />
+            </div>
+
+            {/* 2. District */}
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">
+                2. Judicial District
+              </label>
+              <input
+                type="text"
+                value={filterDistrict}
+                onChange={(e) => setFilterDistrict(e.target.value)}
+                placeholder="e.g. Central Delhi"
+                className="w-full px-2.5 py-1.5 bg-secondary border border-border rounded-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-sans text-xs"
+              />
+            </div>
+
+            {/* 3. Custody Duration */}
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">
+                3. Min Custody Duration
+              </label>
+              <select
+                value={custodyDurationMin}
+                onChange={(e) => setCustodyDurationMin(e.target.value)}
+                className="w-full py-1.5 px-2.5 bg-secondary border border-border rounded-sm text-foreground focus:outline-none text-xs font-mono"
+              >
+                <option value="">Any Custody Duration</option>
+                <option value="30">≥ 30 Days (1 Month)</option>
+                <option value="60">≥ 60 Days (2 Months)</option>
+                <option value="90">≥ 90 Days (Quarter)</option>
+                <option value="180">≥ 180 Days (Half-Year)</option>
+                <option value="365">≥ 365 Days (1 Year+)</option>
+                <option value="730">≥ 730 Days (2 Years+)</option>
+              </select>
+            </div>
+
+            {/* 4. Document Completeness */}
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">
+                4. Max Doc Completeness
+              </label>
+              <select
+                value={documentCompletenessMax}
+                onChange={(e) => setDocumentCompletenessMax(e.target.value)}
+                className="w-full py-1.5 px-2.5 bg-secondary border border-border rounded-sm text-foreground focus:outline-none text-xs font-mono"
+              >
+                <option value="">Any Completeness</option>
+                <option value="25">≤ 25% (Critical Missing)</option>
+                <option value="50">≤ 50% (Substantial Missing)</option>
+                <option value="75">≤ 75% (Minor Missing)</option>
+                <option value="99">&lt; 100% (Any Incomplete)</option>
+              </select>
+            </div>
+
+            {/* 5. Legal-Aid Need */}
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">
+                5. Legal-Aid Need
+              </label>
+              <select
+                value={legalAidNeed}
+                onChange={(e) => setLegalAidNeed(e.target.value)}
+                className="w-full py-1.5 px-2.5 bg-secondary border border-border rounded-sm text-foreground focus:outline-none text-xs font-mono"
+              >
+                <option value="">All Matters</option>
+                <option value="true">Legal-Aid Required</option>
+                <option value="false">Private Counsel / Covered</option>
+              </select>
+            </div>
+
+            {/* 6. Unresolved Data Conflicts */}
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">
+                6. Data Conflicts / Exceptions
+              </label>
+              <select
+                value={hasDataConflict}
+                onChange={(e) => setHasDataConflict(e.target.value)}
+                className="w-full py-1.5 px-2.5 bg-secondary border border-border rounded-sm text-foreground focus:outline-none text-xs font-mono"
+              >
+                <option value="">All Matters</option>
+                <option value="true">Unresolved Conflicts Only</option>
+                <option value="false">Verified / Clean Only</option>
+              </select>
+            </div>
+
+            {/* 7. Current Verdict / Matter State */}
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">
+                7. Matter State / Stage
+              </label>
+              <select
+                value={matterStatus}
+                onChange={(e) => setMatterStatus(e.target.value)}
+                className="w-full py-1.5 px-2.5 bg-secondary border border-border rounded-sm text-foreground focus:outline-none text-xs font-mono"
+              >
+                <option value="">All Matter Stages</option>
+                <option value="INTAKE">INTAKE</option>
+                <option value="VERIFICATION">VERIFICATION</option>
+                <option value="REVIEW">REVIEW</option>
+                <option value="LEGAL_AID_REQUIRED">LEGAL_AID_REQUIRED</option>
+                <option value="ASSIGNED">ASSIGNED</option>
+                <option value="DOCUMENT_PENDING">DOCUMENT_PENDING</option>
+                <option value="ANALYSIS_READY">ANALYSIS_READY</option>
+                <option value="SUBMITTED">SUBMITTED</option>
+                <option value="APPROVED">APPROVED</option>
+                <option value="FILED">FILED</option>
+                <option value="HEARING_SCHEDULED">HEARING_SCHEDULED</option>
+                <option value="ORDER_RECEIVED">ORDER_RECEIVED</option>
+                <option value="RELEASE_WORKFLOW">RELEASE_WORKFLOW</option>
+                <option value="POST_RELEASE_FOLLOW_UP">POST_RELEASE_FOLLOW_UP</option>
+                <option value="CLOSED">CLOSED</option>
+                <option value="DATA_CONFLICT">DATA_CONFLICT</option>
+              </select>
+            </div>
+
+            {/* 8. Hearing Date Range */}
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">
+                8. Hearing Date Range
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                <input
+                  type="date"
+                  value={hearingDateFrom}
+                  onChange={(e) => setHearingDateFrom(e.target.value)}
+                  title="Hearing Date From"
+                  className="w-full px-1.5 py-1 bg-secondary border border-border rounded-sm text-[11px] font-mono text-foreground focus:outline-none"
+                />
+                <input
+                  type="date"
+                  value={hearingDateTo}
+                  onChange={(e) => setHearingDateTo(e.target.value)}
+                  title="Hearing Date To"
+                  className="w-full px-1.5 py-1 bg-secondary border border-border rounded-sm text-[11px] font-mono text-foreground focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Safe Bulk Action Toolbar */}
       {selectedTaskIds.length > 0 && (

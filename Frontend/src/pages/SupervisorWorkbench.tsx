@@ -375,7 +375,7 @@ export function SupervisorWorkbench() {
                           {c.case_id}
                         </span>
                         <span className="text-xs font-mono text-muted-foreground">{c.court_name}</span>
-                        <span className="text-xs font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 border border-blue-500/20 font-bold">
+                        <span className="text-xs font-mono px-2 py-0.5 rounded bg-muted text-foreground border border-border font-bold">
                           {c.status}
                         </span>
                       </div>

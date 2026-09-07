@@ -213,7 +213,7 @@ export function AuditorConsole() {
       return {
         title: "Authorized System Sign-In",
         category: "User Access",
-        color: "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20",
+        color: "bg-muted text-foreground border-border",
         summary: `User logged in securely with role [${ev.actor_role.replace(/_/g, " ")}]. Session verified.`,
         targetLabel: `Session ID: ${ev.entity_id}`,
       };
@@ -243,7 +243,7 @@ export function AuditorConsole() {
       return {
         title: "Document Hash & Evidence Verified",
         category: "Data Integrity",
-        color: "bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/20",
+        color: "bg-muted text-foreground border-border",
         summary: `Cryptographic SHA-256 integrity check verified against stored vault checksum for Case #${ev.entity_id}.`,
         targetLabel: `Evidence Item #${ev.entity_id}`,
       };
@@ -406,7 +406,7 @@ export function AuditorConsole() {
 
         <div className="bg-card border-2 border-border p-4 rounded-sm shadow-sm">
           <div className="text-xs font-mono text-muted-foreground uppercase font-semibold">Legal Actions & Approvals</div>
-          <div className="text-2xl font-serif font-bold text-blue-600 mt-1">
+          <div className="text-2xl font-serif font-bold text-foreground mt-1">
             {events.filter((e) => e.action.includes("ADVOCATE") || e.action.includes("IDENTITY") || e.action.includes("APPROVE")).length}
           </div>
           <div className="text-xs font-mono text-muted-foreground mt-1">Supervisory Human Sign-Offs</div>
@@ -677,14 +677,14 @@ export function AuditorConsole() {
                       ? "border-l-rose-600 border-border"
                       : exc.severity === "HIGH"
                       ? "border-l-red-600 border-border"
-                      : "border-l-blue-600 border-border"
+                      : "border-l-foreground border-border"
                   }`}
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase ${
                         exc.severity === "CRITICAL" ? "bg-rose-600 text-white" :
-                        exc.severity === "HIGH" ? "bg-red-600 text-white" : "bg-blue-600 text-white"
+                        exc.severity === "HIGH" ? "bg-red-600 text-white" : "bg-muted text-foreground border border-border"
                       }`}>
                         {exc.severity}
                       </span>

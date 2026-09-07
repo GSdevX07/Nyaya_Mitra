@@ -224,8 +224,8 @@ export function PoliceWorkspace() {
 
         <div className="bg-card border-2 border-border p-4 rounded-sm">
           <div className="text-[11px] font-mono text-muted-foreground uppercase">Institutional Requests</div>
-          <div className="text-2xl font-serif font-bold text-indigo-600 mt-1">{pendingActions.length}</div>
-          <div className="text-[10px] font-mono text-indigo-600/80 mt-1">DLSA & Court Inquiries</div>
+          <div className="text-2xl font-serif font-bold text-foreground mt-1">{pendingActions.length}</div>
+          <div className="text-[10px] font-mono text-muted-foreground mt-1">DLSA & Court Inquiries</div>
         </div>
       </div>
 
@@ -407,7 +407,7 @@ export function PoliceWorkspace() {
                             isCompleted
                               ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
                               : isAck
-                              ? "bg-blue-100 text-blue-800 border border-blue-300"
+                              ? "bg-muted text-foreground border border-border"
                               : "bg-red-100 text-red-800 border border-red-300"
                           }`}
                         >

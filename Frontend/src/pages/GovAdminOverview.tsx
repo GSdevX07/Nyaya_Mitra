@@ -109,10 +109,10 @@ export function GovAdminOverview() {
 
         <div className="bg-card border-2 border-border p-4 rounded-sm">
           <div className="text-[11px] font-mono text-muted-foreground uppercase">Estimated Review Hours Avoided</div>
-          <div className="text-2xl font-serif font-bold text-blue-600 mt-1">
+          <div className="text-2xl font-serif font-bold text-foreground mt-1">
             {overview?.estimated_manual_review_hours_avoided ?? reports?.overview?.estimated_hours_saved_by_ai ?? "—"}h
           </div>
-          <div className="text-[10px] font-mono text-blue-600 mt-1" title="Simulation estimate — not measured operational savings">
+          <div className="text-[10px] font-mono text-muted-foreground mt-1" title="Simulation estimate — not measured operational savings">
             Simulation Estimate
           </div>
         </div>

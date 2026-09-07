@@ -246,10 +246,10 @@ export function IngestionDashboard() {
 
         <div className="bg-card border-2 border-border p-4 rounded-sm">
           <div className="text-[11px] font-mono text-muted-foreground uppercase">Identity Merges</div>
-          <div className="text-2xl font-serif font-black text-blue-600 mt-1">
+          <div className="text-2xl font-serif font-black text-foreground mt-1">
             {merges.length}
           </div>
-          <div className="text-[10px] font-mono text-blue-600 mt-1 flex items-center gap-1">
+          <div className="text-[10px] font-mono text-muted-foreground mt-1 flex items-center gap-1">
             <Users className="w-3 h-3" /> Uncertain Matches
           </div>
         </div>
@@ -316,7 +316,7 @@ export function IngestionDashboard() {
         >
           Identity Deduplication
           {merges.length > 0 && (
-            <span className="px-1.5 py-0.2 bg-blue-500/20 text-blue-600 text-[10px] rounded-full">
+            <span className="px-1.5 py-0.2 bg-muted text-foreground border border-border text-[10px] rounded-full">
               {merges.length}
             </span>
           )}
@@ -526,10 +526,10 @@ export function IngestionDashboard() {
             </div>
           ) : (
             merges.map((cand) => (
-              <div key={cand.id} className="bg-card border-2 border-blue-500/40 p-5 rounded-sm shadow-sm space-y-4">
+              <div key={cand.id} className="bg-card border-2 border-border p-5 rounded-sm shadow-sm space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono bg-blue-500/20 text-blue-700 px-2 py-0.5 rounded font-bold uppercase">
+                    <span className="text-[10px] font-mono bg-muted text-foreground border border-border px-2 py-0.5 rounded font-bold uppercase">
                       {cand.confidence} ({Math.round(cand.similarity_score * 100)}% match)
                     </span>
                     <span className="font-mono text-xs font-bold text-foreground">

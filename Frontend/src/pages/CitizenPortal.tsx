@@ -176,13 +176,13 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
   const getStatusBadge = () => {
     const code = data.legal_status.status_code;
     if (code === "UNDER_REVIEW") {
-      return { text: lang === 'hi' ? "समीक्षाधीन" : "UNDER INITIAL REVIEW", color: "bg-blue-500/10 text-blue-600 border-blue-500/20" };
+      return { text: lang === 'hi' ? "समीक्षाधीन" : "UNDER INITIAL REVIEW", color: "bg-muted text-foreground border-border" };
     }
     if (code === "ELIGIBLE_FOR_REVIEW") {
       return { text: lang === 'hi' ? "पात्रता चिह्नित" : "ELIGIBLE UNDER SEC 479", color: "bg-red-500/10 text-red-600 border-border" };
     }
     if (code === "COUNSEL_ASSIGNED") {
-      return { text: lang === 'hi' ? "अधिवक्ता नियुक्त" : "COUNSEL ASSIGNED", color: "bg-blue-500/10 text-blue-600 border-blue-500/20" };
+      return { text: lang === 'hi' ? "अधिवक्ता नियुक्त" : "COUNSEL ASSIGNED", color: "bg-muted text-foreground border-border" };
     }
     if (code === "READY_FOR_FILING") {
       return { text: lang === 'hi' ? "दायर करने हेतु तैयार" : "DRAFT APPROVED • PENDING FILING", color: "bg-red-500/10 text-red-600 border-border" };
@@ -194,7 +194,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
       return { text: lang === 'hi' ? "अदालत का आदेश प्राप्त" : "COURT BAIL ORDER ISSUED", color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" };
     }
     if (code === "RELEASE_EXECUTED") {
-      return { text: lang === 'hi' ? "रिहाई प्रक्रिया पूर्ण" : "PRISON RELEASE EXECUTED", color: "bg-purple-500/10 text-purple-600 border-purple-500/20" };
+      return { text: lang === 'hi' ? "रिहाई प्रक्रिया पूर्ण" : "PRISON RELEASE EXECUTED", color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" };
     }
     return { text: code, color: "bg-secondary text-foreground" };
   };

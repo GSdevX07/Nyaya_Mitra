@@ -182,10 +182,10 @@ export function AdvocateWorkspace() {
 
         <div className="bg-card border-2 border-border p-4 rounded-sm">
           <div className="text-[11px] font-mono text-muted-foreground uppercase">Filed in Court Registry</div>
-          <div className="text-2xl font-serif font-bold text-blue-600 mt-1">
+          <div className="text-2xl font-serif font-bold text-foreground mt-1">
             {filedCases.length}
           </div>
-          <div className="text-[10px] font-mono text-blue-600 mt-1">Active Court Proceedings</div>
+          <div className="text-[10px] font-mono text-muted-foreground mt-1">Active Court Proceedings</div>
         </div>
       </div>
 
@@ -296,7 +296,7 @@ export function AdvocateWorkspace() {
                       )}
 
                       {isFiled && (
-                        <span className="px-2.5 py-1 text-[11px] font-mono font-bold rounded bg-blue-500/10 text-blue-600 border border-blue-500/20">
+                        <span className="px-2.5 py-1 text-[11px] font-mono font-bold rounded bg-muted text-foreground border border-border">
                           FILED IN COURT
                         </span>
                       )}

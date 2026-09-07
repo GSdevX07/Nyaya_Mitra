@@ -61,12 +61,22 @@ def _safe_sqlite_connect(database, *args, **kwargs):
         kwargs["uri"] = True
     if database == DB_PATH and "check_same_thread" not in kwargs:
         kwargs["check_same_thread"] = False
-    return _orig_sqlite_connect(database, *args, **kwargs)
+    kwargs["timeout"] = kwargs.get("timeout", 60.0)
+    conn = _orig_sqlite_connect(database, *args, **kwargs)
+    try:
+        conn.execute("PRAGMA busy_timeout = 60000")
+    except Exception:
+        pass
+    return conn
 
 sqlite3.connect = _safe_sqlite_connect
 
 # Persistent connection to keep the shared in-memory SQLite schema in RAM without saving any file to disk
-_MEM_KEEP_ALIVE = sqlite3.connect(DB_PATH, uri=True, check_same_thread=False)
+_MEM_KEEP_ALIVE = sqlite3.connect(DB_PATH, uri=True, check_same_thread=False, timeout=60.0)
+try:
+    _MEM_KEEP_ALIVE.execute("PRAGMA busy_timeout = 60000")
+except Exception:
+    pass
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
@@ -670,8 +680,12 @@ _MEMORY_UPLOADED_DOCS: List[Dict[str, Any]] = []
 
 
 def get_db_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, uri=True, timeout=30.0, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, uri=True, timeout=60.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA busy_timeout = 60000")
+    except Exception:
+        pass
     return conn
 
 

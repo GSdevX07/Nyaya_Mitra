@@ -45,7 +45,13 @@ class CaseRepository:
             if is_supabase_active():
                 raw = supa_get_all_legacy_cases()
                 if raw:
-                    return [CaseRecord.model_validate(d) for d in raw]
+                    cases = []
+                    for d in raw:
+                        if isinstance(d, str):
+                            cases.append(CaseRecord.model_validate_json(d))
+                        else:
+                            cases.append(CaseRecord.model_validate(d))
+                    return cases
         except Exception as e:
             print(f"[WARN] CaseRepository.get_all_cases Supabase error: {e}")
 
@@ -73,7 +79,10 @@ class CaseRepository:
                 if cli:
                     res = cli.table("cases").select("data").eq("case_id", case_id).execute()
                     if res.data and res.data[0].get("data"):
-                        return CaseRecord.model_validate(res.data[0]["data"])
+                        d = res.data[0]["data"]
+                        if isinstance(d, str):
+                            return CaseRecord.model_validate_json(d)
+                        return CaseRecord.model_validate(d)
         except Exception:
             pass
 

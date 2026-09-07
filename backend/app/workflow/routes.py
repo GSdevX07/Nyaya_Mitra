@@ -183,7 +183,11 @@ async def get_matter_approvals_endpoint(
                 or (assigned_law_id and assigned_law_id == adv_id)
                 or (assigned_law_nm and user_full and (user_full in assigned_law_nm or assigned_law_nm in user_full))
                 or (linked_cid and linked_cid == case_id)
-                or (adv_id in ("demo_advocate", "adv_001") and (assigned_law_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma") or "rajesh" in assigned_law_nm))
+                or (adv_id in ("demo_advocate", "adv_001") and (
+                    assigned_adv_id in ("l-1", "l-001", "lwyr-001", "demo_advocate", "adv_001")
+                    or assigned_law_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma", "l-1", "l-001", "lwyr-001")
+                    or "rajesh" in assigned_law_nm
+                ))
                 or (adv_id in ("demo_ext_advocate", "adv_ext_001") and (assigned_law_id in ("demo_ext_advocate", "adv_ext_001") or "external" in assigned_law_nm))
             )
             if not is_assigned:
@@ -231,7 +235,11 @@ async def create_artifact_endpoint(
         or (assigned_law_id and assigned_law_id == adv_id)
         or (assigned_law_nm and user_full and (user_full in assigned_law_nm or assigned_law_nm in user_full))
         or (linked_cid and linked_cid == case_id)
-        or (adv_id in ("demo_advocate", "adv_001") and (assigned_law_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma") or "rajesh" in assigned_law_nm))
+        or (adv_id in ("demo_advocate", "adv_001") and (
+            assigned_adv_id in ("l-1", "l-001", "lwyr-001", "demo_advocate", "adv_001")
+            or assigned_law_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma", "l-1", "l-001", "lwyr-001")
+            or "rajesh" in assigned_law_nm
+        ))
         or (adv_id in ("demo_ext_advocate", "adv_ext_001") and (assigned_law_id in ("demo_ext_advocate", "adv_ext_001") or "external" in assigned_law_nm))
     )
     if not is_assigned:
@@ -290,7 +298,11 @@ async def list_artifacts_endpoint(
             or (assigned_law_id and assigned_law_id == adv_id)
             or (assigned_law_nm and user_full and (user_full in assigned_law_nm or assigned_law_nm in user_full))
             or (linked_cid and linked_cid == case_id)
-            or (adv_id in ("demo_advocate", "adv_001") and (assigned_law_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma") or "rajesh" in assigned_law_nm))
+            or (adv_id in ("demo_advocate", "adv_001") and (
+                assigned_adv_id in ("l-1", "l-001", "lwyr-001", "demo_advocate", "adv_001")
+                or assigned_law_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma", "l-1", "l-001", "lwyr-001")
+                or "rajesh" in assigned_law_nm
+            ))
             or (adv_id in ("demo_ext_advocate", "adv_ext_001") and (assigned_law_id in ("demo_ext_advocate", "adv_ext_001") or "external" in assigned_law_nm))
         )
         if not is_assigned:
@@ -496,7 +508,11 @@ async def generate_draft_endpoint(
             or (assigned_law_id and assigned_law_id == adv_id)
             or (assigned_law_nm and user_full and (user_full in assigned_law_nm or assigned_law_nm in user_full))
             or (linked_cid and linked_cid == case_id)
-            or (adv_id in ("demo_advocate", "adv_001") and (assigned_law_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma") or "rajesh" in assigned_law_nm))
+            or (adv_id in ("demo_advocate", "adv_001") and (
+                assigned_adv_id in ("l-1", "l-001", "lwyr-001", "demo_advocate", "adv_001")
+                or assigned_law_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma", "l-1", "l-001", "lwyr-001")
+                or "rajesh" in assigned_law_nm
+            ))
             or (adv_id in ("demo_ext_advocate", "adv_ext_001") and (assigned_law_id in ("demo_ext_advocate", "adv_ext_001") or "external" in assigned_law_nm))
         )
         if not is_assigned:

@@ -2405,6 +2405,44 @@ def get_platform_health(
 
 
 
+# ── Governed AI Service Layer Telemetry & Evaluation Endpoints ────────────────
+
+@app.get("/ai/governance/policies", tags=["AI Governance"])
+def get_ai_governance_policies(
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Return configured AI capabilities with explicit permitted/forbidden boundaries and human sign-off rules."""
+    from app.ai.capabilities import CAPABILITY_POLICIES
+    return [policy.model_dump() for policy in CAPABILITY_POLICIES.values()]
+
+
+@app.get("/ai/governance/logs", tags=["AI Governance"])
+def list_ai_governance_logs(
+    limit: int = Query(default=50, ge=1, le=500),
+    case_id: Optional[str] = Query(default=None),
+    capability: Optional[str] = Query(default=None),
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR,
+        Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER,
+    )),
+):
+    """Retrieve immutable AI execution telemetry, prompt versions, trust tiers, and safety audit trails."""
+    from app.database import get_ai_governance_logs
+    return get_ai_governance_logs(limit=limit, case_id=case_id, capability=capability)
+
+
+@app.get("/ai/governance/evaluations", tags=["AI Governance"])
+def get_ai_governance_evaluations(
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR,
+    )),
+):
+    """Run automated regression evaluation suite against benchmark cases and return metrics."""
+    from app.ai.evaluators import run_ai_governance_evaluations
+    metrics = run_ai_governance_evaluations()
+    return metrics.model_dump()
+
+
 # ── Additional Module Endpoints ────────────────────────────────────────────────
 
 @app.get("/documents", tags=["Documents"])

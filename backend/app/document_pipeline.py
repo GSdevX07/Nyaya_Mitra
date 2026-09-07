@@ -53,6 +53,7 @@ import numpy as np
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from app.ai import get_ai_gateway, GatewayRequest, AICapability
 from app.llm_client import generate, get_last_provider
 from app.rag.legal_ingestion import LegalIngestionError, extract_pdf_text, run_data_prep_kit
 from app.rag.vector_store import retrieve_legal_chunks, VectorStoreUnavailable
@@ -581,15 +582,34 @@ def _build_assessment(
     else:
         eligibility_status = "REQUIRES_HUMAN_LEGAL_REVIEW"
 
-    generated = generate(
-        _assessment_prompt(document_name, clean_text, metadata, citations),
-        system=(
+    gateway = get_ai_gateway()
+    req = GatewayRequest(
+        capability=AICapability.RETRIEVAL_ASSISTED_LEGAL_SYNTHESIS,
+        prompt=_assessment_prompt(document_name, clean_text, metadata, citations),
+        system_instruction=(
             "You are a legal-aid drafting assistant. "
             "Use only supplied document facts and RAG sources. "
             "Do not fabricate facts or give a final legal determination."
         ),
+        case_id=metadata.get("case_id"),
+        document_id=document_name,
+        user_id="document_pipeline",
+        user_role="SYSTEM",
+        context_data={
+            "document_name": document_name,
+            "metadata": metadata,
+            "citations": citations,
+        },
     )
-    provider = get_last_provider()
+    res = gateway.execute(req)
+    if res.structured_data and hasattr(res.structured_data, "synthesis_summary") and res.structured_data.synthesis_summary:
+        generated = res.structured_data.synthesis_summary.strip()
+    elif res.content:
+        generated = res.content.strip()
+    else:
+        generated = "Automated legal assessment requires manual review of document records."
+
+    provider = res.provider_name
     findings = [
         f"{key.replace('_', ' ').title()}: {value}"
         for key, value in metadata.items()

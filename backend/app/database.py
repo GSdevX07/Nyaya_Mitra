@@ -1670,6 +1670,36 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_matter_artifacts_tag ON matter_artifact_versions(matter_id, version_tag)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_matter_handoffs_matter ON matter_handoffs(matter_id)")
 
+    # ── Governed AI Service Layer Logs ──────────────────────────────────────
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ai_governance_logs (
+            id TEXT PRIMARY KEY,
+            request_id TEXT NOT NULL,
+            capability TEXT NOT NULL,
+            status TEXT NOT NULL,
+            prompt_version TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            provider_used TEXT NOT NULL,
+            trust_tier TEXT NOT NULL,
+            fallback_triggered INTEGER DEFAULT 0,
+            fallback_reason TEXT,
+            case_id TEXT,
+            document_id TEXT,
+            source_doc_ids TEXT DEFAULT '[]',
+            retrieved_source_ids TEXT DEFAULT '[]',
+            latency_ms REAL DEFAULT 0.0,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            cost_inr REAL DEFAULT 0.0,
+            needs_human_review INTEGER DEFAULT 0,
+            abstention_reason TEXT,
+            rationale_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_logs_capability ON ai_governance_logs(capability)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_logs_case ON ai_governance_logs(case_id)")
+
     conn.commit()
 
 
@@ -1750,6 +1780,109 @@ def sync_case_documents_and_evidence(cursor_or_conn=None, case_id: Optional[str]
         conn.close()
     elif conn:
         conn.commit()
+
+
+def record_ai_governance_log(log_dict: Dict[str, Any]) -> None:
+    """Persist an auditable generation event from the AI Gateway."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_governance_logs (
+                id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL,
+                capability TEXT NOT NULL,
+                status TEXT NOT NULL,
+                prompt_version TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                provider_used TEXT NOT NULL,
+                trust_tier TEXT NOT NULL,
+                fallback_triggered INTEGER DEFAULT 0,
+                fallback_reason TEXT,
+                case_id TEXT,
+                document_id TEXT,
+                source_doc_ids TEXT DEFAULT '[]',
+                retrieved_source_ids TEXT DEFAULT '[]',
+                latency_ms REAL DEFAULT 0.0,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                cost_inr REAL DEFAULT 0.0,
+                needs_human_review INTEGER DEFAULT 0,
+                abstention_reason TEXT,
+                rationale_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO ai_governance_logs (
+                id, request_id, capability, status, prompt_version, model_name,
+                provider_used, trust_tier, fallback_triggered, fallback_reason,
+                case_id, document_id, source_doc_ids, retrieved_source_ids,
+                latency_ms, input_tokens, output_tokens, cost_inr,
+                needs_human_review, abstention_reason, rationale_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                log_dict.get("id"),
+                log_dict.get("request_id"),
+                log_dict.get("capability"),
+                log_dict.get("status"),
+                log_dict.get("prompt_version"),
+                log_dict.get("model_name"),
+                log_dict.get("provider_used"),
+                log_dict.get("trust_tier"),
+                log_dict.get("fallback_triggered", 0),
+                log_dict.get("fallback_reason"),
+                log_dict.get("case_id"),
+                log_dict.get("document_id"),
+                log_dict.get("source_doc_ids", "[]"),
+                log_dict.get("retrieved_source_ids", "[]"),
+                log_dict.get("latency_ms", 0.0),
+                log_dict.get("input_tokens", 0),
+                log_dict.get("output_tokens", 0),
+                log_dict.get("cost_inr", 0.0),
+                log_dict.get("needs_human_review", 0),
+                log_dict.get("abstention_reason"),
+                log_dict.get("rationale_json", "{}"),
+                log_dict.get("created_at"),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_ai_governance_logs(
+    limit: int = 50,
+    capability: Optional[str] = None,
+    case_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Query recent AI governance telemetry records."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        query = "SELECT * FROM ai_governance_logs"
+        params = []
+        conditions = []
+        if capability:
+            conditions.append("capability = ?")
+            params.append(capability)
+        if case_id:
+            conditions.append("case_id = ?")
+            params.append(case_id)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, tuple(params))
+        rows = cursor.fetchall()
+        cols = [d[0] for d in cursor.description]
+        return [dict(zip(cols, row)) for row in rows]
+    finally:
+        conn.close()
 
 
 def init_db():

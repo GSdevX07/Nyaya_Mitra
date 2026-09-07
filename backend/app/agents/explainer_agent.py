@@ -13,8 +13,8 @@ Design pattern (from Nyaya_Mitra_Master_Roadmap_v2.md §9, Agent 2.7):
 
 from __future__ import annotations
 
-from app.llm_client import generate
 from app.models.schemas import CaseRecord
+from app.ai import get_ai_gateway, GatewayRequest, AICapability
 
 
 
@@ -66,25 +66,68 @@ def generate_explanation(case: CaseRecord, eligibility_details: dict) -> dict:
     user_prompt = (
         f"Target Language: English\n\n"
         f"Facts: "
-        f"Eligibility Result: {eligibility_details['eligible']}, "
-        f"Days Overdue: {eligibility_details['days_overdue']}, "
+        f"Eligibility Result: {eligibility_details.get('eligible')}, "
+        f"Days Overdue: {eligibility_details.get('days_overdue')}, "
         f"Next Step: Pending Lawyer Review.\n\n"
         f"Task: Generate the explanation."
     )
 
-    # ── Call LLM via the single choke-point for English base ─────────────────────────────────
-    english_explanation = generate(prompt=user_prompt, system=EXPLAINER_SYSTEM_PROMPT)
-    
-    # ── Translate to preferred language if necessary ─────────────────────────────────
+    gateway = get_ai_gateway()
+
+    # ── Call AI Gateway for English Plain Language Explanation ─────────────────
+    req_en = GatewayRequest(
+        capability=AICapability.PLAIN_LANGUAGE_EXPLANATION,
+        prompt=user_prompt,
+        system_instruction=EXPLAINER_SYSTEM_PROMPT,
+        case_id=case.case_id,
+        user_id="explainer_agent",
+        user_role="LEGAL_AID_WORKER",
+        context_data={
+            "case_id": case.case_id,
+            "eligibility": eligibility_details,
+            "offense_sections": case.offense_sections,
+            "custody_days": case.custody_days,
+        },
+    )
+    res_en = gateway.execute(req_en)
+    if res_en.structured_data and hasattr(res_en.structured_data, "plain_explanation") and res_en.structured_data.plain_explanation:
+        english_explanation = res_en.structured_data.plain_explanation.strip()
+    elif res_en.content:
+        english_explanation = res_en.content.strip()
+    else:
+        english_explanation = (
+            f"Case {case.case_id} is currently under legal-aid review. "
+            f"The undertrial has spent {case.custody_days} days in detention. "
+            f"A legal-aid panel counsel has been assigned to examine the records."
+        )
+
+    # ── Translate to preferred language if necessary ──────────────────────────
     if case.preferred_language.lower() in ["en", "english"]:
         native_explanation = english_explanation
     else:
-        translate_prompt = (
-            f"Translate the following English explanation into {case.preferred_language} (ISO 639-1 code if provided). "
-            f"Provide ONLY the translated text, with no additional commentary:\n\n"
-            f"{english_explanation}"
+        req_trans = GatewayRequest(
+            capability=AICapability.MULTILINGUAL_EXPLANATION,
+            prompt=(
+                f"Translate the following English explanation into {case.preferred_language} (ISO 639-1 code if provided). "
+                f"Provide ONLY the translated text, with no additional commentary:\n\n"
+                f"{english_explanation}"
+            ),
+            case_id=case.case_id,
+            user_id="explainer_agent",
+            user_role="LEGAL_AID_WORKER",
+            context_data={
+                "english_source_text": english_explanation,
+                "target_language_code": case.preferred_language,
+                "case_id": case.case_id,
+            },
         )
-        native_explanation = generate(prompt=translate_prompt, system="You are an expert legal translator.")
+        res_trans = gateway.execute(req_trans)
+        if res_trans.structured_data and hasattr(res_trans.structured_data, "translated_text") and res_trans.structured_data.translated_text:
+            native_explanation = res_trans.structured_data.translated_text.strip()
+        elif res_trans.content:
+            native_explanation = res_trans.content.strip()
+        else:
+            native_explanation = english_explanation
 
     return {
         "case_id": case.case_id,

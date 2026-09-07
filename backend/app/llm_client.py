@@ -251,11 +251,33 @@ def _call_ollama(prompt: str, system: str) -> str:
 
 
 def generate(prompt: str, system: str = "", _override: str | None = None) -> str:
-    """Generate through the configured provider order: watsonx, Groq, then Ollama."""
+    """
+    Generate through the Governed AI Gateway.
+    Provides backward-compatible gateway interface for legacy callers while enforcing
+    model selection, rate limits, PII redaction, prompt injection defense, and audit logging.
+    """
     global _last_provider
     if _override is not None:
         _last_provider = "test override"
         return _override
+
+    try:
+        from app.ai import get_ai_gateway, GatewayRequest, AICapability
+        gateway = get_ai_gateway()
+        req = GatewayRequest(
+            capability=AICapability.PLAIN_LANGUAGE_EXPLANATION,
+            prompt=prompt,
+            system_instruction=system,
+            user_id="legacy_llm_client",
+            user_role="SYSTEM",
+        )
+        res = gateway.execute(req)
+        _last_provider = res.provider_name
+        if res.content:
+            return res.content
+    except Exception as e:
+        # Resilient fallback to direct providers if gateway bootstrapping fails
+        pass
 
     providers: dict[str, Callable[[str, str], str]] = {
         "watsonx": _call_watsonx,

@@ -337,18 +337,33 @@ def generate_derived_display(
     lang_entry = next((l for l in SUPPORTED_LANGUAGES if l["code"] == target_lang), None)
     lang_name = lang_entry["name"] if lang_entry else target_lang
 
-    # Attempt LLM translation via explainer if appropriate, or dictionary fallback
+    # Attempt translation via governed AI Gateway, or fallback to authoritative text
     derived_text = authoritative_text
     try:
-        from app.llm_client import generate
-        prompt = (
-            f"Translate the following plain-language legal explanation into {lang_name} ({target_lang}). "
-            f"Keep simple vocabulary suitable for a family member. Provide ONLY the translated text:\n\n"
-            f"{authoritative_text}"
+        from app.ai import get_ai_gateway, GatewayRequest, AICapability
+        gateway = get_ai_gateway()
+        req = GatewayRequest(
+            capability=AICapability.MULTILINGUAL_EXPLANATION,
+            prompt=(
+                f"Translate the following plain-language legal explanation into {lang_name} ({target_lang}). "
+                f"Keep simple vocabulary suitable for a family member. Provide ONLY the translated text:\n\n"
+                f"{authoritative_text}"
+            ),
+            user_id="system",
+            user_role="SYSTEM",
+            context_data={
+                "english_source_text": authoritative_text,
+                "target_language_code": target_lang,
+                "target_language_name": lang_name,
+            },
         )
-        derived_text = generate(prompt=prompt, system="You are an expert legal aid multilingual assistant.")
+        res = gateway.execute(req)
+        if res.structured_data and hasattr(res.structured_data, "translated_text") and res.structured_data.translated_text:
+            derived_text = res.structured_data.translated_text.strip()
+        elif res.content and "unavailable" not in res.content.lower():
+            derived_text = res.content.strip()
     except Exception as e:
-        logger.warning(f"Derived translation failed for {target_lang}: {e}. Falling back to English.")
+        logger.warning(f"AI Gateway derived translation failed for {target_lang}: {e}. Falling back to English.")
         derived_text = authoritative_text
 
     return {

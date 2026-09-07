@@ -13,7 +13,7 @@ import unicodedata
 from typing import Optional, Dict, Any
 
 from app.database import get_case, get_uploaded_document_by_id
-from app.llm_client import generate
+from app.ai import get_ai_gateway, GatewayRequest, AICapability
 from app.services.language_service import generate_derived_display
 
 logger = logging.getLogger(__name__)
@@ -147,9 +147,29 @@ def summarize_document(
 
     summary_text = ""
     try:
-        res = generate(prompt, system="You are Nyaya Mitra, an Indian legal aid assistant providing plain-language summaries of official case records.")
-        if res and "unavailable" not in res.lower() and len(res.strip()) > 20:
-            cleaned = res.strip().replace('"', '').replace('**', '')
+        gateway = get_ai_gateway()
+        req = GatewayRequest(
+            capability=AICapability.DOCUMENT_SUMMARIZATION,
+            prompt=prompt,
+            case_id=case_id,
+            document_id=doc_type,
+            user_id="system",
+            user_role="SYSTEM",
+            context_data={
+                "case_id": case_id,
+                "document_type": doc_type,
+                "raw_text": raw_text[:600] if raw_text else "",
+            },
+        )
+        res = gateway.execute(req)
+        if res.structured_data and hasattr(res.structured_data, "concise_summary") and res.structured_data.concise_summary:
+            cleaned = res.structured_data.concise_summary.strip()
+        elif res.content and "unavailable" not in res.content.lower() and len(res.content.strip()) > 20:
+            cleaned = res.content.strip().replace('"', '').replace('**', '')
+        else:
+            cleaned = ""
+
+        if cleaned:
             # Normalize smart quotes and dashes to prevent encoding issues
             cleaned = (
                 cleaned.replace('\u2011', '-')
@@ -163,7 +183,7 @@ def summarize_document(
             )
             summary_text = cleaned
     except Exception as e:
-        logger.warning(f"LLM API summarization failed: {e}. Falling back to extractive Python summary.")
+        logger.warning(f"AI Gateway summarization failed: {e}. Falling back to extractive Python summary.")
 
     if not summary_text:
         summary_text = generate_extractive_summary(case_id, doc_type, raw_text)

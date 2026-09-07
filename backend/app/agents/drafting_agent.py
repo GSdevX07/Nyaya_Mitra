@@ -13,8 +13,8 @@ Design pattern (from Nyaya_Mitra_Master_Roadmap_v2.md §9, Agent 2.6):
 
 from __future__ import annotations
 
-from app.llm_client import generate
 from app.models.schemas import CaseRecord
+from app.ai import get_ai_gateway, GatewayRequest, AICapability
 
 
 import re
@@ -100,12 +100,49 @@ def draft_bail_application(case: CaseRecord, retrieved_law: str) -> dict:
         f"- Document Grounding: The following documents are officially verified and present: [{present_str}]. Do NOT state that any of these present documents are missing. Missing documents: [{missing_str}]."
     )
 
-    # ── Call LLM via the single choke-point ─────────────────────────────────
-    drafted_document = generate(prompt=user_prompt, system=DRAFTING_SYSTEM_PROMPT)
+    # ── Call AI Gateway with DRAFT_PREPARATION capability ──────────────────
+    gateway = get_ai_gateway()
+    req = GatewayRequest(
+        capability=AICapability.DRAFT_PREPARATION,
+        prompt=user_prompt,
+        system_instruction=DRAFTING_SYSTEM_PROMPT,
+        case_id=case.case_id,
+        user_id="drafting_agent",
+        user_role="LEGAL_AID_COUNSEL",
+        context_data={
+            "case_id": case.case_id,
+            "inmate_name": case.name,
+            "offense_sections": case.offense_sections,
+            "custody_days": case.custody_days,
+            "court_name": getattr(case, "court_name", "Court of Competent Jurisdiction"),
+            "assigned_lawyer": advocate_display,
+            "present_docs": case.present_docs or [],
+            "missing_docs": missing_docs,
+            "retrieved_law": safe_retrieved_law[:800],
+        },
+    )
+    res = gateway.execute(req)
+    if res.structured_data and hasattr(res.structured_data, "draft_text") and res.structured_data.draft_text:
+        drafted_document = res.structured_data.draft_text.strip()
+    elif res.content and "unavailable" not in res.content.lower():
+        drafted_document = res.content.strip()
+    else:
+        # Fallback template requiring human sign-off
+        drafted_document = (
+            f"IN THE COURT OF {getattr(case, 'court_name', 'COMPETENT JURISDICTION')}\n\n"
+            f"APPLICATION FOR BAIL UNDER SECTION 479 BNSS\n"
+            f"IN THE MATTER OF: {case.name} (Case ID: {case.case_id})\n"
+            f"Offense: {', '.join(case.offense_sections) if isinstance(case.offense_sections, list) else case.offense_sections}\n"
+            f"Detention Duration: {case.custody_days} days\n\n"
+            f"NOTE: AI drafted template awaiting formal defense advocate review and sign-off.\n"
+            f"Advocate on Record: {advocate_display}\n"
+        )
 
     return {
         "case_id": case.case_id,
         "drafted_document": drafted_document,
+        "human_approval_required": True,
+        "model_used": res.provider_name,
     }
 
 

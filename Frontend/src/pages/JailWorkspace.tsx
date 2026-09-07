@@ -34,6 +34,7 @@ import {
 } from "../lib/api";
 import { RoleEvidenceProvenanceModal } from "../components/RoleEvidenceProvenanceModal";
 import { UniversalTaskQueue } from "../components/UniversalTaskQueue";
+import { useAuth } from "../lib/auth";
 
 const PRISON_DOC_TYPES = [
   { value: "prison_admission_record", label: "Prison Admission Record" },
@@ -53,6 +54,7 @@ const CUSTODY_EVENT_TYPES = [
 ];
 
 export function JailWorkspace() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<"queue" | "inmates">("queue");
   const [inmates, setInmates] = useState<JailInmateRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,24 +80,24 @@ export function JailWorkspace() {
   // Intake form state
   const [intakeForm, setIntakeForm] = useState<CustodyIntakePayload>({
     name: "",
-    facility_id: "FAC-TIHAR-04",
-    facility_name: "Central Jail Tihar (No. 4)",
-    district: "Central Delhi",
-    court_name: "Patiala House District Courts",
+    facility_id: user?.facility_ids?.[0] || "",
+    facility_name: "",
+    district: user?.district || "",
+    court_name: "",
     arrest_date: new Date().toISOString().split("T")[0],
     admission_date: new Date().toISOString().split("T")[0],
-    offense_sections: ["BNS 303(2)"],
+    offense_sections: [],
     refer_to_dlsa: true,
     notes: "",
   });
-  const [offenseSectionsInput, setOffenseSectionsInput] = useState("BNS 303(2)");
+  const [offenseSectionsInput, setOffenseSectionsInput] = useState("");
 
   // Custody Event form state
   const [eventForm, setEventForm] = useState<CustodyEventPayload>({
     event_type: "REMAND_EXTENSION",
     event_date: new Date().toISOString().split("T")[0],
-    court_name: "Chief Metropolitan Magistrate, Patiala House",
-    notes: "14-day judicial custody remand extended by competent court.",
+    court_name: "",
+    notes: "",
     verified: true,
   });
 

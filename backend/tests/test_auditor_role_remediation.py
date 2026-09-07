@@ -254,28 +254,36 @@ def test_sqlite_immutability_triggers():
     """P0 Issue 10 & 11: SQLite triggers strictly prevent UPDATE or DELETE on audit_events."""
     conn = get_db_connection()
     cur = conn.cursor()
+    try:
+        # Attempt UPDATE - must raise IntegrityError from trigger
+        with pytest.raises((sqlite3.IntegrityError, sqlite3.DatabaseError)) as exc_info:
+            cur.execute("UPDATE audit_events SET actor_id = 'hacked' WHERE rowid = 1")
+        assert "forbidden" in str(exc_info.value).lower()
+        conn.rollback()
 
-    # Attempt UPDATE - must raise IntegrityError from trigger
-    with pytest.raises((sqlite3.IntegrityError, sqlite3.DatabaseError)) as exc_info:
-        cur.execute("UPDATE audit_events SET actor_id = 'hacked' WHERE rowid = 1")
-    assert "forbidden" in str(exc_info.value).lower()
-
-    # Attempt DELETE - must raise IntegrityError from trigger
-    with pytest.raises((sqlite3.IntegrityError, sqlite3.DatabaseError)) as exc_info:
-        cur.execute("DELETE FROM audit_events WHERE rowid = 1")
-    assert "forbidden" in str(exc_info.value).lower()
-    conn.close()
+        # Attempt DELETE - must raise IntegrityError from trigger
+        with pytest.raises((sqlite3.IntegrityError, sqlite3.DatabaseError)) as exc_info:
+            cur.execute("DELETE FROM audit_events WHERE rowid = 1")
+        assert "forbidden" in str(exc_info.value).lower()
+        conn.rollback()
+    finally:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        conn.close()
 
 
 def test_failed_authorization_logs_audit_event(auditor_token):
     """P1 Issue 14: Denied request triggers AUTHORIZATION_DENIED event in audit ledger."""
     import time
     # Attempt an unauthorized mutation
-    client.post("/cases/UTP-0001/approve", headers={"Authorization": f"Bearer {auditor_token}"})
+    res = client.post("/cases/UTP-0001/approve", headers={"Authorization": f"Bearer {auditor_token}"})
+    assert res.status_code == 403
 
     # Verify AUTHORIZATION_DENIED was logged with retry resilience
     row = None
-    for attempt in range(10):
+    for attempt in range(15):
         try:
             conn = get_db_connection()
             cur = conn.cursor()
@@ -286,9 +294,10 @@ def test_failed_authorization_logs_audit_event(auditor_token):
             if row:
                 break
         except sqlite3.OperationalError:
-            time.sleep(0.3)
+            pass
+        time.sleep(0.2)
 
-    assert row is not None
+    assert row is not None, "Expected AUTHORIZATION_DENIED audit event in audit_events table"
     assert row[0] == "AUTHORIZATION_DENIED"
     assert row[1] == "demo_auditor"
     assert row[2] == "WARNING"

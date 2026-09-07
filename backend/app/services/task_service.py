@@ -72,8 +72,8 @@ class TaskService:
 
                 custody_days = int(getattr(case, "custody_days", 0) or 0)
                 max_days = int(getattr(case, "max_sentence_days_for_offense", 1095) or 1095)
-                facility = getattr(case, "jail_location", None) or "Central Jail No. 4, Tihar (Synthetic)"
-                district = getattr(case, "district", None) or "Central Delhi"
+                facility = getattr(case, "jail_location", None) or "Not Recorded"
+                district = getattr(case, "district", None) or "Not Recorded"
                 assigned_id = getattr(case, "assigned_lawyer_id", None)
                 assigned_name = getattr(case, "assigned_lawyer", None)
                 missing_docs = getattr(case, "missing_docs", []) or []
@@ -331,6 +331,58 @@ class TaskService:
                     ))
                     synced_count += 1
 
+                # 9. DLSA: Hearing Follow-up & Court Production
+                if hearing_date and status in ("FILED", "HEARING_SCHEDULED", "ORDER_RECEIVED"):
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO task_queue (
+                            id, case_id, accused_name, task_type, title, description,
+                            owner_role, owner_user_id, owner_name, priority, due_date, source, reason,
+                            status, escalation_path, facility, district, custody_duration_days,
+                            document_completeness_pct, has_data_conflict, legal_aid_need,
+                            assignment_status, matter_status, hearing_date, is_consequential, updated_at
+                        ) VALUES (
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+                        )
+                    """, (
+                        f"TASK-{cid}-HEARING-FOLLOWUP", cid, cname, "HEARING_FOLLOW_UP",
+                        f"Track Court Production & Hearing: {cname}",
+                        f"Track scheduled court hearing and inmate production for {cname} ({cid}).",
+                        "DLSA_OFFICER", None, "DLSA Court Production Desk", "HIGH",
+                        hearing_date, "COURT_REGISTRY_SCHEDULE",
+                        f"Matter listed for hearing on {hearing_date}. DLSA coordination of prisoner production and defense representation required under High Court rules.",
+                        "PENDING_ACTION", "DLSA Secretary -> Chief Judicial Magistrate",
+                        facility, district, custody_days, completeness_pct, has_conflict, legal_aid_need,
+                        assignment_status, status, hearing_date, 0
+                    ))
+                    synced_count += 1
+
+                # 10. DLSA: Matter Completion Monitoring
+                if status in ("POST_RELEASE_FOLLOW_UP", "CLOSED"):
+                    due_date = (today + datetime.timedelta(days=7)).isoformat()
+                    task_st = "COMPLETED" if status == "CLOSED" else "UNDER_REVIEW"
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO task_queue (
+                            id, case_id, accused_name, task_type, title, description,
+                            owner_role, owner_user_id, owner_name, priority, due_date, source, reason,
+                            status, escalation_path, facility, district, custody_duration_days,
+                            document_completeness_pct, has_data_conflict, legal_aid_need,
+                            assignment_status, matter_status, hearing_date, is_consequential, updated_at
+                        ) VALUES (
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+                        )
+                    """, (
+                        f"TASK-{cid}-COMPLETION-MONITOR", cid, cname, "MATTER_COMPLETION_MONITORING",
+                        f"Monitor Post-Release & Matter Conclusion: {cname}",
+                        f"Post-release tracking and formal matter file closure review for {cname}.",
+                        "DLSA_OFFICER", None, "DLSA Case Monitoring Desk", "LOW",
+                        due_date, "POST_RELEASE_REGISTER",
+                        f"Accused released / matter transitioned to {status}. Verify trial monitoring records and formal closure checklist.",
+                        task_st, "DLSA Secretary -> State Legal Services Authority",
+                        facility, district, custody_days, completeness_pct, has_conflict, legal_aid_need,
+                        assignment_status, status, hearing_date, 0
+                    ))
+                    synced_count += 1
+
             conn.commit()
 
             # Authoritative Cloud Sync to Supabase PostgreSQL
@@ -485,9 +537,14 @@ class TaskService:
                 query += " AND matter_status = ?"
                 params.append(matter_status.upper())
 
+            today_iso = datetime.date.today().isoformat()
             if status:
-                query += " AND status = ?"
-                params.append(status.upper())
+                if status.upper() == "OVERDUE":
+                    query += " AND (status = 'OVERDUE' OR (status != 'COMPLETED' AND due_date < ?))"
+                    params.append(today_iso)
+                else:
+                    query += " AND status = ?"
+                    params.append(status.upper())
 
             if search:
                 s_term = f"%{search.strip()}%"
@@ -507,7 +564,13 @@ class TaskService:
             query += f" ORDER BY {sort_expr} {order_dir}"
 
             rows = cursor.execute(query, params).fetchall()
-            return [dict(r) for r in rows]
+            items = []
+            for r in rows:
+                d = dict(r)
+                if d.get("status") not in ("COMPLETED", "EXCEPTION") and d.get("due_date") and d["due_date"] < today_iso:
+                    d["status"] = "OVERDUE"
+                items.append(d)
+            return items
         finally:
             conn.close()
 

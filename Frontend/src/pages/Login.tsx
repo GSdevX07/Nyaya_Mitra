@@ -36,6 +36,7 @@ export function Login() {
       case "SUPERVISING_LEGAL_OFFICER":
         return "/supervisor";
       case "DLSA_OFFICER":
+        return "/dlsa";
       default:
         return "/dashboard";
     }

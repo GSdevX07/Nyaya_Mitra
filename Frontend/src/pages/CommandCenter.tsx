@@ -103,13 +103,8 @@ export function CommandCenter() {
       }
     } catch (err) {
       console.error("Failed to fetch eligible counsel:", err);
-      // Fallback counsel list
-      setEligibleCounsel([
-        { id: "ADV-DLSA-01", name: "Adv. Rajesh Sharma", bar_registration: "D/1428/2012", active_cases: 3, tier_label: "Primary District Panel", badge: "Lead LADC" },
-        { id: "ADV-DLSA-02", name: "Adv. Priya Nair", bar_registration: "D/2891/2016", active_cases: 2, tier_label: "Primary District Panel", badge: "Panel Counsel" },
-        { id: "ADV-DLSA-03", name: "Adv. Amit Patel", bar_registration: "D/3104/2019", active_cases: 1, tier_label: "Primary District Panel", badge: "Remand Advocate" },
-      ]);
-      setSelectedLawyerId("ADV-DLSA-01");
+      setEligibleCounsel([]);
+      setSelectedLawyerId("");
     } finally {
       setCounselLoading(false);
     }
@@ -577,9 +572,14 @@ export function CommandCenter() {
                     Select Empanelled Defense Advocate *
                   </label>
                   <div className="space-y-2 max-h-56 overflow-y-auto border border-border p-2 rounded-sm">
-                    {eligibleCounsel.map((adv) => (
-                      <label
-                        key={adv.id}
+                    {eligibleCounsel.length === 0 ? (
+                      <div className="p-4 text-center text-muted-foreground text-xs font-mono border border-dashed border-border rounded-sm">
+                        No Eligible Counsel Available
+                      </div>
+                    ) : (
+                      eligibleCounsel.map((adv) => (
+                        <label
+                          key={adv.id}
                         className={`p-2.5 rounded-sm border cursor-pointer flex items-center justify-between transition-colors ${
                           selectedLawyerId === adv.id
                             ? "bg-primary/10 border-primary"
@@ -612,7 +612,7 @@ export function CommandCenter() {
                           </div>
                         </div>
                       </label>
-                    ))}
+                    )))}
                   </div>
                 </div>
 

@@ -30,6 +30,7 @@ import { PoliceWorkspace } from "./pages/PoliceWorkspace";
 import { DocumentAssessmentPage } from "./pages/DocumentAssessmentPage";
 import { LegalSourcesAdmin } from "./pages/LegalSourcesAdmin";
 import { SupervisorWorkbench } from "./pages/SupervisorWorkbench";
+import { DlsaWorkspace } from "./pages/DlsaWorkspace";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 function App() {
@@ -109,6 +110,20 @@ function App() {
                     ]}
                   >
                     <SupervisorWorkbench />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dlsa"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                    ]}
+                  >
+                    <DlsaWorkspace />
                   </ProtectedRoute>
                 }
               />

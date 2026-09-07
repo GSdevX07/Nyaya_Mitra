@@ -141,7 +141,7 @@ class AuditRepository:
 
         # 2. SQLite local write with retry on database table lock
         import time
-        for attempt in range(5):
+        for attempt in range(10):
             conn = None
             try:
                 conn = self._get_conn()
@@ -178,16 +178,29 @@ class AuditRepository:
                 conn.commit()
                 break
             except sqlite3.OperationalError as e:
-                if attempt < 4:
-                    time.sleep(0.1 * (attempt + 1))
+                if conn:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                if attempt < 9:
+                    time.sleep(0.15 * (attempt + 1))
                 else:
                     print(f"[WARN] Failed to write audit event to SQLite after retries: {e}")
             except Exception as e:
+                if conn:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
                 print(f"[WARN] Failed to write audit event to SQLite: {e}")
                 break
             finally:
                 if conn:
-                    conn.close()
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
         return event
 
     def get_entity_audit_trail(self, entity_type: str, entity_id: str) -> List[AuditEvent]:

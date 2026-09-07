@@ -98,6 +98,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
     case "DLSA_OFFICER":
     default:
       return [
+        { path: "/dlsa", label: "DLSA Operations Desk" },
         { path: "/dashboard", label: "Legal-Aid Workbench" },
         { path: "/cases", label: "Cases" },
         { path: "/identity-review", label: "Identity Review" },

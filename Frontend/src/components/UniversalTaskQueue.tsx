@@ -163,9 +163,9 @@ export function UniversalTaskQueue({
       case "HIGH":
         return "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30";
       case "MEDIUM":
-        return "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30";
+        return "bg-secondary text-foreground border-border";
       default:
-        return "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/30";
+        return "bg-secondary/50 text-muted-foreground border-border";
     }
   };
 
@@ -175,7 +175,7 @@ export function UniversalTaskQueue({
       case "EXCEPTION":
         return "bg-rose-600 text-white font-bold";
       case "UNDER_REVIEW":
-        return "bg-purple-500/10 text-purple-600 border-purple-500/30";
+        return "bg-secondary text-foreground border-border";
       case "WAITING_FOR_DOCUMENTS":
         return "bg-red-500/10 text-red-600 border-red-500/30";
       case "COMPLETED":
@@ -280,7 +280,7 @@ export function UniversalTaskQueue({
           onClick={() => setActivePreset("WAITING_DOCS")}
           className={`px-3 py-1 rounded-sm border transition-colors ${
             activePreset === "WAITING_DOCS"
-              ? "bg-blue-600 text-white border-blue-600 font-bold"
+              ? "bg-red-600 text-white border-red-600 font-bold"
               : "bg-secondary text-muted-foreground border-border hover:text-foreground"
           }`}
         >
@@ -290,7 +290,7 @@ export function UniversalTaskQueue({
           onClick={() => setActivePreset("MY_TASKS")}
           className={`px-3 py-1 rounded-sm border transition-colors ${
             activePreset === "MY_TASKS"
-              ? "bg-indigo-600 text-white border-indigo-600 font-bold"
+              ? "bg-primary text-primary-foreground border-primary font-bold"
               : "bg-secondary text-muted-foreground border-border hover:text-foreground"
           }`}
         >

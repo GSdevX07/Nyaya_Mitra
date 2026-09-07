@@ -1228,18 +1228,20 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
 
     # Enforce database-level append-only immutability via SQLite triggers
     try:
+        cursor.execute("DROP TRIGGER IF EXISTS prevent_audit_events_update")
+        cursor.execute("DROP TRIGGER IF EXISTS prevent_audit_events_delete")
         cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS prevent_audit_events_update
+            CREATE TRIGGER prevent_audit_events_update
             BEFORE UPDATE ON audit_events
             BEGIN
-                SELECT RAISE(FAIL, 'UPDATE operation is strictly forbidden on immutable audit_events ledger');
+                SELECT RAISE(ABORT, 'UPDATE operation is strictly forbidden on immutable audit_events ledger');
             END;
         """)
         cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS prevent_audit_events_delete
+            CREATE TRIGGER prevent_audit_events_delete
             BEFORE DELETE ON audit_events
             BEGIN
-                SELECT RAISE(FAIL, 'DELETE operation is strictly forbidden on immutable audit_events ledger');
+                SELECT RAISE(ABORT, 'DELETE operation is strictly forbidden on immutable audit_events ledger');
             END;
         """)
     except Exception as e:

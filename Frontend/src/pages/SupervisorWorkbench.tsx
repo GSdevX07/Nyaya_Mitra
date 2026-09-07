@@ -78,35 +78,12 @@ export function SupervisorWorkbench() {
       const list = res.artifacts || res || [];
       if (list.length > 0) {
         setSelectedArtifact(list[0]);
+      } else {
+        setSelectedArtifact(null);
       }
     } catch (err) {
       console.error("Failed to load artifacts:", err);
-      // Construct fallback view if no artifact object exists yet
-      setSelectedArtifact({
-        artifact_id: `DRAFT-${c.case_id}`,
-        artifact_version_id: `v1-${c.case_id}`,
-        artifact_type: "BAIL_APPLICATION",
-        content_text: `IN THE COURT OF CHIEF METROPOLITAN MAGISTRATE / DISTRICT & SESSIONS JUDGE, ${(c.district || "CENTRAL").toUpperCase()}
-
-BAIL APPLICATION NO. _____ OF 2026
-
-IN THE MATTER OF:
-STATE (NCT OF DELHI) ... PROSECUTION
-VERSUS
-${c.name.toUpperCase()} ... ACCUSED / APPLICANT
-
-APPLICATION UNDER SECTION 479 OF BHARATIYA NAGARIK SURAKSHA SANHITA (BNSS), 2023 FOR GRANT OF STATUTORY BAIL
-
-MOST RESPECTFULLY SHOWETH:
-1. That the Applicant has undergone continuous judicial custody of ${c.custody_days} days in connection with offenses under ${c.offense_sections?.join(", ")}.
-2. That the Applicant is eligible for statutory bail relief as per law.
-
-COUNSEL FOR APPLICANT
-(Assigned Legal-Aid Counsel)`,
-        version_tag: "v1.0-counsel-signoff",
-        sha256_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        created_at: new Date().toISOString(),
-      });
+      setSelectedArtifact(null);
     } finally {
       setArtifactsLoading(false);
     }
@@ -563,19 +540,31 @@ COUNSEL FOR APPLICANT
                     </span>
                   </div>
 
-                  <div className="p-4 bg-muted/30 border border-border rounded-sm font-mono text-xs whitespace-pre-wrap leading-relaxed max-h-[420px] overflow-y-auto">
-                    {selectedArtifact?.content_text || "No draft content recorded."}
-                  </div>
+                  {!selectedArtifact ? (
+                    <div className="p-8 text-center text-xs font-mono text-muted-foreground border border-dashed border-border rounded-sm">
+                      <Scale className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+                      <div className="font-bold text-foreground">Pending Counsel Draft Submission</div>
+                      <p className="mt-1 text-[11px]">
+                        Assigned defense counsel has not yet submitted a draft petition artifact for supervisory scrutiny.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="p-4 bg-muted/30 border border-border rounded-sm font-mono text-xs whitespace-pre-wrap leading-relaxed max-h-[420px] overflow-y-auto">
+                        {selectedArtifact.content_text || "No draft content recorded."}
+                      </div>
 
-                  <div className="p-3 bg-secondary/40 border border-border rounded-sm text-[11px] font-mono space-y-1">
-                    <div className="flex items-center gap-1.5 text-muted-foreground">
-                      <Hash className="w-3.5 h-3.5 text-primary shrink-0" />
-                      <span>Artifact Digest: <strong className="text-foreground select-all">{selectedArtifact?.sha256_hash || "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}</strong></span>
-                    </div>
-                    <div className="text-muted-foreground">
-                      Level-1 Counsel: <strong>{selectedCase.assigned_lawyer || "Assigned Legal Aid Advocate"}</strong>
-                    </div>
-                  </div>
+                      <div className="p-3 bg-secondary/40 border border-border rounded-sm text-[11px] font-mono space-y-1">
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                          <Hash className="w-3.5 h-3.5 text-primary shrink-0" />
+                          <span>Artifact Digest: <strong className="text-foreground select-all">{selectedArtifact.sha256_hash || "Not Recorded"}</strong></span>
+                        </div>
+                        <div className="text-muted-foreground">
+                          Level-1 Counsel: <strong>{selectedCase.assigned_lawyer || "Assigned Legal Aid Advocate"}</strong>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Right Side: Supervisory Review & Action Controls (5 cols) */}
@@ -609,8 +598,8 @@ COUNSEL FOR APPLICANT
                     />
                     <button
                       onClick={handleSupervisoryApprove}
-                      disabled={actionInProgress}
-                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-xs font-bold uppercase rounded-sm flex items-center justify-center gap-2 shadow-sm transition-colors"
+                      disabled={actionInProgress || !selectedArtifact}
+                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-mono text-xs font-bold uppercase rounded-sm flex items-center justify-center gap-2 shadow-sm transition-colors"
                     >
                       {actionInProgress ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                       Approve Petition (Supervisory Approval)

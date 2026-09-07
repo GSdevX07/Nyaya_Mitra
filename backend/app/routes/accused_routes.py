@@ -218,14 +218,15 @@ async def list_entitled_documents(
 @citizen_router.get("/documents/{doc_id}/summary", response_model=Dict[str, Any])
 async def get_doc_summary(
     doc_id: str,
+    lang: str = Query("en"),
     current_user: AuthUser = Depends(require_role(Role.ACCUSED_USER, Role.FAMILY_GUARDIAN)),
 ):
     """
-    Retrieve plain-text preview and summary of an entitled document for low-bandwidth mode.
+    Retrieve plain-text preview and dynamic summary of an entitled document for low-bandwidth mode.
     """
     if not current_user.linked_case_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active linked case.")
-    return get_citizen_document_summary(doc_id, current_user.linked_case_id)
+    return get_citizen_document_summary(doc_id, current_user.linked_case_id, lang=lang)
 
 
 @citizen_router.post("/requests", response_model=Dict[str, Any])

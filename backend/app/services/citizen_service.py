@@ -40,6 +40,7 @@ from app.database import (
     log_citizen_notification,
     get_case_uploaded_documents,
 )
+from app.services.document_summarizer import summarize_document
 
 logger = logging.getLogger("nyaya_mitra.citizen_service")
 
@@ -296,16 +297,6 @@ def get_citizen_entitled_documents(case_id: str, lang: str = "en") -> List[Dict[
         "nominal_roll": "Jail Nominal Roll Certificate",
     }
 
-    TEXT_SUMMARIES = {
-        "fir": "Certified copy of initial police report stating allegations, FIR number, date of incident, and registration.",
-        "charge_sheet": "Formal investigation report filed under CrPC/BNSS stating evidence gathered, witness list, and formal sections.",
-        "remand_order": "Judicial authorization detailing judicial custody period and next court production date.",
-        "custody_certificate": "Official prison certificate confirming exact calendar days spent in detention.",
-        "bail_application": "Formal petition filed on behalf of the accused praying for release on statutory grounds.",
-        "court_order": "Authoritative court order signed by the presiding judge disposing the bail prayer.",
-        "nominal_roll": "Official prison record extract detailing conduct, discipline, and custody chronology.",
-    }
-
     results: List[Dict[str, Any]] = []
     seen = set()
 
@@ -317,7 +308,14 @@ def get_citizen_entitled_documents(case_id: str, lang: str = "en") -> List[Dict[
             if d_type in CITIZEN_ENTITLED_TYPES and d_type not in seen:
                 seen.add(d_type)
                 title_trans = get_document_title_translation(d_type, lang)
-                summary_raw = TEXT_SUMMARIES.get(d_type, f"Certified copy of official {d_type.replace('_', ' ')}.")
+                raw_text = doc.get("extracted_text") or doc.get("custom_text") or ""
+                summary_raw = summarize_document(
+                    case_id=case_id,
+                    doc_type=d_type,
+                    raw_text=raw_text,
+                    doc_obj=doc,
+                    lang=lang,
+                )
                 size_bytes = doc.get("file_size_bytes", 24576)
                 size_kb = max(1, round(size_bytes / 1024))
 
@@ -342,7 +340,12 @@ def get_citizen_entitled_documents(case_id: str, lang: str = "en") -> List[Dict[
             if p_doc in CITIZEN_ENTITLED_TYPES and p_doc not in seen:
                 seen.add(p_doc)
                 title_trans = get_document_title_translation(p_doc, lang)
-                summary_raw = TEXT_SUMMARIES.get(p_doc, f"Certified copy of official {p_doc.replace('_', ' ')}.")
+                summary_raw = summarize_document(
+                    case_id=case_id,
+                    doc_type=p_doc,
+                    raw_text="",
+                    lang=lang,
+                )
                 results.append({
                     "id": f"doc_{case_id}_{p_doc}",
                     "document_type": p_doc,
@@ -358,7 +361,7 @@ def get_citizen_entitled_documents(case_id: str, lang: str = "en") -> List[Dict[
     return results
 
 
-def get_citizen_document_summary(doc_id: str, case_id: str) -> Dict[str, Any]:
+def get_citizen_document_summary(doc_id: str, case_id: str, lang: str = "en") -> Dict[str, Any]:
     """Retrieve text summary and preview for low-bandwidth viewing."""
     conn = get_db_connection()
     try:
@@ -368,22 +371,29 @@ def get_citizen_document_summary(doc_id: str, case_id: str) -> Dict[str, Any]:
         if row:
             cols = [d[0] for d in cursor.description]
             doc = dict(zip(cols, row))
-            raw_text = doc.get("extracted_text") or doc.get("custom_text") or "No plain text extracted."
+            raw_text = doc.get("extracted_text") or doc.get("custom_text") or ""
+            d_type = doc.get("document_type", "official_record")
+            summary = summarize_document(case_id=case_id, doc_type=d_type, raw_text=raw_text, doc_obj=doc, lang=lang)
             return {
                 "id": doc_id,
                 "case_id": case_id,
-                "document_type": doc.get("document_type"),
+                "document_type": d_type,
                 "file_name": doc.get("file_name"),
-                "text_preview": raw_text[:1000],
+                "text_summary": summary,
+                "text_preview": raw_text[:1000] if raw_text else summary,
                 "file_size_formatted": f"{max(1, round((doc.get('file_size_bytes') or 0) / 1024))} KB",
                 "status": "VERIFIED",
             }
+        
+        d_type = doc_id.replace(f"doc_{case_id}_", "")
+        summary = summarize_document(case_id=case_id, doc_type=d_type, raw_text="", lang=lang)
         return {
             "id": doc_id,
             "case_id": case_id,
-            "document_type": "official_record",
+            "document_type": d_type,
             "file_name": f"{doc_id}.pdf",
-            "text_preview": "Official certified case copy on file with the District Legal Services Authority.",
+            "text_summary": summary,
+            "text_preview": summary,
             "file_size_formatted": "16 KB",
             "status": "VERIFIED",
         }

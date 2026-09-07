@@ -9,6 +9,7 @@ import { useAuth } from "../lib/auth";
 import {
   fetchCitizenOverview,
   fetchCitizenLanguages,
+  fetchCitizenDocumentSummary,
   submitCitizenActionRequest,
   updateCitizenNotificationPreferences,
   fetchEvidenceChain,
@@ -64,6 +65,22 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
 
   // Document Summary Preview Modal
   const [previewDoc, setPreviewDoc] = useState<CitizenEntitledDocument | null>(null);
+  const [previewDetails, setPreviewDetails] = useState<any>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
+  const handleOpenTextSummary = async (doc: CitizenEntitledDocument) => {
+    setPreviewDoc(doc);
+    setPreviewDetails(null);
+    setLoadingPreview(true);
+    try {
+      const summaryRes = await fetchCitizenDocumentSummary(doc.id, lang);
+      setPreviewDetails(summaryRes);
+    } catch (err) {
+      console.warn("Failed to fetch extended document summary:", err);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
 
   // Document Provenance Modal State
   const [selectedProvenanceDoc, setSelectedProvenanceDoc] = useState<CitizenEntitledDocument | null>(null);
@@ -686,7 +703,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                 </span>
                 <div className="flex items-center gap-1.5">
                   <button
-                    onClick={() => setPreviewDoc(doc)}
+                    onClick={() => handleOpenTextSummary(doc)}
                     className="px-2.5 py-1 rounded text-[11px] font-sans font-bold bg-card border border-border hover:bg-secondary text-foreground flex items-center gap-1 transition-colors"
                   >
                     <Eye className="w-3 h-3" />
@@ -1057,7 +1074,13 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               <h3 className="font-serif font-bold text-base text-foreground truncate pr-2">
                 {previewDoc.title}
               </h3>
-              <button onClick={() => setPreviewDoc(null)} className="text-muted-foreground hover:text-foreground shrink-0">
+              <button
+                onClick={() => {
+                  setPreviewDoc(null);
+                  setPreviewDetails(null);
+                }}
+                className="text-muted-foreground hover:text-foreground shrink-0"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1068,9 +1091,27 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                 <span>Size: {previewDoc.file_size_formatted}</span>
               </div>
               <div className="p-4 bg-secondary/30 border border-border rounded-lg text-foreground leading-relaxed">
-                <strong className="block font-serif text-sm mb-1 text-primary">Plain-Language Summary:</strong>
-                {previewDoc.text_summary}
+                <div className="flex items-center justify-between mb-1">
+                  <strong className="block font-serif text-sm text-primary">Plain-Language Summary:</strong>
+                  {loadingPreview && (
+                    <span className="text-[10px] font-mono text-muted-foreground animate-pulse">Syncing...</span>
+                  )}
+                </div>
+                <p className="text-xs text-foreground leading-relaxed">
+                  {previewDetails?.text_summary || previewDoc.text_summary}
+                </p>
               </div>
+
+              {previewDetails?.text_preview &&
+                previewDetails.text_preview !== (previewDetails.text_summary || previewDoc.text_summary) && (
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-bold text-muted-foreground">Document Extract / Record Snippet:</span>
+                    <div className="p-3 bg-secondary/20 border border-border/70 rounded-lg text-xs font-mono text-foreground max-h-36 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                      {previewDetails.text_preview}
+                    </div>
+                  </div>
+                )}
+
               <p className="text-[11px] text-muted-foreground leading-relaxed">
                 This document is certified by the Legal Services Authority. Certified paper copies may also be inspected at the DLSA Front Office during court working hours.
               </p>
@@ -1078,7 +1119,10 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
 
             <div className="pt-3 flex items-center justify-end">
               <button
-                onClick={() => setPreviewDoc(null)}
+                onClick={() => {
+                  setPreviewDoc(null);
+                  setPreviewDetails(null);
+                }}
                 className="px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-lg"
               >
                 Close Preview

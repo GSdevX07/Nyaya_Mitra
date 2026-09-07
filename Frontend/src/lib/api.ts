@@ -987,16 +987,17 @@ export async function fetchCitizenEntitledDocuments(lang: string = "en"): Promis
   return await res.json();
 }
 
-export async function fetchCitizenDocumentSummary(docId: string): Promise<{
+export async function fetchCitizenDocumentSummary(docId: string, lang: string = "en"): Promise<{
   id: string;
   case_id: string;
   document_type: string;
   file_name: string;
+  text_summary?: string;
   text_preview: string;
   file_size_formatted: string;
   status: string;
 }> {
-  const res = await authFetch(`${API_BASE_URL}/citizen/documents/${encodeURIComponent(docId)}/summary`);
+  const res = await authFetch(`${API_BASE_URL}/citizen/documents/${encodeURIComponent(docId)}/summary?lang=${encodeURIComponent(lang)}`);
   if (!res.ok) throw new Error("Failed to load document summary");
   return await res.json();
 }

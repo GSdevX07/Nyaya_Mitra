@@ -212,8 +212,8 @@ export function PoliceWorkspace() {
 
         <div className="bg-card border-2 border-border p-4 rounded-sm">
           <div className="text-[11px] font-mono text-muted-foreground uppercase">Charge Sheet Status</div>
-          <div className="text-2xl font-serif font-bold text-amber-600 mt-1">{chargesheetPending.length}</div>
-          <div className="text-[10px] font-mono text-amber-600/80 mt-1">Pending Source Record</div>
+          <div className="text-2xl font-serif font-bold text-red-600 mt-1">{chargesheetPending.length}</div>
+          <div className="text-[10px] font-mono text-red-600/80 mt-1">Pending Source Record</div>
         </div>
 
         <div className="bg-card border-2 border-border p-4 rounded-sm">
@@ -316,11 +316,11 @@ export function PoliceWorkspace() {
                       </div>
 
                       <div className="flex items-center gap-3 text-[11px] font-mono pt-1">
-                        <span className={`flex items-center gap-1 ${c.remand_order_present ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        <span className={`flex items-center gap-1 ${c.remand_order_present ? 'text-emerald-600' : 'text-red-600'}`}>
                           {c.remand_order_present ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
                           Remand Record: {c.remand_status}
                         </span>
-                        <span className={`flex items-center gap-1 ${c.charge_sheet_present ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        <span className={`flex items-center gap-1 ${c.charge_sheet_present ? 'text-emerald-600' : 'text-red-600'}`}>
                           {c.charge_sheet_present ? <CheckCircle2 className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
                           Charge Sheet: {c.charge_sheet_status}
                         </span>
@@ -408,7 +408,7 @@ export function PoliceWorkspace() {
                               ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
                               : isAck
                               ? "bg-blue-100 text-blue-800 border border-blue-300"
-                              : "bg-amber-100 text-amber-800 border border-amber-300"
+                              : "bg-red-100 text-red-800 border border-red-300"
                           }`}
                         >
                           {act.status}

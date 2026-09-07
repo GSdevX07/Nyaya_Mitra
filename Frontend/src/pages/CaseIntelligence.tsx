@@ -640,7 +640,7 @@ export function CaseIntelligence() {
     checkPageBreak(30);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
-    doc.setTextColor(180, 83, 9); // Amber color for notice
+    doc.setTextColor(220, 38, 38); // Red color for notice
     doc.text("B. Remaining / Pending Documents Required (To be Requisitioned):", margin, yPos);
     doc.setTextColor(0, 0, 0); // Reset to black
     yPos += 4.5;
@@ -755,7 +755,7 @@ export function CaseIntelligence() {
       <div className="p-8 max-w-xl mx-auto flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center">
         <ToastContainer toasts={toasts} onDismiss={removeToast} />
         {isForbidden ? (
-          <ShieldAlert className="w-14 h-14 text-amber-500" />
+          <ShieldAlert className="w-14 h-14 text-red-500" />
         ) : (
           <AlertCircle className="w-12 h-12 text-destructive" />
         )}
@@ -1219,7 +1219,7 @@ export function CaseIntelligence() {
               >
                 {generatingDraft ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-4 h-4" />} Internal Copy
               </button>
-              <span className="px-3 py-1.5 rounded-sm bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs font-mono font-bold flex items-center gap-1.5">
+              <span className="px-3 py-1.5 rounded-sm bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-mono font-bold flex items-center gap-1.5">
                 <AlertCircle className="w-4 h-4" /> DLSA COORDINATION — Pending Advocate Sign-Off
               </span>
             </>
@@ -1287,7 +1287,7 @@ export function CaseIntelligence() {
                   key={t.action}
                   onClick={() => handleTransitionButtonClick(t)}
                   disabled={transitioningAction === t.action}
-                  className="px-2 py-1 text-[10px] font-mono font-bold rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
+                  className="px-2 py-1 text-[10px] font-mono font-bold rounded bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30 hover:bg-red-500/20 transition-colors flex items-center gap-1"
                   title={t.description}
                 >
                   <AlertTriangle className="w-3 h-3 shrink-0" />
@@ -1396,7 +1396,7 @@ export function CaseIntelligence() {
                 need.urgency === "URGENT"
                   ? "bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300"
                   : need.blocking_bail_workflow
-                  ? "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300"
+                  ? "bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400"
                   : "bg-blue-500/10 border-blue-500/30 text-blue-700 dark:text-blue-300"
               }`}
             >
@@ -1609,7 +1609,7 @@ export function CaseIntelligence() {
                       <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
                         (c.present_docs || []).some((d: string) => d.toLowerCase().includes("charge"))
                           ? "bg-emerald-500/15 text-emerald-600 border border-emerald-500/30"
-                          : "bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30"
+                          : "bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30"
                       }`}>
                         {(c.present_docs || []).some((d: string) => d.toLowerCase().includes("charge"))
                           ? "SUBMITTED / ON RECORD"
@@ -1688,7 +1688,7 @@ export function CaseIntelligence() {
                       Section 479 BNSS Informational Threshold Signal
                     </span>
                     {eligibility.eligible ? (
-                      <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                      <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30">
                         Potential Threshold Met
                       </span>
                     ) : (
@@ -1723,7 +1723,7 @@ export function CaseIntelligence() {
                               <CheckCircle2 className="w-3.5 h-3.5" /> Present
                             </span>
                           ) : (
-                            <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1 text-[11px] font-bold">
+                            <span className="text-red-600 dark:text-red-400 flex items-center gap-1 text-[11px] font-bold">
                               <AlertTriangle className="w-3.5 h-3.5" /> Pending
                             </span>
                           )}
@@ -1756,7 +1756,7 @@ export function CaseIntelligence() {
                       ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
                       : eligibility.machine_status === "EXCLUDED"
                       ? "bg-destructive/15 text-destructive border border-destructive/30"
-                      : "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                      : "bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30"
                   }`}
                 >
                   {eligibility.machine_status ? eligibility.machine_status.replace(/_/g, " ") : (eligibility.eligible ? "THRESHOLD SATISFIED" : "REVIEW REQUIRED")}
@@ -1773,7 +1773,7 @@ export function CaseIntelligence() {
                 </div>
                 <div className="p-3 rounded bg-secondary/50 border border-border">
                   <span className="text-[10px] font-mono text-muted-foreground uppercase block">Excluded Delay</span>
-                  <span className="text-lg font-bold font-mono text-amber-500">
+                  <span className="text-lg font-bold font-mono text-red-500">
                     {eligibility.excluded_delay_days || c.excluded_delay_days || 0}d
                   </span>
                 </div>
@@ -1810,7 +1810,7 @@ export function CaseIntelligence() {
                     <span>Capital / Life Imprisonment Exclusion: <strong>{c.punishable_by_death_or_life ? "Excluded" : "Cleared"}</strong></span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 className={`w-3.5 h-3.5 ${c.multiple_active_cases ? "text-amber-500" : "text-emerald-500"}`} />
+                    <CheckCircle2 className={`w-3.5 h-3.5 ${c.multiple_active_cases ? "text-red-500" : "text-emerald-500"}`} />
                     <span>Multiple Pending Cases Proviso: <strong>{c.multiple_active_cases ? "Review Required" : "Single Case"}</strong></span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1836,7 +1836,7 @@ export function CaseIntelligence() {
                 <h3 className="font-bold font-serif text-sm uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                   <FileText className="w-4 h-4 text-primary" /> Required Case Records & Blockers
                 </h3>
-                <span className={`text-xs font-mono font-bold ${completeness.is_complete ? "text-emerald-500" : "text-amber-500"}`}>
+                <span className={`text-xs font-mono font-bold ${completeness.is_complete ? "text-emerald-500" : "text-red-500"}`}>
                   {completeness.is_complete ? "All Documents Present" : "Missing Records Required"}
                 </span>
               </div>
@@ -1869,7 +1869,7 @@ export function CaseIntelligence() {
                           : isReviewed
                           ? "bg-blue-500/10 border-blue-500/40"
                           : isPending
-                          ? "bg-amber-500/10 border-amber-500/40"
+                          ? "bg-secondary/40 border-border"
                           : "bg-destructive/5 border-destructive/20"
                       }`}
                     >
@@ -1881,7 +1881,7 @@ export function CaseIntelligence() {
                           ) : isReviewed ? (
                             <CheckCircle2 className="w-4 h-4 text-blue-500 shrink-0" />
                           ) : isPending ? (
-                            <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+                            <Clock className="w-4 h-4 text-red-500 shrink-0" />
                           ) : (
                             <AlertTriangle className="w-4 h-4 text-destructive shrink-0" />
                           )}
@@ -1903,7 +1903,7 @@ export function CaseIntelligence() {
                             </span>
                           )}
                           {isPending && (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-secondary text-foreground border border-border">
                               PENDING VERIFICATION &bull; STORED IN VAULT
                             </span>
                           )}
@@ -1924,7 +1924,7 @@ export function CaseIntelligence() {
                         ) : isPending ? (
                           <span>Stored in Vault &bull; Awaiting Verification &bull; Uploaded by: <strong className="text-foreground">{detail?.uploaded_by || "Institutional Officer"}</strong></span>
                         ) : (
-                          <span className="text-amber-600 dark:text-amber-400 font-medium">Missing record &mdash; awaiting institutional upload</span>
+                          <span className="text-red-600 dark:text-red-400 font-medium">Missing record &mdash; awaiting institutional upload</span>
                         )}
                       </div>
 
@@ -1953,10 +1953,10 @@ export function CaseIntelligence() {
                           ) : (
                             <button
                               onClick={() => handleOpenDocPreview(docId, docType.replace(/_/g, " ").toUpperCase())}
-                              className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-700 dark:text-amber-300 rounded text-xs font-mono font-medium flex items-center gap-1 shadow-sm transition-colors"
+                              className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-600 dark:text-red-400 rounded text-xs font-mono font-medium flex items-center gap-1 shadow-sm transition-colors"
                               title="View statutory requisition notice"
                             >
-                              <FileText className="w-3.5 h-3.5 text-amber-500" />
+                              <FileText className="w-3.5 h-3.5 text-red-500" />
                               <span>Notice</span>
                             </button>
                           )}
@@ -2038,14 +2038,14 @@ export function CaseIntelligence() {
       {!isPolice && !isJail && activeTab === "draft" && (
         <div className="space-y-6">
           {!hasAssignedCounsel ? (
-            <div className="p-8 border border-amber-500/30 bg-amber-500/5 rounded-sm space-y-6">
+            <div className="p-8 border border-red-500/30 bg-red-500/5 rounded-sm space-y-6">
               <div className="flex items-start gap-4">
-                <div className="p-3 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 shrink-0">
+                <div className="p-3 rounded-full bg-red-500/20 text-red-600 dark:text-red-400 shrink-0">
                   <ShieldAlert className="w-8 h-8" />
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-secondary text-foreground border border-border">
                       Institutional Procedural Hold
                     </span>
                     <span className="text-xs font-mono text-muted-foreground">
@@ -2076,7 +2076,7 @@ export function CaseIntelligence() {
                   </div>
                   <div className="p-3 bg-muted/40 rounded border border-border">
                     <div className="text-[10px] font-mono uppercase text-muted-foreground">Counsel Assignment</div>
-                    <div className="font-bold text-amber-600 dark:text-amber-400 mt-0.5">Pending Panel Allocation</div>
+                    <div className="font-bold text-red-600 dark:text-red-400 mt-0.5">Pending Panel Allocation</div>
                   </div>
                 </div>
               </div>
@@ -2165,13 +2165,13 @@ export function CaseIntelligence() {
                 {/* DLSA: Read-only petition view */}
                 <div className="space-y-2">
                   <label className="text-xs font-mono font-bold uppercase text-muted-foreground flex items-center gap-2">
-                    <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
+                    <ShieldCheck className="w-3.5 h-3.5 text-red-500" />
                     Petition Work Product — Read Only (Authorised Legal Counsel Editing Reserved):
                   </label>
                   <div className="w-full p-4 font-mono text-xs bg-muted/30 border border-border rounded-sm text-foreground leading-relaxed min-h-[200px] overflow-auto whitespace-pre-wrap select-all">
                     {editableDraft || "Draft petition will appear here once AI generation is complete."}
                   </div>
-                  <p className="text-[11px] text-amber-700 dark:text-amber-400 font-mono">
+                  <p className="text-[11px] text-red-600 dark:text-red-400 font-mono">
                     ⚠ DLSA officers may review and coordinate corrections. Final petition editing authority rests with the assigned panel advocate.
                   </p>
                 </div>
@@ -2229,8 +2229,8 @@ export function CaseIntelligence() {
                   if (reviewEvents.length === 0) return null;
                   const latestFeedback = reviewEvents[reviewEvents.length - 1];
                   return (
-                    <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-sm space-y-1.5 font-mono text-xs">
-                      <div className="flex items-center gap-2 font-bold text-amber-700 dark:text-amber-400">
+                    <div className="p-3.5 bg-red-500/10 border border-red-500/30 rounded-sm space-y-1.5 font-mono text-xs">
+                      <div className="flex items-center gap-2 font-bold text-red-600 dark:text-red-400">
                         <AlertTriangle className="w-4 h-4 shrink-0" />
                         <span>Institutional Review Directive ({latestFeedback.actor_role?.replace(/_/g, " ")}):</span>
                       </div>
@@ -2336,7 +2336,7 @@ export function CaseIntelligence() {
                         disabled={transitioningAction === "REQUEST_REVISIONS"}
                         className="px-3 py-2 bg-secondary hover:bg-secondary/80 text-foreground border border-border rounded-sm text-xs font-bold font-serif uppercase tracking-wider flex items-center gap-1.5 transition-colors"
                       >
-                        <Send className="w-3.5 h-3.5 text-amber-500" />
+                        <Send className="w-3.5 h-3.5 text-red-500" />
                         Request Revisions
                       </button>
                       <button
@@ -2589,7 +2589,7 @@ export function CaseIntelligence() {
                         : isReviewed
                         ? "border-blue-500/30 bg-blue-500/5"
                         : isPending
-                        ? "border-amber-500/30 bg-amber-500/5"
+                        ? "border-red-500/30 bg-red-500/5"
                         : "border-destructive/30 bg-destructive/5"
                     }`}
                   >
@@ -2599,7 +2599,7 @@ export function CaseIntelligence() {
                       ) : isReviewed ? (
                         <CheckCircle2 className="w-5 h-5 text-blue-500 shrink-0" />
                       ) : isPending ? (
-                        <Clock className="w-5 h-5 text-amber-500 shrink-0" />
+                        <Clock className="w-5 h-5 text-red-500 shrink-0" />
                       ) : (
                         <AlertTriangle className="w-5 h-5 text-destructive shrink-0" />
                       )}
@@ -2619,7 +2619,7 @@ export function CaseIntelligence() {
                             </span>
                           )}
                           {isPending && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 border border-amber-500/30">
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-secondary text-foreground border border-border">
                               PENDING VERIFICATION &bull; STORED IN VAULT
                             </span>
                           )}
@@ -2848,7 +2848,7 @@ export function CaseIntelligence() {
                 <CheckCircle2 className="w-3.5 h-3.5" /> COUNSEL ASSIGNED
               </span>
             ) : (
-              <span className="px-2.5 py-1 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 font-mono text-xs font-bold flex items-center gap-1">
+              <span className="px-2.5 py-1 rounded bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 font-mono text-xs font-bold flex items-center gap-1">
                 <AlertTriangle className="w-3.5 h-3.5" /> PENDING ASSIGNMENT
               </span>
             )}
@@ -3074,7 +3074,7 @@ export function CaseIntelligence() {
             <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-secondary/30">
               <div className="flex items-center gap-2.5">
                 {activeTransitionModal.is_exception ? (
-                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+                  <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
                 ) : (
                   <ShieldCheck className="w-5 h-5 text-primary shrink-0" />
                 )}
@@ -3524,7 +3524,7 @@ export function CaseIntelligence() {
                   disabled={transitioningAction === activeTransitionModal.action}
                   className={`px-4 py-2 rounded-lg text-xs font-bold font-mono text-white shadow-sm flex items-center gap-1.5 transition-colors ${
                     activeTransitionModal.is_exception
-                      ? "bg-amber-600 hover:bg-amber-700"
+                      ? "bg-red-600 hover:bg-red-700"
                       : "bg-primary hover:bg-primary/90 text-primary-foreground"
                   }`}
                 >

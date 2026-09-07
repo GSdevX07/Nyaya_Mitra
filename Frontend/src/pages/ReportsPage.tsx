@@ -240,7 +240,7 @@ export function ReportsPage() {
 
             <div className="p-3 bg-secondary/40 rounded border border-border space-y-1">
               <div className="text-[11px] font-mono text-muted-foreground uppercase">Unauthorized Access Attempts</div>
-              <div className={`text-xl font-serif font-bold ${data.statutory_compliance.unauthorized_access_attempts > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+              <div className={`text-xl font-serif font-bold ${data.statutory_compliance.unauthorized_access_attempts > 0 ? "text-red-600" : "text-emerald-600"}`}>
                 {data.statutory_compliance.unauthorized_access_attempts}
               </div>
               <div className="text-[11px] text-muted-foreground">

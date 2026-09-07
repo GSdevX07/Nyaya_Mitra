@@ -120,7 +120,7 @@ export function EvidencePage() {
                   {item.authenticity_score > 85 ? (
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                   ) : (
-                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                    <AlertCircle className="w-3.5 h-3.5 text-red-600" />
                   )}
                   {item.authenticity_score > 85 ? "Integrity Verified" : "Integrity Flagged"}
                 </span>

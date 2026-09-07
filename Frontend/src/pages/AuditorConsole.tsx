@@ -253,7 +253,7 @@ export function AuditorConsole() {
       return {
         title: "Formal Audit Ledger Export Generated",
         category: "Audit Provenance",
-        color: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20",
+        color: "bg-red-500/10 text-red-600 dark:text-red-400 border-border",
         summary: `Auditor exported verifiable audit stream. Reason: ${details.export_reason || "Statutory Review"}. SHA-256 Checksum: ${details.artifact_sha256?.slice(0, 16) || "SEALED"}...`,
         targetLabel: "Audit Export Artifact",
       };
@@ -381,7 +381,7 @@ export function AuditorConsole() {
               : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
-          <ShieldAlert className="w-4 h-4 text-amber-500" />
+          <ShieldAlert className="w-4 h-4 text-red-500" />
           Statutory Exceptions & Anomalies ({exceptions.length})
         </button>
       </div>
@@ -536,8 +536,8 @@ export function AuditorConsole() {
                           {ev.severity && ev.severity !== "INFO" && (
                             <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase ${
                               ev.severity === "CRITICAL" ? "bg-rose-600 text-white" :
-                              ev.severity === "HIGH" ? "bg-amber-600 text-white" :
-                              ev.severity === "WARNING" ? "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border border-yellow-500/40" :
+                              ev.severity === "HIGH" ? "bg-red-600 text-white" :
+                              ev.severity === "WARNING" ? "bg-red-500/20 text-red-700 dark:text-red-400 border border-red-500/40" :
                               "bg-secondary text-foreground"
                             }`}>
                               {ev.severity}
@@ -649,7 +649,7 @@ export function AuditorConsole() {
         <div className="space-y-4">
           <div className="bg-card border-2 border-border p-5 rounded-sm shadow-sm">
             <h2 className="text-lg font-serif font-bold text-foreground flex items-center gap-2">
-              <ShieldAlert className="w-5 h-5 text-amber-500" />
+              <ShieldAlert className="w-5 h-5 text-red-500" />
               Statutory Exception Detection & Non-Compliance Tracking
             </h2>
             <p className="text-xs text-muted-foreground mt-1">
@@ -676,7 +676,7 @@ export function AuditorConsole() {
                     exc.severity === "CRITICAL"
                       ? "border-l-rose-600 border-border"
                       : exc.severity === "HIGH"
-                      ? "border-l-amber-600 border-border"
+                      ? "border-l-red-600 border-border"
                       : "border-l-blue-600 border-border"
                   }`}
                 >
@@ -684,7 +684,7 @@ export function AuditorConsole() {
                     <div className="flex items-center gap-2">
                       <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase ${
                         exc.severity === "CRITICAL" ? "bg-rose-600 text-white" :
-                        exc.severity === "HIGH" ? "bg-amber-600 text-white" : "bg-blue-600 text-white"
+                        exc.severity === "HIGH" ? "bg-red-600 text-white" : "bg-blue-600 text-white"
                       }`}>
                         {exc.severity}
                       </span>

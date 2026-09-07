@@ -300,7 +300,7 @@ export function LegalSourcesAdmin() {
       case "discovered":
         return <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-gray-500/15 text-gray-600 border border-gray-500/30 flex items-center gap-1"><Clock className="w-3 h-3" /> Discovered / Proposed</span>;
       case "superseded":
-        return <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-600 border border-amber-500/30 flex items-center gap-1"><History className="w-3 h-3" /> Superseded (Historical)</span>;
+        return <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-secondary text-foreground border border-border flex items-center gap-1"><History className="w-3 h-3" /> Superseded (Historical)</span>;
       case "retired":
         return <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-500/15 text-rose-600 border border-rose-500/30 flex items-center gap-1"><X className="w-3 h-3" /> Retired</span>;
       default:
@@ -371,9 +371,9 @@ export function LegalSourcesAdmin() {
           <div className="text-xs text-muted-foreground mt-2">BNSS 2023, BNS 2023 &amp; SC Precedents</div>
         </div>
 
-        <div className="p-6 bg-card border-2 border-border rounded-2xl shadow-sm hover:border-amber-500/40 transition-colors">
+        <div className="p-6 bg-card border-2 border-border rounded-2xl shadow-sm hover:border-red-500/40 transition-colors">
           <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Historical / Superseded</div>
-          <div className="text-4xl font-extrabold text-amber-600 mt-2">
+          <div className="text-4xl font-extrabold text-red-600 mt-2">
             {sources.filter((s) => s.lifecycle_status === "superseded").length}
           </div>
           <div className="text-xs text-muted-foreground mt-2">IPC 1860 &amp; CrPC 1973 (Transitional)</div>
@@ -436,7 +436,7 @@ export function LegalSourcesAdmin() {
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
-            <AlertTriangle className="w-4 h-4 text-amber-500" /> Judicial Review Queue ({escalations.length})
+            <AlertTriangle className="w-4 h-4 text-red-500" /> Judicial Review Queue ({escalations.length})
           </button>
         )}
       </div>
@@ -742,7 +742,7 @@ export function LegalSourcesAdmin() {
                 <p className="text-xs text-foreground leading-relaxed">{verifierReport.message}</p>
 
                 {verifierReport.routed_to_human_review && (
-                  <div className="p-2.5 rounded bg-amber-500/15 border border-amber-500/30 text-xs text-amber-700 dark:text-amber-400 font-medium">
+                  <div className="p-2.5 rounded bg-red-500/15 border border-red-500/30 text-xs text-red-600 dark:text-red-400 font-medium">
                     ⚠️ <strong>Durable Human Review Task Created:</strong> This ungrounded statement has been routed to the Supervising Legal Officer queue for manual verification.
                   </div>
                 )}
@@ -836,7 +836,7 @@ export function LegalSourcesAdmin() {
                           {b.rank === 1 ? (
                             <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-600">Rank 1</span>
                           ) : b.rank ? (
-                            <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-600">Rank {b.rank}</span>
+                            <span className="px-2 py-0.5 rounded bg-red-500/15 text-red-600">Rank {b.rank}</span>
                           ) : (
                             <span className="px-2 py-0.5 rounded bg-rose-500/15 text-rose-600">Miss</span>
                           )}
@@ -862,7 +862,7 @@ export function LegalSourcesAdmin() {
           <div className="flex items-center justify-between border-b border-border pb-4">
             <div>
               <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-amber-500" /> Statutory Citation Escalations Queue
+                <AlertTriangle className="w-5 h-5 text-red-500" /> Statutory Citation Escalations Queue
               </h2>
               <p className="text-xs text-muted-foreground mt-1">
                 Review assertions flagged by the Citation Integrity guardrail where citations were unsupported, invented, or unverified.
@@ -891,7 +891,7 @@ export function LegalSourcesAdmin() {
               {escalations.map((esc) => (
                 <div key={esc.id} className="p-4 border-2 border-border rounded-xl bg-background space-y-3">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-mono font-bold text-amber-600">{esc.id}</span>
+                    <span className="font-mono font-bold text-red-600">{esc.id}</span>
                     <span className="text-muted-foreground">Created: {esc.created_at}</span>
                   </div>
 

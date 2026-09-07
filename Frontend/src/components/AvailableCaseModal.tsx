@@ -288,8 +288,8 @@ export function AvailableCaseModal({
           <div className="p-4 border-t border-border bg-card shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="text-xs text-muted-foreground">
               {isAdvocate && !isAssignedToUser ? (
-                <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1.5 font-medium">
-                  <ShieldAlert className="w-4 h-4 text-amber-500" /> Case unassigned. Legal Aid counsel appointment is made by DLSA.
+                <span className="text-red-600 dark:text-red-400 flex items-center gap-1.5 font-medium">
+                  <ShieldAlert className="w-4 h-4 text-red-500" /> Case unassigned. Legal Aid counsel appointment is made by DLSA.
                 </span>
               ) : hasScrolledToBottom ? (
                 <span className="text-foreground flex items-center gap-1 font-medium">

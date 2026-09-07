@@ -139,46 +139,55 @@ class AuditRepository:
         except Exception as e:
             print(f"[WARN] Supabase audit log write failed: {e}")
 
-        # 2. SQLite local write
-        conn = None
-        try:
-            conn = self._get_conn()
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO audit_events (
-                    id, timestamp, actor_id, actor_role, organization_id, action,
-                    entity_type, entity_id, ip_address, details_json, is_immutable,
-                    event_hash, previous_event_hash, hash_algorithm, sequence_number, severity, data_status
+        # 2. SQLite local write with retry on database table lock
+        import time
+        for attempt in range(5):
+            conn = None
+            try:
+                conn = self._get_conn()
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO audit_events (
+                        id, timestamp, actor_id, actor_role, organization_id, action,
+                        entity_type, entity_id, ip_address, details_json, is_immutable,
+                        event_hash, previous_event_hash, hash_algorithm, sequence_number, severity, data_status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event.id,
+                        event.timestamp,
+                        event.actor_id,
+                        event.actor_role,
+                        event.organization_id,
+                        event.action.value,
+                        event.entity_type,
+                        event.entity_id,
+                        event.ip_address,
+                        event.details_json,
+                        1 if event.is_immutable else 0,
+                        event.event_hash,
+                        event.previous_event_hash,
+                        event.hash_algorithm,
+                        event.sequence_number,
+                        event.severity,
+                        event.data_status,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event.id,
-                    event.timestamp,
-                    event.actor_id,
-                    event.actor_role,
-                    event.organization_id,
-                    event.action.value,
-                    event.entity_type,
-                    event.entity_id,
-                    event.ip_address,
-                    event.details_json,
-                    1 if event.is_immutable else 0,
-                    event.event_hash,
-                    event.previous_event_hash,
-                    event.hash_algorithm,
-                    event.sequence_number,
-                    event.severity,
-                    event.data_status,
-                ),
-            )
-            conn.commit()
-        except Exception as e:
-            print(f"[WARN] Failed to write audit event to SQLite: {e}")
-        finally:
-            if conn:
-                conn.close()
+                conn.commit()
+                break
+            except sqlite3.OperationalError as e:
+                if attempt < 4:
+                    time.sleep(0.1 * (attempt + 1))
+                else:
+                    print(f"[WARN] Failed to write audit event to SQLite after retries: {e}")
+            except Exception as e:
+                print(f"[WARN] Failed to write audit event to SQLite: {e}")
+                break
+            finally:
+                if conn:
+                    conn.close()
         return event
 
     def get_entity_audit_trail(self, entity_type: str, entity_id: str) -> List[AuditEvent]:

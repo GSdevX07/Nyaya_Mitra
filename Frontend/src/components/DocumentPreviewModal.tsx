@@ -172,12 +172,12 @@ export function DocumentPreviewModal({
                     <CheckCircle2 className="w-3 h-3" /> REVIEWED (INTAKE) &bull; STORED IN VAULT
                   </span>
                 ) : docData?.document_status === "MISSING_REQUISITIONED" || docData?.document_status === "MISSING" ? (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
                     <AlertCircle className="w-3 h-3" /> STATUTORY REQUISITION NOTICE
                   </span>
                 ) : (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                    <Clock className="w-3 h-3" /> PENDING VERIFICATION &bull; STORED IN VAULT
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-secondary text-foreground border border-border flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-muted-foreground" /> PENDING VERIFICATION &bull; STORED IN VAULT
                   </span>
                 )}
               </div>
@@ -279,14 +279,14 @@ export function DocumentPreviewModal({
 
               {/* Integrity Hash or Requisition Notice */}
               {isMissingDoc ? (
-                <div className="p-3 bg-amber-500/10 rounded-lg border border-amber-500/30 flex items-center justify-between gap-3">
+                <div className="p-3 bg-red-500/10 rounded-lg border border-red-500/30 flex items-center justify-between gap-3">
                   <div className="min-w-0 flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
                     <div className="min-w-0">
                       <span className="text-[10px] font-mono text-muted-foreground uppercase block">
                         Evidentiary Vault Status
                       </span>
-                      <span className="text-[11px] font-mono font-bold text-amber-700 dark:text-amber-300 truncate block">
+                      <span className="text-[11px] font-mono font-bold text-red-600 dark:text-red-400 truncate block">
                         Awaiting Institutional Upload &bull; No Cryptographic Seal Recorded
                       </span>
                     </div>

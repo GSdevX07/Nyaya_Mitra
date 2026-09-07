@@ -85,7 +85,7 @@ export function LawyerProfileModal({ isOpen, onClose }: UserProfileModalProps) {
       SUPERVISING_LEGAL_OFFICER: {
         name: "Authorized Supervising Legal Officer",
         badge: "BNSS 479 Submission Authorization Authority",
-        color: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30",
+        color: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30",
       },
       DEFENSE_ADVOCATE: {
         name: "Legal Aid / Panel Defence Counsel",
@@ -100,7 +100,7 @@ export function LawyerProfileModal({ isOpen, onClose }: UserProfileModalProps) {
       JAIL_OFFICER: {
         name: "Jail Superintendent / Prison In-Charge",
         badge: "Detention Roster & Admission Authority",
-        color: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30",
+        color: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30",
       },
       POLICE_OFFICER: {
         name: "Police Station In-Charge / Investigating Officer",
@@ -308,11 +308,11 @@ export function LawyerProfileModal({ isOpen, onClose }: UserProfileModalProps) {
                 {profile.facility_ids && profile.facility_ids.length > 0 && (
                   <div className="flex items-center justify-between p-2.5 text-xs">
                     <span className="text-muted-foreground flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-amber-600" /> Assigned Prison Facilities:
+                      <Layers className="w-4 h-4 text-red-600" /> Assigned Prison Facilities:
                     </span>
                     <div className="flex gap-1">
                       {profile.facility_ids.map((fac: string) => (
-                        <span key={fac} className="text-xs font-mono bg-amber-500/10 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded border border-amber-500/20">
+                        <span key={fac} className="text-xs font-mono bg-red-500/10 text-red-600 dark:text-red-400 px-2 py-0.5 rounded border border-border">
                           {fac}
                         </span>
                       ))}

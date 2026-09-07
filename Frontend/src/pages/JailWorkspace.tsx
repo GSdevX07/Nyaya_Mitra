@@ -423,8 +423,8 @@ export function JailWorkspace() {
 
         <div className="bg-card border-2 border-border p-4 rounded-sm">
           <div className="text-[11px] font-mono text-muted-foreground uppercase">Sec 479 Thresholds</div>
-          <div className="text-2xl font-serif font-bold text-amber-600 mt-1">{eligible479Cases.length}</div>
-          <div className="text-[10px] font-mono text-amber-600 mt-1 flex items-center gap-1">
+          <div className="text-2xl font-serif font-bold text-red-600 mt-1">{eligible479Cases.length}</div>
+          <div className="text-[10px] font-mono text-red-600 mt-1 flex items-center gap-1">
             <AlertTriangle className="w-3 h-3" /> Potential Statutory Bail
           </div>
         </div>
@@ -554,7 +554,7 @@ export function JailWorkspace() {
                           {c.jail_location}
                         </span>
                         {c.potential_479_eligible && (
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-red-500/10 text-red-600 dark:text-red-400 border border-border">
                             Sec 479 Threshold Met
                           </span>
                         )}
@@ -581,7 +581,7 @@ export function JailWorkspace() {
                             <CheckCircle2 className="w-3.5 h-3.5" /> DLSA Counsel: {c.assigned_lawyer || "Assigned"}
                           </span>
                         ) : (
-                          <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                          <span className="text-red-600 dark:text-red-400 flex items-center gap-1">
                             <AlertTriangle className="w-3.5 h-3.5" /> Legal-Aid Representation Pending
                           </span>
                         )}
@@ -1109,7 +1109,7 @@ export function JailWorkspace() {
               </button>
             </div>
 
-            <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 rounded-sm text-xs font-mono flex items-start gap-2">
+            <div className="p-3 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 rounded-sm text-xs font-mono flex items-start gap-2">
               <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
               <span>
                 <strong>Consequential Action:</strong> Physical prison release marks the conclusion of custody and moves the matter into post-release preservation. Ensure the competent court bail order and surety verification have been certified.

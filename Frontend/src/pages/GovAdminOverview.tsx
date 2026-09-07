@@ -211,7 +211,7 @@ export function GovAdminOverview() {
                       <td className="py-3 px-3 text-center text-primary">{item.assigned_counsel}</td>
                       <td className="py-3 px-3 text-center">
                         {item.pending_documents > 0 ? (
-                          <span className="text-amber-600 font-bold">{item.pending_documents}</span>
+                          <span className="text-red-600 font-bold">{item.pending_documents}</span>
                         ) : (
                           <span className="text-emerald-600">0</span>
                         )}
@@ -222,7 +222,7 @@ export function GovAdminOverview() {
                           className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                             item.compliance_rate_pct >= 80
                               ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
-                              : "bg-amber-500/10 text-amber-600 border border-amber-500/20"
+                              : "bg-secondary text-foreground border border-border"
                           }`}
                         >
                           {item.compliance_rate_pct}%
@@ -260,7 +260,7 @@ export function GovAdminOverview() {
             </div>
             <div className="p-4 bg-secondary/30 rounded border border-border">
               <div className="text-[11px] font-mono text-muted-foreground uppercase">At-Risk Cases</div>
-              <div className="text-2xl font-serif font-bold text-amber-600 mt-1">
+              <div className="text-2xl font-serif font-bold text-red-600 mt-1">
                 {slaData?.sla_breakdown.at_risk_cases ?? 0}
               </div>
               <div className="text-[10px] font-mono text-muted-foreground mt-1">Threshold approaching</div>
@@ -306,7 +306,7 @@ export function GovAdminOverview() {
         <div className="bg-card border-2 border-border p-5 rounded-sm space-y-4">
           <div className="flex justify-between items-center">
             <h2 className="font-serif font-bold text-sm uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-500" />
+              <AlertTriangle className="w-4 h-4 text-red-500" />
               State-Level Compliance Exceptions & Bottlenecks
             </h2>
             <span className="text-[11px] font-mono text-muted-foreground">
@@ -325,7 +325,7 @@ export function GovAdminOverview() {
                 <div key={idx} className="p-4 bg-secondary/30 rounded border border-border space-y-1">
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-mono font-bold text-foreground flex items-center gap-2">
-                      <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 border border-amber-500/20 text-[10px]">
+                      <span className="px-1.5 py-0.5 rounded bg-secondary text-foreground border border-border text-[10px]">
                         {exc.category}
                       </span>
                       {exc.title}

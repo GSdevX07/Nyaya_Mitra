@@ -519,7 +519,7 @@ export function DocumentsPage() {
         </div>
 
         <div className="p-6 rounded-xl bg-card shadow-sm border border-border flex items-center gap-4">
-          <div className="w-12 h-12 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-600">
+          <div className="w-12 h-12 rounded-lg bg-red-500/10 border border-border flex items-center justify-center text-red-600">
             <AlertTriangle className="w-6 h-6" />
           </div>
           <div>
@@ -580,7 +580,7 @@ export function DocumentsPage() {
                           <CheckCheck className="w-3.5 h-3.5" /> Reviewed (Intake)
                         </span>
                       ) : d.document_status === "PENDING_VERIFICATION" ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-600 border border-amber-500/30">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-secondary text-foreground border border-border">
                           <Clock className="w-3.5 h-3.5" /> Pending Verification
                         </span>
                       ) : (

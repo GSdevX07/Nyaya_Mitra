@@ -40,16 +40,16 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onDismis
         };
       case "conflict":
         return {
-          icon: <RefreshCw className="w-4 h-4 text-amber-700 shrink-0" />,
-          accentBorder: "border-l-4 border-l-amber-600",
-          badgeClass: "bg-amber-100 text-amber-900 border-amber-300",
+          icon: <RefreshCw className="w-4 h-4 text-red-700 shrink-0" />,
+          accentBorder: "border-l-4 border-l-red-600",
+          badgeClass: "bg-red-100 text-red-900 border-red-300",
           badgeLabel: "Notice",
         };
       case "warning":
         return {
-          icon: <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />,
-          accentBorder: "border-l-4 border-l-amber-600",
-          badgeClass: "bg-amber-100 text-amber-900 border-amber-300",
+          icon: <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />,
+          accentBorder: "border-l-4 border-l-red-600",
+          badgeClass: "bg-red-100 text-red-900 border-red-300",
           badgeLabel: "Notice",
         };
       case "error":

@@ -385,7 +385,7 @@ export function RoleEvidenceProvenanceModal({
               {/* ============================================================== */}
               {roleView === "READ_ONLY_AUDITOR" && (
                 <div className="space-y-4">
-                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 rounded-lg text-xs font-semibold flex items-center gap-2">
+                  <div className="p-3 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 rounded-lg text-xs font-semibold flex items-center gap-2">
                     <Shield className="w-4 h-4 shrink-0" />
                     Read-Only Statutory Audit Mode &mdash; Complete Append-Only Event Trail
                   </div>
@@ -489,7 +489,7 @@ export function RoleEvidenceProvenanceModal({
                       <span className="text-[11px] text-muted-foreground block">Version History</span>
                     </div>
                     <div className="p-3 bg-secondary/20 rounded-lg border border-border">
-                      <span className="text-lg font-mono font-bold text-amber-600">{data.missing_records_count || 0}</span>
+                      <span className="text-lg font-mono font-bold text-red-600">{data.missing_records_count || 0}</span>
                       <span className="text-[11px] text-muted-foreground block">Missing Records</span>
                     </div>
                     <div className="p-3 bg-secondary/20 rounded-lg border border-border">

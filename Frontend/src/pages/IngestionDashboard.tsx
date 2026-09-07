@@ -236,10 +236,10 @@ export function IngestionDashboard() {
 
         <div className="bg-card border-2 border-border p-4 rounded-sm">
           <div className="text-[11px] font-mono text-muted-foreground uppercase">Field Conflicts</div>
-          <div className="text-2xl font-serif font-black text-amber-600 mt-1">
+          <div className="text-2xl font-serif font-black text-red-600 mt-1">
             {conflicts.length}
           </div>
-          <div className="text-[10px] font-mono text-amber-600 mt-1 flex items-center gap-1">
+          <div className="text-[10px] font-mono text-red-600 mt-1 flex items-center gap-1">
             <AlertTriangle className="w-3 h-3" /> Awaiting Human Review
           </div>
         </div>
@@ -257,8 +257,8 @@ export function IngestionDashboard() {
 
       {/* Supervisory Governance Mode Notice */}
       {isSupervisor && (
-        <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-sm text-xs text-amber-700 dark:text-amber-300 font-mono flex items-center gap-2.5">
-          <ShieldAlert className="w-4 h-4 text-amber-500 shrink-0" />
+        <div className="p-3.5 bg-red-500/10 border border-red-500/30 rounded-sm text-xs text-red-600 dark:text-red-400 font-mono flex items-center gap-2.5">
+          <ShieldAlert className="w-4 h-4 text-red-500 shrink-0" />
           <span>
             <strong>Supervisory Governance Mode:</strong> Technical connector synchronization and raw data imports are restricted to Platform Administrators. Review and resolve field discrepancies and cross-facility identity merges below.
           </span>
@@ -301,7 +301,7 @@ export function IngestionDashboard() {
         >
           Conflict Resolution Queue
           {conflicts.length > 0 && (
-            <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-600 text-[10px] rounded-full">
+            <span className="px-1.5 py-0.2 bg-red-500/20 text-red-600 text-[10px] rounded-full">
               {conflicts.length}
             </span>
           )}
@@ -331,7 +331,7 @@ export function IngestionDashboard() {
               <div>
                 <div className="flex items-center justify-between gap-2">
                   <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
-                    c.sync_status === "HEALTHY" ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/30" : "bg-amber-500/10 text-amber-600"
+                    c.sync_status === "HEALTHY" ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/30" : "bg-red-500/10 text-red-600"
                   }`}>
                     {c.sync_status}
                   </span>
@@ -450,10 +450,10 @@ export function IngestionDashboard() {
             </div>
           ) : (
             conflicts.map((conf) => (
-              <div key={conf.id} className="bg-card border-2 border-amber-500/40 p-5 rounded-sm shadow-sm space-y-4">
+              <div key={conf.id} className="bg-card border-2 border-red-500/40 p-5 rounded-sm shadow-sm space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono bg-amber-500/20 text-amber-700 px-2 py-0.5 rounded font-bold uppercase">
+                    <span className="text-[10px] font-mono bg-red-500/20 text-red-700 px-2 py-0.5 rounded font-bold uppercase">
                       {conf.severity} CONFLICT
                     </span>
                     <span className="font-mono text-xs font-bold text-foreground">
@@ -477,8 +477,8 @@ export function IngestionDashboard() {
                   </div>
 
                   <div className="space-y-1">
-                    <div className="text-[10px] text-muted-foreground uppercase font-bold text-amber-600">Proposed Discrepancy</div>
-                    <div className="p-2.5 bg-background border border-amber-500/30 rounded font-bold text-amber-700">
+                    <div className="text-[10px] text-muted-foreground uppercase font-bold text-red-600">Proposed Discrepancy</div>
+                    <div className="p-2.5 bg-background border border-red-500/30 rounded font-bold text-red-700">
                       {JSON.stringify(conf.proposed_value)}
                     </div>
                     <div className="text-[10px] text-muted-foreground">
@@ -502,7 +502,7 @@ export function IngestionDashboard() {
                       </button>
                       <button
                         onClick={() => handleResolveConflict(conf.id, "ACCEPTED_PROPOSED")}
-                        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-mono font-bold uppercase rounded-sm flex items-center gap-1.5"
+                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-mono font-bold uppercase rounded-sm flex items-center gap-1.5"
                       >
                         <Check className="w-3.5 h-3.5" /> Accept Proposed Update
                       </button>

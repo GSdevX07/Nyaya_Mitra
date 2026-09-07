@@ -362,7 +362,7 @@ def _build_initial_hero_cases() -> List[CaseRecord]:
             multiple_active_cases=False,
             prior_bail_orders=["BAIL-2022-007"],
             required_docs=["remand_order", "charge_sheet", "prior_bail_order_if_any"],
-            present_docs=["remand_order", "prior_bail_order_if_any"],  # Missing charge sheet
+            present_docs=["remand_order", "charge_sheet", "prior_bail_order_if_any"],
             urgency_flags=UrgencyFlags(age=40, health_flag=False, repeat_offender=True),
             jail_location="Central Jail, Lucknow (Synthetic)",
             preferred_language="hi",

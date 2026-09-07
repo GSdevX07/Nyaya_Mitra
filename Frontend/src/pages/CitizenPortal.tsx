@@ -145,7 +145,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
     return (
       <div className="p-8 max-w-2xl mx-auto space-y-6">
         <div className="bg-card border-2 border-border rounded-xl text-center p-8 space-y-4 shadow-sm">
-          <AlertCircle className="w-12 h-12 text-amber-500 mx-auto" />
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto" />
           <h2 className="text-xl font-serif font-bold text-foreground">
             {lang === 'hi' ? "कोई सक्रिय मामला लिंक नहीं मिला" : "No Active Case Linked to This Account"}
           </h2>
@@ -179,13 +179,13 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
       return { text: lang === 'hi' ? "समीक्षाधीन" : "UNDER INITIAL REVIEW", color: "bg-blue-500/10 text-blue-600 border-blue-500/20" };
     }
     if (code === "ELIGIBLE_FOR_REVIEW") {
-      return { text: lang === 'hi' ? "पात्रता चिह्नित" : "ELIGIBLE UNDER SEC 479", color: "bg-amber-500/10 text-amber-600 border-amber-500/20" };
+      return { text: lang === 'hi' ? "पात्रता चिह्नित" : "ELIGIBLE UNDER SEC 479", color: "bg-red-500/10 text-red-600 border-border" };
     }
     if (code === "COUNSEL_ASSIGNED") {
       return { text: lang === 'hi' ? "अधिवक्ता नियुक्त" : "COUNSEL ASSIGNED", color: "bg-blue-500/10 text-blue-600 border-blue-500/20" };
     }
     if (code === "READY_FOR_FILING") {
-      return { text: lang === 'hi' ? "दायर करने हेतु तैयार" : "DRAFT APPROVED • PENDING FILING", color: "bg-amber-500/10 text-amber-600 border-amber-500/20" };
+      return { text: lang === 'hi' ? "दायर करने हेतु तैयार" : "DRAFT APPROVED • PENDING FILING", color: "bg-red-500/10 text-red-600 border-border" };
     }
     if (code === "FILED_IN_COURT") {
       return { text: lang === 'hi' ? "अदालत में दायर" : "FILED IN COURT", color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" };
@@ -302,7 +302,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               </div>
             ) : (
               <div className="space-y-1">
-                <div className="text-sm font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                <div className="text-sm font-semibold text-red-600 dark:text-red-400 flex items-center gap-1.5">
                   <Clock className="w-4 h-4" />
                   {lang === 'hi' ? "आवंटन प्रक्रियाधीन" : "Counsel Allocation in Progress"}
                 </div>

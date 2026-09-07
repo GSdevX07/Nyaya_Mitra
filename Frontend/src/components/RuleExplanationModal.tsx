@@ -45,7 +45,7 @@ export function RuleExplanationModal({
         );
       case "POTENTIALLY_APPLICABLE":
         return (
-          <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1.5">
+          <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-red-500/10 text-red-400 border border-red-500/30 flex items-center gap-1.5">
             <AlertTriangle className="w-3.5 h-3.5" /> Approaching / Records Required
           </span>
         );
@@ -117,7 +117,7 @@ export function RuleExplanationModal({
             {explanation.explanation_text}
           </p>
           {explanation.manual_review_reason && (
-            <div className="text-xs text-amber-400 bg-amber-500/10 p-2.5 rounded border border-amber-500/20 flex items-start gap-2">
+            <div className="text-xs text-red-400 bg-red-500/10 p-2.5 rounded border border-border flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>
                 <strong>Reason for Human Review:</strong> {explanation.manual_review_reason}
@@ -204,7 +204,7 @@ export function RuleExplanationModal({
                     ) : c.satisfied === false ? (
                       <XCircle className="w-4 h-4 text-destructive" />
                     ) : (
-                      <HelpCircle className="w-4 h-4 text-amber-500" />
+                      <HelpCircle className="w-4 h-4 text-red-500" />
                     )}
                   </div>
                   <div className="space-y-0.5 text-xs flex-1">

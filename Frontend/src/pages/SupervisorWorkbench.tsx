@@ -272,8 +272,8 @@ COUNSEL FOR APPLICANT
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-card border-2 border-border p-4 rounded-sm space-y-1">
           <div className="text-[11px] font-mono text-muted-foreground uppercase">Pending Supervisory Approvals</div>
-          <div className="text-2xl font-serif font-bold text-amber-600">{pendingApprovalsCount}</div>
-          <div className="text-[10px] font-mono text-amber-600 flex items-center gap-1">
+          <div className="text-2xl font-serif font-bold text-red-600">{pendingApprovalsCount}</div>
+          <div className="text-[10px] font-mono text-red-600 flex items-center gap-1">
             <Clock className="w-3 h-3" /> Level-2 Supervisory Decision Required
           </div>
         </div>
@@ -436,7 +436,7 @@ COUNSEL FOR APPLICANT
           {unassignedMattersCount > 0 && (
             <div className="p-4 bg-muted/40 border border-border rounded-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono">
               <div className="flex items-center gap-2 text-muted-foreground">
-                <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
                 <span>
                   Notice: <strong className="text-foreground">{unassignedMattersCount} undertrial matters</strong> in this district currently await DLSA panel advocate assignment.
                 </span>
@@ -455,8 +455,8 @@ COUNSEL FOR APPLICANT
       {/* TAB 3: Exceptions & Conflict Desk */}
       {activeTab === "exceptions" && (
         <div className="space-y-6">
-          <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-sm">
-            <h3 className="font-serif font-bold text-sm uppercase text-amber-700 dark:text-amber-400">
+          <div className="p-4 bg-red-500/5 border border-border rounded-sm">
+            <h3 className="font-serif font-bold text-sm uppercase text-red-600 dark:text-red-400">
               Institutional Exception Handling &amp; Conflict Resolution
             </h3>
             <p className="text-xs text-muted-foreground mt-0.5">
@@ -467,7 +467,7 @@ COUNSEL FOR APPLICANT
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="p-5 border-2 border-border bg-card rounded-sm space-y-3">
               <div className="flex items-center gap-2 text-foreground font-serif font-bold text-sm uppercase">
-                <AlertCircle className="w-4 h-4 text-amber-600" />
+                <AlertCircle className="w-4 h-4 text-red-600" />
                 Identity Discrepancies &amp; Aliases
               </div>
               <p className="text-xs text-muted-foreground">
@@ -621,7 +621,7 @@ COUNSEL FOR APPLICANT
                   </div>
 
                   <div className="border-t border-border pt-3 space-y-2">
-                    <label className="block uppercase text-[11px] font-mono font-bold text-amber-600">
+                    <label className="block uppercase text-[11px] font-mono font-bold text-red-600">
                       Request Counsel Revisions (Alternative)
                     </label>
                     <textarea
@@ -629,7 +629,7 @@ COUNSEL FOR APPLICANT
                       value={revisionNotes}
                       onChange={(e) => setRevisionNotes(e.target.value)}
                       placeholder="Specify missing grounds, calculation errors, or case law directives..."
-                      className="w-full p-2 bg-input border border-border rounded-sm text-xs font-mono focus:outline-none focus:border-amber-600"
+                      className="w-full p-2 bg-input border border-border rounded-sm text-xs font-mono focus:outline-none focus:border-red-600"
                     />
                     <button
                       onClick={handleRequestRevisions}

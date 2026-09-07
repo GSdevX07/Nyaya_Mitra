@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.auth.roles import Role
 from app.auth.tokens import create_access_token
-from app.database import init_db, DB_PATH
+from app.database import init_db, DB_PATH, get_db_connection
 from app.models.domain import AuditAction
 from app.repositories.audit_repository import append_audit_event, AuditRepository
 
@@ -252,7 +252,7 @@ def test_cryptographic_hash_chain_continuity():
 
 def test_sqlite_immutability_triggers():
     """P0 Issue 10 & 11: SQLite triggers strictly prevent UPDATE or DELETE on audit_events."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cur = conn.cursor()
 
     # Attempt UPDATE - must raise IntegrityError from trigger
@@ -269,16 +269,24 @@ def test_sqlite_immutability_triggers():
 
 def test_failed_authorization_logs_audit_event(auditor_token):
     """P1 Issue 14: Denied request triggers AUTHORIZATION_DENIED event in audit ledger."""
+    import time
     # Attempt an unauthorized mutation
     client.post("/cases/UTP-0001/approve", headers={"Authorization": f"Bearer {auditor_token}"})
 
-    # Verify AUTHORIZATION_DENIED was logged
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    row = cur.execute(
-        "SELECT action, actor_id, severity FROM audit_events WHERE action = 'AUTHORIZATION_DENIED' ORDER BY timestamp DESC LIMIT 1"
-    ).fetchone()
-    conn.close()
+    # Verify AUTHORIZATION_DENIED was logged with retry resilience
+    row = None
+    for attempt in range(10):
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            row = cur.execute(
+                "SELECT action, actor_id, severity FROM audit_events WHERE action = 'AUTHORIZATION_DENIED' ORDER BY timestamp DESC LIMIT 1"
+            ).fetchone()
+            conn.close()
+            if row:
+                break
+        except sqlite3.OperationalError:
+            time.sleep(0.3)
 
     assert row is not None
     assert row[0] == "AUTHORIZATION_DENIED"

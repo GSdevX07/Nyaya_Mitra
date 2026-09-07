@@ -284,7 +284,7 @@ export function AdvocateWorkspace() {
 
                     <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                       {hasDirectivePending && (
-                        <span className="px-2.5 py-1 text-[11px] font-mono font-bold rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                        <span className="px-2.5 py-1 text-[11px] font-mono font-bold rounded bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
                           <AlertTriangle className="w-3 h-3" /> REVISION REQUESTED
                         </span>
                       )}

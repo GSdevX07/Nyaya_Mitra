@@ -234,11 +234,11 @@ export const AccusedProfilePage: React.FC = () => {
     return (
       <div className="p-8 text-center bg-card rounded-xl border border-border max-w-2xl mx-auto my-12 shadow-sm">
         {isForbidden ? (
-          <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-3 border border-amber-500/20">
-            <Lock className="h-6 w-6 text-amber-500" />
+          <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-3 border border-border">
+            <Lock className="h-6 w-6 text-red-500" />
           </div>
         ) : (
-          <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-3" />
+          <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-3" />
         )}
         <h2 className="text-xl font-bold font-serif text-foreground">
           {isForbidden ? "Institutional Access Restricted" : "Accused Profile Not Found"}
@@ -357,7 +357,7 @@ export const AccusedProfilePage: React.FC = () => {
           }`}
         >
           <HeartPulse className="h-4 w-4" /> Restricted Health Dossier
-          {profile.medical_record?.is_redacted && <Lock className="h-3.5 w-3.5 text-amber-500" />}
+          {profile.medical_record?.is_redacted && <Lock className="h-3.5 w-3.5 text-red-500" />}
         </button>
 
         <button
@@ -397,7 +397,7 @@ export const AccusedProfilePage: React.FC = () => {
                   </div>
                   <span className={`text-xs px-3 py-1.5 rounded-full font-bold shadow-sm ${
                     c.current_status === 'APPROVED_READY_FOR_FILING' ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30' :
-                    c.current_status === 'ELIGIBLE' ? 'bg-amber-500/10 text-amber-600 border border-amber-500/30' :
+                    c.current_status === 'ELIGIBLE' ? 'bg-red-500/10 text-red-600 border border-red-500/30' :
                     'bg-secondary text-muted-foreground border border-border'
                   }`}>
                     {c.current_status}
@@ -541,7 +541,7 @@ export const AccusedProfilePage: React.FC = () => {
             </div>
 
             {profile.medical_record?.is_redacted ? (
-              <span className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600 border border-amber-500/30 flex items-center gap-2 shadow-sm">
+              <span className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-red-500/10 text-red-600 border border-red-500/30 flex items-center gap-2 shadow-sm">
                 <Lock className="h-4 w-4" /> REDACTED ENVELOPE
               </span>
             ) : (

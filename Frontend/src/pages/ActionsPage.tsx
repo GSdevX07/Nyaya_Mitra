@@ -275,21 +275,21 @@ export function ActionsPage() {
                   </button>
                 ) : isAdvocate ? (
                   <span
-                    className="px-3 py-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-mono font-bold rounded border border-amber-500/30 flex items-center gap-1.5"
+                    className="px-3 py-1.5 bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-mono font-bold rounded border border-red-500/30 flex items-center gap-1.5"
                     title="This action requires institutional or supervisory authority"
                   >
                     <ShieldCheck className="w-3.5 h-3.5" /> Institutional Action Only
                   </span>
                 ) : isSupervisor ? (
                   <span
-                    className="px-3 py-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-mono font-bold rounded border border-amber-500/30 flex items-center gap-1.5"
+                    className="px-3 py-1.5 bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-mono font-bold rounded border border-red-500/30 flex items-center gap-1.5"
                     title="This action type requires Court or Originating Institutional authority"
                   >
                     <ShieldCheck className="w-3.5 h-3.5" /> Judicial/Originating Auth Required
                   </span>
                 ) : isDlsa ? (
                   <span
-                    className="px-3 py-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-mono font-bold rounded border border-amber-500/30 flex items-center gap-1.5"
+                    className="px-3 py-1.5 bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-mono font-bold rounded border border-red-500/30 flex items-center gap-1.5"
                     title="This action type requires Supervisory Legal Officer or Court authorization"
                   >
                     <ShieldCheck className="w-3.5 h-3.5" /> Supervisor Auth Required

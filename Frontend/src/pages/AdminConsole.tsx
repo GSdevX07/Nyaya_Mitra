@@ -244,14 +244,14 @@ export function AdminConsole() {
                     <div key={conn.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-secondary/15 transition-colors">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                          <span className={`w-2 h-2 rounded-full ${isSimulated ? "bg-amber-500" : "bg-emerald-500 animate-pulse"}`} />
+                          <span className={`w-2 h-2 rounded-full ${isSimulated ? "bg-red-500" : "bg-emerald-500 animate-pulse"}`} />
                           <h4 className="font-serif font-bold text-sm text-foreground">{conn.name}</h4>
                           <span className="text-[10px] font-mono px-2 py-0.5 bg-muted rounded border border-border text-muted-foreground">
                             {conn.type}
                           </span>
                           <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
                             isSimulated
-                              ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                              ? "bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400"
                               : "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
                           }`}>
                             {conn.status}
@@ -408,7 +408,7 @@ export function AdminConsole() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-card border-2 border-border p-5 rounded-sm shadow-sm space-y-3">
               <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-amber-500" />
+                <Zap className="w-4 h-4 text-red-500" />
                 <h3 className="font-serif font-bold text-sm text-foreground">Cache & Memory Management</h3>
               </div>
               <p className="text-xs text-muted-foreground">

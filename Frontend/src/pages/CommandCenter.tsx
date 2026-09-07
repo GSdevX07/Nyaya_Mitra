@@ -238,12 +238,12 @@ export function CommandCenter() {
             Unassigned Counsel Queue
           </span>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold font-serif text-amber-600">
+            <span className="text-2xl font-bold font-serif text-red-600">
               {unassignedUndertrials.length}
             </span>
-            <span className="text-xs text-amber-600 font-mono">awaiting counsel</span>
+            <span className="text-xs text-red-600 font-mono">awaiting counsel</span>
           </div>
-          <div className="text-[10px] font-mono text-amber-600 flex items-center gap-1">
+          <div className="text-[10px] font-mono text-red-600 flex items-center gap-1">
             <AlertTriangle className="w-3 h-3" /> Requires DLSA Assignment
           </div>
         </div>
@@ -399,7 +399,7 @@ export function CommandCenter() {
                             {c.case_id}
                           </span>
                           <span className="text-xs font-mono text-muted-foreground">{c.jail_location}</span>
-                          <span className="text-xs font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 font-bold">
+                          <span className="text-xs font-mono px-2 py-0.5 rounded bg-red-500/10 text-red-600 dark:text-red-400 border border-border font-bold">
                             Unassigned
                           </span>
                         </div>
@@ -494,8 +494,8 @@ export function CommandCenter() {
       {/* TAB 4: Cross-Facility Coordination */}
       {activeTab === "exceptions" && (
         <div className="space-y-6">
-          <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-sm">
-            <h3 className="font-serif font-bold text-sm uppercase text-amber-700 dark:text-amber-400">
+          <div className="p-4 bg-red-500/5 border border-border rounded-sm">
+            <h3 className="font-serif font-bold text-sm uppercase text-red-600 dark:text-red-400">
               Inter-Institutional Document &amp; Custody Exception Desk
             </h3>
             <p className="text-xs text-muted-foreground mt-0.5">

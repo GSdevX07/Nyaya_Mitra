@@ -209,7 +209,7 @@ export const IdentityResolutionPage: React.FC = () => {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-mono font-bold text-primary bg-primary/10 px-2 py-1 rounded">{cand.id}</span>
-                    <span className="text-xs px-2.5 py-1 rounded-full font-extrabold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                    <span className="text-xs px-2.5 py-1 rounded-full font-extrabold bg-secondary text-foreground border border-border">
                       Candidate Match — Human Decision Required ({(cand.match_confidence * 100).toFixed(0)}%)
                     </span>
                   </div>
@@ -319,14 +319,14 @@ export const IdentityResolutionPage: React.FC = () => {
                   </ul>
                 </div>
 
-                <div className="bg-amber-500/10 border-2 border-amber-500/30 rounded-xl p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                <div className="bg-red-500/10 border-2 border-red-500/30 rounded-xl p-5 space-y-3">
+                  <h4 className="text-sm font-bold text-red-600 dark:text-red-400 flex items-center gap-2">
                     <AlertTriangle className="h-5 w-5" /> Discrepancies & Conflict Flags
                   </h4>
                   <ul className="space-y-2">
                     {selectedCandidate.conflicting_traits.map((conflict, i) => (
                       <li key={i} className="text-sm text-foreground/90 font-medium flex items-start gap-2.5">
-                        <span className="h-2 w-2 rounded-full bg-amber-500 mt-1.5 shrink-0" />
+                        <span className="h-2 w-2 rounded-full bg-red-500 mt-1.5 shrink-0" />
                         {conflict}
                       </li>
                     ))}
@@ -391,10 +391,10 @@ export const IdentityResolutionPage: React.FC = () => {
                           setResolutionAction('MARK_AS_ALIAS');
                           setNotes(`Flagged and escalated for supervisory review by ${user?.full_name || user?.role}`);
                         }}
-                        className="p-4 rounded-xl border-2 border-amber-500/40 bg-amber-500/5 text-sm font-bold transition-all flex flex-col items-center text-center gap-2 shadow-sm text-foreground hover:bg-amber-500/10"
+                        className="p-4 rounded-xl border-2 border-red-500/40 bg-red-500/5 text-sm font-bold transition-all flex flex-col items-center text-center gap-2 shadow-sm text-foreground hover:bg-red-500/10"
                         title="High-impact Canonical ID merge requires Supervising Legal Officer authority. Click to flag and escalate."
                       >
-                        <AlertTriangle className="h-6 w-6 text-amber-500" />
+                        <AlertTriangle className="h-6 w-6 text-red-500" />
                         <span>Escalate to Supervisor</span>
                         <span className="text-[11px] font-normal opacity-80">Flag for supervisory decision</span>
                       </button>
@@ -430,9 +430,9 @@ export const IdentityResolutionPage: React.FC = () => {
                   {resolutionAction && (
                     <div className="space-y-4 pt-4 border-t border-border">
                       {resolutionAction === 'MERGE_RECORDS' && (
-                        <div className="p-4 bg-amber-500/10 border-2 border-amber-500/30 rounded-xl space-y-2 text-xs font-mono text-amber-800 dark:text-amber-300">
+                        <div className="p-4 bg-red-500/10 border-2 border-red-500/30 rounded-xl space-y-2 text-xs font-mono text-red-700 dark:text-red-300">
                           <div className="font-bold flex items-center gap-2 text-sm uppercase">
-                            <AlertTriangle className="h-4 w-4 text-amber-600" /> High-Impact Identity Mutation Warning
+                            <AlertTriangle className="h-4 w-4 text-red-600" /> High-Impact Identity Mutation Warning
                           </div>
                           <p>
                             Merging under Canonical ID permanently unifies detention dockets, biometric aliases, and criminal histories across state facilities. This irreversible action will be stamped with your officer credentials ({user?.full_name || user?.role}) in the permanent audit ledger.

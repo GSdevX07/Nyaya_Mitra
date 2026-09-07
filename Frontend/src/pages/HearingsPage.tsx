@@ -172,7 +172,7 @@ export function HearingsPage() {
 
                 {/* Police-related Task / Status (Visible for Police Officers) */}
                 {isPolice && (
-                  <div className="p-2.5 rounded bg-amber-500/10 border border-amber-500/25 text-amber-800 dark:text-amber-300 text-xs font-sans space-y-1">
+                  <div className="p-2.5 rounded bg-red-500/10 border border-red-500/25 text-red-700 dark:text-red-300 text-xs font-sans space-y-1">
                     <div className="font-bold font-mono text-[10px] uppercase flex items-center gap-1.5">
                       <Clock className="w-3 h-3" /> Station Compliance Task
                     </div>
@@ -347,7 +347,7 @@ export function HearingsPage() {
                               className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
                                 hasChargeSheet
                                   ? "bg-emerald-500/15 text-emerald-600 border border-emerald-500/30"
-                                  : "bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30"
+                                  : "bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30"
                               }`}
                             >
                               {hasChargeSheet ? "SUBMITTED TO COURT" : "INVESTIGATION PENDING"}

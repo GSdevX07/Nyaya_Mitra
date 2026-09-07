@@ -135,7 +135,7 @@ export function EligibilityRadar() {
     }
     if (c.machineStatus === "POTENTIALLY_APPLICABLE") {
       return (
-        <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-[10px] font-bold uppercase tracking-wider rounded-md border border-amber-500/30 flex items-center gap-1">
+        <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-[10px] font-bold uppercase tracking-wider rounded-md border border-red-500/30 flex items-center gap-1">
           <AlertTriangle className="w-3 h-3" /> Approaching Threshold
         </span>
       );
@@ -201,7 +201,7 @@ export function EligibilityRadar() {
           </div>
         </div>
         <div className="p-5 rounded bg-card border border-border flex items-center gap-4">
-          <div className="p-3 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
+          <div className="p-3 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20">
             <Clock className="w-6 h-6" />
           </div>
           <div>
@@ -277,7 +277,7 @@ export function EligibilityRadar() {
                       c.daysOverdue > 0
                         ? "border-destructive/30 bg-destructive/10 hover:border-destructive"
                         : c.missingDocs.length > 0
-                        ? "border-border bg-secondary/50 hover:border-amber-500"
+                        ? "border-border bg-secondary/50 hover:border-red-500"
                         : "border-border bg-card hover:border-accent"
                     }`}
                   >

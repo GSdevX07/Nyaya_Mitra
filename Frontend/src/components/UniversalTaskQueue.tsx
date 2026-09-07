@@ -161,7 +161,7 @@ export function UniversalTaskQueue({
       case "CRITICAL":
         return "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30";
       case "HIGH":
-        return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30";
+        return "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30";
       case "MEDIUM":
         return "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30";
       default:
@@ -177,7 +177,7 @@ export function UniversalTaskQueue({
       case "UNDER_REVIEW":
         return "bg-purple-500/10 text-purple-600 border-purple-500/30";
       case "WAITING_FOR_DOCUMENTS":
-        return "bg-amber-500/10 text-amber-600 border-amber-500/30";
+        return "bg-red-500/10 text-red-600 border-red-500/30";
       case "COMPLETED":
         return "bg-emerald-500/10 text-emerald-600 border-emerald-500/30";
       default:
@@ -201,7 +201,7 @@ export function UniversalTaskQueue({
         );
       } else if (diffDays === 0) {
         return (
-          <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1">
+          <span className="text-red-600 dark:text-red-400 font-bold flex items-center gap-1">
             <Clock className="w-3 h-3" /> Due Today
           </span>
         );
@@ -270,7 +270,7 @@ export function UniversalTaskQueue({
           onClick={() => setActivePreset("OVERDUE")}
           className={`px-3 py-1 rounded-sm border transition-colors ${
             activePreset === "OVERDUE"
-              ? "bg-amber-600 text-white border-amber-600 font-bold"
+              ? "bg-red-600 text-white border-red-600 font-bold"
               : "bg-secondary text-muted-foreground border-border hover:text-foreground"
           }`}
         >
@@ -380,14 +380,14 @@ export function UniversalTaskQueue({
             bulkActionResult.type === "success"
               ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
               : bulkActionResult.type === "warning"
-              ? "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400"
+              ? "bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400"
               : "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400"
           }`}
         >
           {bulkActionResult.type === "success" ? (
             <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
           ) : bulkActionResult.type === "warning" ? (
-            <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+            <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" />
           ) : (
             <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
           )}
@@ -526,7 +526,7 @@ export function UniversalTaskQueue({
                         {task.is_consequential ? (
                           <button
                             onClick={() => setConsequentialModalTask(task)}
-                            className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-[11px] font-mono rounded-sm flex items-center gap-1 hover:bg-amber-500/20"
+                            className="px-2.5 py-1 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-[11px] font-mono rounded-sm flex items-center gap-1 hover:bg-red-500/20"
                           >
                             <Scale className="w-3 h-3" /> Consequential Action
                           </button>
@@ -567,7 +567,7 @@ export function UniversalTaskQueue({
       {consequentialModalTask && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
           <div className="bg-card border-2 border-border p-6 rounded-sm shadow-xl max-w-lg w-full space-y-4">
-            <div className="flex items-center gap-2.5 text-amber-600">
+            <div className="flex items-center gap-2.5 text-red-600">
               <Scale className="w-6 h-6" />
               <h3 className="text-base font-serif font-bold text-foreground">
                 Legally Consequential Action Safeguard
@@ -578,7 +578,7 @@ export function UniversalTaskQueue({
                 The action for task <strong>{consequentialModalTask.id}</strong> (
                 <em>{consequentialModalTask.title}</em>) is legally or operationally consequential.
               </p>
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-sm font-mono text-[11px] text-amber-800 dark:text-amber-300">
+              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-sm font-mono text-[11px] text-red-700 dark:text-red-300">
                 <strong>Mandatory Statutory Rule:</strong> Consequential legal actions (Supervisory
                 Approval, Court Registry Filing, Prison Release Confirmation, or Matter Closure)
                 cannot be executed in bulk or via generic task updates.

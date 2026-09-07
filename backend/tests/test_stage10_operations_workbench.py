@@ -182,19 +182,19 @@ def test_jail_officer_cannot_draft_or_approve(jail_tok):
 
 def test_dlsa_officer_counsel_assignment_desk(dlsa_tok):
     """DLSA officer can query eligible counsel roster and assign panel advocate."""
-    # Query eligible counsel
-    roster_res = client.get("/cases/UTP-0002/eligible-counsel", headers={"Authorization": f"Bearer {dlsa_tok}"})
+    # Query eligible counsel for verified matter
+    roster_res = client.get("/cases/UTP-0001/eligible-counsel", headers={"Authorization": f"Bearer {dlsa_tok}"})
     assert roster_res.status_code == 200, roster_res.text
     roster = roster_res.json()
     assert "counsel" in roster or "counsel_list" in roster
 
-    # Assign counsel to a test case
+    # Assign counsel to the verified matter
     assign_payload = {
         "lawyer_id": "ADV-TEST-01",
         "lawyer_name": "Adv. S. K. Raman",
         "notes": "Assigned under Section 12 Legal Services Authorities Act.",
     }
-    assign_res = client.post("/cases/UTP-0002/assign-counsel", json=assign_payload, headers={"Authorization": f"Bearer {dlsa_tok}"})
+    assign_res = client.post("/cases/UTP-0001/assign-counsel", json=assign_payload, headers={"Authorization": f"Bearer {dlsa_tok}"})
     assert assign_res.status_code == 200, assign_res.text
 
 

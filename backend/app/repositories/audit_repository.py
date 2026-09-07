@@ -15,8 +15,7 @@ from typing import List, Optional, Dict, Any
 from app.models.domain import AuditEvent, AuditAction, generate_prefixed_id
 
 import hashlib
-
-DB_PATH = Path(__file__).resolve().parent.parent.parent / "nyaya_mitra.db"
+from app.database import DB_PATH, get_db_connection
 
 
 def mask_ip_address(ip: Optional[str]) -> str:
@@ -30,8 +29,15 @@ def mask_ip_address(ip: Optional[str]) -> str:
 
 
 class AuditRepository:
-    def __init__(self, db_path: str = str(DB_PATH)):
+    def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
+
+    def _get_conn(self) -> sqlite3.Connection:
+        if self.db_path == DB_PATH:
+            return get_db_connection()
+        is_uri = "mode=memory" in str(self.db_path) or str(self.db_path).startswith("file:")
+        conn = sqlite3.connect(self.db_path, uri=is_uri, timeout=30.0, check_same_thread=False)
+        return conn
 
     def record(
         self,
@@ -49,14 +55,14 @@ class AuditRepository:
         # Determine cryptographic sequence and parent link from previous event
         prev_hash = "GENESIS_NYAYA_MITRA_AUDIT_LEDGER_V1"
         seq = 1
+        conn_prev = None
         try:
-            conn_prev = sqlite3.connect(self.db_path)
+            conn_prev = self._get_conn()
             cur_prev = conn_prev.cursor()
             cur_prev.execute(
                 "SELECT event_hash, sequence_number FROM audit_events ORDER BY timestamp DESC, rowid DESC LIMIT 1"
             )
             row_prev = cur_prev.fetchone()
-            conn_prev.close()
             if row_prev and row_prev[0]:
                 prev_hash = row_prev[0]
                 seq = (row_prev[1] or 0) + 1
@@ -64,6 +70,9 @@ class AuditRepository:
                 seq = (row_prev[1] or 0) + 1
         except Exception:
             pass
+        finally:
+            if conn_prev:
+                conn_prev.close()
 
         # Determine severity if not explicitly specified
         if not severity:
@@ -131,8 +140,9 @@ class AuditRepository:
             print(f"[WARN] Supabase audit log write failed: {e}")
 
         # 2. SQLite local write
+        conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_conn()
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -164,15 +174,18 @@ class AuditRepository:
                 ),
             )
             conn.commit()
-            conn.close()
         except Exception as e:
             print(f"[WARN] Failed to write audit event to SQLite: {e}")
+        finally:
+            if conn:
+                conn.close()
         return event
 
     def get_entity_audit_trail(self, entity_type: str, entity_id: str) -> List[AuditEvent]:
         events = []
+        conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_conn()
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -184,7 +197,6 @@ class AuditRepository:
                 (entity_type, entity_id),
             )
             rows = cursor.fetchall()
-            conn.close()
             for r in rows:
                 try:
                     action_val = AuditAction(r[5])
@@ -213,6 +225,9 @@ class AuditRepository:
                 )
         except Exception as e:
             print(f"[WARN] Failed to fetch audit trail: {e}")
+        finally:
+            if conn:
+                conn.close()
         return events
 
 

@@ -273,6 +273,7 @@ def get_accused_profile(accused_id: str, user: AuthUser) -> Dict[str, Any]:
                 "fir_number": c.fir_number,
                 "police_station": c.police_station,
                 "current_status": c.status.value if hasattr(c.status, "value") else str(c.status),
+                "assignment_status": getattr(c, "assignment_status", None) or ("ASSIGNED" if c.assigned_lawyer_id else "UNASSIGNED"),
                 "assigned_lawyer": getattr(c, "assigned_lawyer", None) or c.assigned_lawyer_id or "Unassigned",
                 "assigned_lawyer_id": c.assigned_lawyer_id,
                 "days_in_custody": getattr(c, "custody_days", 0),
@@ -987,6 +988,7 @@ def get_citizen_view(user: AuthUser) -> Dict[str, Any]:
     has_assigned_lawyer = bool(
         assigned_lawyer_val
         and str(assigned_lawyer_val).strip().lower() not in ("none", "unassigned", "", "null")
+        and primary_case.get("assignment_status") == "ASSIGNED"
     )
 
     if has_assigned_lawyer:
@@ -1004,6 +1006,7 @@ def get_citizen_view(user: AuthUser) -> Dict[str, Any]:
             "organization": "District Legal Services Authority (DLSA)",
             "status_message": "Legal-aid counsel assignment is in progress by the DLSA Secretary.",
             "dlsa_helpline": "15100 (Toll-Free NALSA Helpline 24x7)",
+            "helpline": "15100 (Toll-Free NALSA Helpline 24x7)",
             "dlsa_office_contact": primary_case.get("dlsa_contact") or "15100 (National Legal Aid Helpline 24x7)",
         }
 

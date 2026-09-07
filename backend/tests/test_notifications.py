@@ -3,13 +3,22 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.auth.tokens import create_access_token
 from app.auth.roles import Role
-from app.database import init_db, get_notifications_for_user
+from app.database import init_db, get_notifications_for_user, add_notification, clear_notifications_for_user
 
 client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def setup_db():
     init_db()
+    add_notification("UTP-0001", "Remand Period Expiry Notice", "Police alert", notif_type="alert", target_role="POLICE_OFFICER", user_id="usr_police_01")
+    add_notification("UTP-0001", "Charge Sheet Submission Due", "Police alert 2", notif_type="alert", target_role="POLICE_OFFICER", user_id="usr_police_01")
+    add_notification("UTP-0001", "Medical Examination Certificate Ready", "Jail alert 1", notif_type="info", target_role="JAIL_OFFICER", user_id="usr_jail_01")
+    add_notification("UTP-0001", "Nominal Roll & Custody Certificate Due", "Jail alert 2", notif_type="info", target_role="JAIL_OFFICER", user_id="usr_jail_01")
+    add_notification("UTP-0001", "Bail Application Draft Ready", "Advocate alert", notif_type="info", target_role="DEFENSE_ADVOCATE", user_id="usr_adv_01")
+    add_notification("UTP-0001", "Radar Alert: Statutory Period Reached", "Advocate alert 2", notif_type="warning", target_role="DEFENSE_ADVOCATE", user_id="usr_adv_01")
+    add_notification("UTP-0001", "Citation Integrity Escalation Directive", "Supervisor alert", notif_type="warning", target_role="SUPERVISING_LEGAL_OFFICER")
+    add_notification("UTP-0001", "Hearing Schedule Update Notice", "Accused alert", notif_type="info", target_role="ACCUSED_USER", user_id="usr_accused_01")
+    yield
 
 def _auth_headers(role: Role, user_id: str = "test_user", linked_case_id: str = None) -> dict:
     claims = {"linked_case_id": linked_case_id} if linked_case_id else None

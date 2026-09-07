@@ -1,4 +1,4 @@
-import { Bell, AlertTriangle, CheckCircle, Info, ShieldAlert, X, Trash2, BellOff, CheckCheck } from "lucide-react";
+import { Bell, AlertTriangle, CheckCircle, Info, ShieldAlert, X, Trash2, BellOff, CheckCheck, Radio } from "lucide-react";
 import { Link } from "react-router-dom";
 
 export interface NotificationItem {
@@ -20,6 +20,7 @@ interface NotificationsModalProps {
   onClearAll?: () => void;
   onClearItem?: (id: string) => void;
   loading?: boolean;
+  onTestAlert?: () => void;
 }
 
 export function NotificationsModal({
@@ -31,6 +32,7 @@ export function NotificationsModal({
   onClearAll,
   onClearItem,
   loading = false,
+  onTestAlert,
 }: NotificationsModalProps) {
   if (!isOpen) return null;
 
@@ -94,6 +96,17 @@ export function NotificationsModal({
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Clear all</span>
+              </button>
+            )}
+            {onTestAlert && (
+              <button
+                type="button"
+                onClick={onTestAlert}
+                className="text-xs text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors px-2 py-1 rounded font-medium flex items-center gap-1 border border-emerald-500/20"
+                title="Trigger a real-time live alert via SSE stream"
+              >
+                <Radio className="w-3.5 h-3.5 animate-pulse text-emerald-500" />
+                <span>Test Live</span>
               </button>
             )}
             <button

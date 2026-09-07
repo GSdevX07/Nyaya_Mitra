@@ -445,8 +445,8 @@ export function DocumentsPage() {
       (d.uploaded_by && d.uploaded_by.toLowerCase().includes(search.toLowerCase()))
   );
 
-  const presentCount = docs.filter(d => d.is_present || d.document_status === "VERIFIED").length;
-  const missingCount = docs.filter(d => !d.is_present && d.document_status !== "VERIFIED").length;
+  const presentCount = docs.filter(d => d.is_present || d.document_status === "VERIFIED" || d.document_status === "PENDING_VERIFICATION" || d.document_status === "REVIEWED").length;
+  const missingCount = docs.filter(d => !d.is_present && (d.document_status === "MISSING" || d.document_status === "MISSING_REQUISITIONED")).length;
 
   return (
     <div className="p-4 md:p-8 w-full space-y-8 animate-in fade-in duration-300">
@@ -616,16 +616,16 @@ export function DocumentsPage() {
                               className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1 shadow-sm"
                               title="Mark reviewed for legal-aid intake processing"
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Review Document
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Review
                             </button>
                           )}
-                          {user?.role === "SUPERVISING_LEGAL_OFFICER" && (
+                          {(user?.role === "SUPERVISING_LEGAL_OFFICER" || user?.role === "DLSA_OFFICER") && (
                             <button
                               onClick={() => handleVerifyDirect(d.actual_doc_id || d.id)}
                               className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1 shadow-sm"
-                              title="Supervisory verification: confirm presence and update case completeness"
+                              title="Verify document authenticity and update case completeness"
                             >
-                              <CheckCheck className="w-3.5 h-3.5" /> Supervisory Verify
+                              <CheckCheck className="w-3.5 h-3.5" /> {user?.role === "SUPERVISING_LEGAL_OFFICER" ? "Supervisory Verify" : "Verify Document"}
                             </button>
                           )}
                         </div>

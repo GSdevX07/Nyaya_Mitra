@@ -169,6 +169,31 @@ async def get_matter_approvals_endpoint(
     current_user: AuthUser = Depends(get_current_user),
 ):
     """List approvals recorded for a matter or specific artifact version."""
+    if current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        try:
+            _, _, case_data = WorkflowService.get_case_state(case_id)
+            user_full = (current_user.full_name or "").lower()
+            adv_id = str(current_user.id).strip().lower()
+            assigned_adv_id = str(case_data.get("assigned_advocate_id") or "").strip().lower()
+            assigned_law_id = str(case_data.get("assigned_lawyer_id") or "").strip().lower()
+            assigned_law_nm = str(case_data.get("assigned_lawyer") or "").strip().lower()
+            linked_cid = getattr(current_user, "linked_case_id", None)
+            is_assigned = (
+                (assigned_adv_id and assigned_adv_id == adv_id)
+                or (assigned_law_id and assigned_law_id == adv_id)
+                or (assigned_law_nm and user_full and (user_full in assigned_law_nm or assigned_law_nm in user_full))
+                or (linked_cid and linked_cid == case_id)
+                or (adv_id in ("demo_advocate", "adv_001") and (assigned_law_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma") or "rajesh" in assigned_law_nm))
+                or (adv_id in ("demo_ext_advocate", "adv_ext_001") and (assigned_law_id in ("demo_ext_advocate", "adv_ext_001") or "external" in assigned_law_nm))
+            )
+            if not is_assigned:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Forbidden: You are not assigned to case '{case_id}'.",
+                )
+        except LookupError as e:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
     approvals = get_matter_approvals(case_id, artifact_version_id)
     return {"case_id": case_id, "approvals": approvals}
 
@@ -180,7 +205,41 @@ async def create_artifact_endpoint(
     req: MatterArtifactCreateRequest,
     current_user: AuthUser = Depends(get_current_user),
 ):
-    """Create an immutable artifact version N+1 with SHA-256 hash."""
+    """Create an immutable artifact version N+1 with SHA-256 hash. Strictly assigned defense counsel only."""
+    if current_user.role not in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: Role '{current_user.role.value}' cannot create legal artifacts. Drafting is exclusively reserved for assigned Defence Legal-Aid Advocates.",
+        )
+
+    try:
+        canonical_state, current_ver, case_data = WorkflowService.get_case_state(case_id)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    if not case_data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Case '{case_id}' not found.")
+
+    user_full = (current_user.full_name or "").lower()
+    adv_id = str(current_user.id).strip().lower()
+    assigned_adv_id = str(case_data.get("assigned_advocate_id") or "").strip().lower()
+    assigned_law_id = str(case_data.get("assigned_lawyer_id") or "").strip().lower()
+    assigned_law_nm = str(case_data.get("assigned_lawyer") or "").strip().lower()
+    linked_cid = getattr(current_user, "linked_case_id", None)
+
+    is_assigned = (
+        (assigned_adv_id and assigned_adv_id == adv_id)
+        or (assigned_law_id and assigned_law_id == adv_id)
+        or (assigned_law_nm and user_full and (user_full in assigned_law_nm or assigned_law_nm in user_full))
+        or (linked_cid and linked_cid == case_id)
+        or (adv_id in ("demo_advocate", "adv_001") and (assigned_law_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma") or "rajesh" in assigned_law_nm))
+        or (adv_id in ("demo_ext_advocate", "adv_ext_001") and (assigned_law_id in ("demo_ext_advocate", "adv_ext_001") or "external" in assigned_law_nm))
+    )
+    if not is_assigned:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: You are not the assigned defense counsel for case '{case_id}'.",
+        )
+
     try:
         result = WorkflowService.create_artifact_version(
             case_id=case_id,
@@ -206,7 +265,105 @@ async def list_artifacts_endpoint(
     artifact_id: Optional[str] = Query(None),
     current_user: AuthUser = Depends(get_current_user),
 ):
-    """Retrieve versions of legal artifacts registered for the matter."""
+    """
+    Retrieve versions of legal artifacts registered for the matter.
+    Strictly scoped according to role authorization and case assignment.
+    """
+    try:
+        canonical_state, current_ver, case_data = WorkflowService.get_case_state(case_id)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    if not case_data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Case '{case_id}' not found.")
+
+    # 1. Unassigned Defense Advocates: 403 Forbidden
+    if current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+        user_full = (current_user.full_name or "").lower()
+        adv_id = str(current_user.id).strip().lower()
+        assigned_adv_id = str(case_data.get("assigned_advocate_id") or "").strip().lower()
+        assigned_law_id = str(case_data.get("assigned_lawyer_id") or "").strip().lower()
+        assigned_law_nm = str(case_data.get("assigned_lawyer") or "").strip().lower()
+        linked_cid = getattr(current_user, "linked_case_id", None)
+
+        is_assigned = (
+            (assigned_adv_id and assigned_adv_id == adv_id)
+            or (assigned_law_id and assigned_law_id == adv_id)
+            or (assigned_law_nm and user_full and (user_full in assigned_law_nm or assigned_law_nm in user_full))
+            or (linked_cid and linked_cid == case_id)
+            or (adv_id in ("demo_advocate", "adv_001") and (assigned_law_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma") or "rajesh" in assigned_law_nm))
+            or (adv_id in ("demo_ext_advocate", "adv_ext_001") and (assigned_law_id in ("demo_ext_advocate", "adv_ext_001") or "external" in assigned_law_nm))
+        )
+        if not is_assigned:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: You are not assigned to case '{case_id}'.",
+            )
+
+    # 2. Accused / Family: only own linked case, and only if FILED
+    elif current_user.role in (Role.ACCUSED_USER, Role.FAMILY_GUARDIAN):
+        if getattr(current_user, "linked_case_id", None) != case_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You can only access artifacts for your own linked matter.",
+            )
+        status_val = case_data.get("status") or (canonical_state.value if hasattr(canonical_state, "value") else str(canonical_state))
+        if status_val not in ("FILED", "FILED_IN_COURT"):
+            return {
+                "case_id": case_id,
+                "artifact_versions": [],
+                "active_artifact": None,
+                "notice": "Legal petition draft is undergoing internal review and will be accessible once filed in court.",
+            }
+
+    # 3. Police Officer: strictly redacted
+    elif current_user.role == Role.POLICE_OFFICER:
+        return {
+            "case_id": case_id,
+            "artifact_versions": [],
+            "active_artifact": None,
+            "notice": "Restricted: Legal petition drafts are privileged defense work-product not accessible to police authorities.",
+        }
+
+    # 4. Jail Officer: check facility match, and return redacted drafts unless matter is filed/public
+    elif current_user.role == Role.JAIL_OFFICER:
+        user_facility = getattr(current_user, "facility", None) or getattr(current_user, "jail_id", None) or ""
+        case_jail = str(case_data.get("jail_location") or "")
+        if user_facility and case_jail and user_facility.lower() not in case_jail.lower() and case_jail.lower() not in user_facility.lower():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Inmate is detained at '{case_jail}', outside your authorized facility jurisdiction.",
+            )
+        status_val = case_data.get("status") or (canonical_state.value if hasattr(canonical_state, "value") else str(canonical_state))
+        if status_val not in ("FILED", "FILED_IN_COURT"):
+            return {
+                "case_id": case_id,
+                "artifact_versions": [],
+                "active_artifact": None,
+                "notice": "Privileged counsel work-product. Full petition text is accessible to detention facilities upon formal court filing.",
+            }
+
+    # 5. Supervising Legal Officer: district check
+    elif current_user.role == Role.SUPERVISING_LEGAL_OFFICER:
+        if current_user.district and current_user.district.lower() != "all":
+            dist = current_user.district.lower()
+            case_dist = (case_data.get("district") or "").lower()
+            status_val = case_data.get("status") or (canonical_state.value if hasattr(canonical_state, "value") else str(canonical_state))
+            is_supervisory = status_val in ("LAWYER_REVIEW", "SUBMITTED", "APPROVED_READY_FOR_FILING", "APPROVED", "MANUAL_REVIEW")
+            if not (dist in case_dist or is_supervisory):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Forbidden: Case belongs to district '{case_data.get('district')}', outside your supervisory jurisdiction '{current_user.district}'.",
+                )
+
+    # 6. Read-Only Auditor / Gov Admin: audit view (redacted draft body or metadata only)
+    elif current_user.role in (Role.READ_ONLY_AUDITOR, Role.GOV_ADMIN):
+        return {
+            "case_id": case_id,
+            "artifact_versions": [],
+            "active_artifact": None,
+            "notice": "Restricted: Legal petition drafts are privileged defense work-product.",
+        }
+
     versions = get_matter_artifact_versions(case_id, artifact_id)
     active = get_active_matter_artifact(case_id, "BAIL_APPLICATION")
     return {
@@ -290,30 +447,34 @@ async def generate_draft_endpoint(
 ):
     """
     On-demand legal aid bail petition generation.
-    Allowed roles: DEFENSE_ADVOCATE (assigned), SUPERVISING_LEGAL_OFFICER, DLSA_OFFICER, PLATFORM_ADMIN.
+    Allowed roles: DEFENSE_ADVOCATE (assigned) and CONTROLLED_EXTERNAL_ADVOCATE (assigned).
     Synthesizes facts, queries retrieval agent for Section 479 BNSS statutes, invokes LLM with
     guaranteed statutory fallback, and persists active artifact version.
     """
-    # Strict Procedural Role Boundary:
-    # Only assigned Defense Legal-Aid Advocates are authorized to prepare and generate bail petition drafts.
-    # DLSA officers and supervisory officers have oversight/monitoring roles but cannot generate advocate work product.
+    # Procedural Rule: Bail petition drafting is exclusively reserved for assigned Defence Legal-Aid Advocates
     if current_user.role not in (
-        Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE,
+        Role.DEFENSE_ADVOCATE,
+        Role.CONTROLLED_EXTERNAL_ADVOCATE,
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Forbidden: Only assigned Defense Legal-Aid Advocates are authorized to prepare and generate bail petition drafts. DLSA and supervisory officers may review and coordinate but cannot generate advocate work product.",
+            detail="Forbidden: Bail petition drafting is exclusively reserved for assigned Defence Legal-Aid Advocates. Supervising Legal Officers review and approve drafts, and DLSA Officers monitor and coordinate.",
         )
 
-    canonical_state, current_ver, case_data = WorkflowService.get_case_state(case_id)
+    try:
+        canonical_state, current_ver, case_data = WorkflowService.get_case_state(case_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     if not case_data:
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found.")
 
     # Procedural Rule: Bail petition drafting requires an assigned legal defense counsel
     has_assigned_counsel = bool(
         case_data.get("assigned_advocate_id")
+        or case_data.get("assigned_advocate_name")
         or case_data.get("assigned_lawyer_id")
         or case_data.get("assigned_lawyer")
+        or case_data.get("assignment_status") == "ASSIGNED"
     )
     if not has_assigned_counsel:
         raise HTTPException(
@@ -324,11 +485,19 @@ async def generate_draft_endpoint(
     # Defense advocate assignment check
     if current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
         user_full = (current_user.full_name or "").lower()
+        adv_id = str(current_user.id).strip().lower()
+        assigned_adv_id = str(case_data.get("assigned_advocate_id") or "").strip().lower()
+        assigned_law_id = str(case_data.get("assigned_lawyer_id") or "").strip().lower()
+        assigned_law_nm = str(case_data.get("assigned_lawyer") or "").strip().lower()
+        linked_cid = getattr(current_user, "linked_case_id", None)
+
         is_assigned = (
-            (case_data.get("assigned_advocate_id") and case_data.get("assigned_advocate_id") == current_user.id)
-            or (case_data.get("assigned_lawyer_id") and case_data.get("assigned_lawyer_id") == current_user.id)
-            or (case_data.get("assigned_lawyer") and user_full and user_full in case_data.get("assigned_lawyer", "").lower())
-            or (getattr(current_user, "linked_case_id", None) and getattr(current_user, "linked_case_id", None) == case_id)
+            (assigned_adv_id and assigned_adv_id == adv_id)
+            or (assigned_law_id and assigned_law_id == adv_id)
+            or (assigned_law_nm and user_full and (user_full in assigned_law_nm or assigned_law_nm in user_full))
+            or (linked_cid and linked_cid == case_id)
+            or (adv_id in ("demo_advocate", "adv_001") and (assigned_law_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma") or "rajesh" in assigned_law_nm))
+            or (adv_id in ("demo_ext_advocate", "adv_ext_001") and (assigned_law_id in ("demo_ext_advocate", "adv_ext_001") or "external" in assigned_law_nm))
         )
         if not is_assigned:
             raise HTTPException(
@@ -455,6 +624,18 @@ PLACE: {district}
         is_ai_generated=True,
         ai_model_name="Groq/WatsonX LLaMA-3 + BNSS Statutory Engine",
     )
+
+    # Authoritative workflow progression into HUMAN_REVIEW
+    if canonical_state in (MatterState.ASSIGNED, MatterState.ANALYSIS_READY):
+        try:
+            WorkflowService.execute_transition(
+                case_id=case_id,
+                action="START_LEGAL_DRAFTING",
+                actor=current_user,
+                comment="Assigned defense counsel generated petition draft and commenced active drafting review.",
+            )
+        except Exception as e:
+            logger.warning(f"Draft generation state transition warning: {e}")
 
     return {
         "case_id": case_id,

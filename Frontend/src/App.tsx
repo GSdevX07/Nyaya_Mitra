@@ -29,6 +29,7 @@ import { IdentityResolutionPage } from "./pages/IdentityResolutionPage";
 import { PoliceWorkspace } from "./pages/PoliceWorkspace";
 import { DocumentAssessmentPage } from "./pages/DocumentAssessmentPage";
 import { LegalSourcesAdmin } from "./pages/LegalSourcesAdmin";
+import { SupervisorWorkbench } from "./pages/SupervisorWorkbench";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 function App() {
@@ -94,6 +95,20 @@ function App() {
                 element={
                   <ProtectedRoute allowedRoles={["GOV_ADMIN"]}>
                     <GovAdminOverview />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/supervisor"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                    ]}
+                  >
+                    <SupervisorWorkbench />
                   </ProtectedRoute>
                 }
               />

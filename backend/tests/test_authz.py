@@ -7,6 +7,9 @@ from app.main import app
 from app.auth.tokens import create_access_token
 from app.auth.roles import Role
 
+from app.database import init_db
+init_db()
+
 client = TestClient(app)
 
 

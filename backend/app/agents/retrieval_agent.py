@@ -165,3 +165,12 @@ def execute_retrieval(case: CaseRecord, is_eligible: bool) -> Dict[str, Any]:
         "retrieved_statutes": concatenated_statutes if is_eligible else "",
         "uncertainty_flag": "HUMAN_LEGAL_REVIEW_REQUIRED" if case.multiple_active_cases or case.punishable_by_death_or_life else None,
     }
+
+
+def retrieve_statutes(case: CaseRecord) -> Dict[str, Any]:
+    """Convenience statutory retrieval interface for drafting workflow."""
+    res = execute_retrieval(case, is_eligible=True)
+    return {
+        "retrieved_text": res.get("retrieved_statutes", ""),
+        "citations": res.get("citations", []),
+    }

@@ -7,11 +7,14 @@ import {
   RefreshCw,
   HeartPulse,
   UserCheck,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 import { fetchCases, type CaseRecord } from "@/lib/api";
 
 type CategoryFilter = "ALL" | "UNDERTRIAL" | "CONVICTED" | "POST_RELEASE";
 type LegalCodeFilter = "ALL" | "BNS_2023" | "IPC_1860";
+type AssignmentFilter = "ALL" | "ASSIGNED" | "UNASSIGNED";
 
 export function CasesPage() {
   const [cases, setCases] = useState<CaseRecord[]>([]);
@@ -19,6 +22,7 @@ export function CasesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("ALL");
   const [legalCodeFilter, setLegalCodeFilter] = useState<LegalCodeFilter>("ALL");
+  const [assignmentFilter, setAssignmentFilter] = useState<AssignmentFilter>("ALL");
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -63,6 +67,13 @@ export function CasesPage() {
       if (c.legal_code !== legalCodeFilter) return false;
     }
 
+    // Assignment Filter
+    if (assignmentFilter === "ASSIGNED") {
+      if (c.assignment_status !== "ASSIGNED" || (!c.assigned_lawyer && !c.assigned_lawyer_id)) return false;
+    } else if (assignmentFilter === "UNASSIGNED") {
+      if (c.assignment_status === "ASSIGNED" && Boolean(c.assigned_lawyer || c.assigned_lawyer_id)) return false;
+    }
+
     return true;
   });
 
@@ -73,6 +84,10 @@ export function CasesPage() {
   const countPostRelease = cases.filter(
     (c) => c.status === "POST_RELEASE_PRESERVED" || c.status === "RELEASED"
   ).length;
+  const countAssigned = cases.filter(
+    (c) => c.assignment_status === "ASSIGNED" && Boolean(c.assigned_lawyer || c.assigned_lawyer_id)
+  ).length;
+  const countUnassigned = cases.length - countAssigned;
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
@@ -160,18 +175,34 @@ export function CasesPage() {
           />
         </div>
 
-        {/* Legal Code Filter Dropdown */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-mono text-muted-foreground">Legal Code:</span>
-          <select
-            value={legalCodeFilter}
-            onChange={(e) => setLegalCodeFilter(e.target.value as LegalCodeFilter)}
-            className="bg-card border border-border text-foreground text-xs rounded-sm px-3 py-2 font-mono focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            <option value="ALL">All Legal Codes</option>
-            <option value="BNS_2023">Bharatiya Nyaya Sanhita, 2023</option>
-            <option value="IPC_1860">Indian Penal Code, 1860 (Historical)</option>
-          </select>
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Legal Code Filter Dropdown */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono text-muted-foreground">Legal Code:</span>
+            <select
+              value={legalCodeFilter}
+              onChange={(e) => setLegalCodeFilter(e.target.value as LegalCodeFilter)}
+              className="bg-card border border-border text-foreground text-xs rounded-sm px-3 py-2 font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="ALL">All Legal Codes</option>
+              <option value="BNS_2023">Bharatiya Nyaya Sanhita, 2023</option>
+              <option value="IPC_1860">Indian Penal Code, 1860 (Historical)</option>
+            </select>
+          </div>
+
+          {/* Counsel Assignment Filter Dropdown */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono text-muted-foreground">Counsel:</span>
+            <select
+              value={assignmentFilter}
+              onChange={(e) => setAssignmentFilter(e.target.value as AssignmentFilter)}
+              className="bg-card border border-border text-foreground text-xs rounded-sm px-3 py-2 font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="ALL">All States ({cases.length})</option>
+              <option value="ASSIGNED">Assigned Counsel ({countAssigned})</option>
+              <option value="UNASSIGNED">Pending DLSA ({countUnassigned})</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -256,6 +287,18 @@ export function CasesPage() {
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Facility / Location:</span>
                       <span className="text-foreground">{c.jail_location}</span>
+                    </div>
+                    <div className="flex justify-between items-center pt-1 border-t border-border/40">
+                      <span className="text-muted-foreground">Legal Counsel:</span>
+                      {c.assignment_status === "ASSIGNED" && (c.assigned_lawyer || c.assigned_lawyer_id) ? (
+                        <span className="text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> {c.assigned_lawyer || "Counsel Assigned"}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-mono font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" /> Pending DLSA Allocation
+                        </span>
+                      )}
                     </div>
                   </div>
 

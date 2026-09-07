@@ -1,4 +1,4 @@
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
 import {
   ArrowLeft,
   FileText,
@@ -62,13 +62,83 @@ import { DocumentPreviewModal } from "@/components/DocumentPreviewModal";
 import { ToastContainer, type ToastItem } from "@/components/ToastContainer";
 import { resolveCaseUpdater } from "@/lib/utils";
 
+export function normalizeDocKey(docType: string): string {
+  if (!docType) return "";
+  const clean = docType.toLowerCase().trim().replace(/[- ]/g, "_");
+  const aliases: Record<string, string> = {
+    fir_copy: "fir",
+    first_information_report: "fir",
+    first_information_report_fir: "fir",
+    fir_legal_aid_intake: "fir",
+    fir_copy_legal_aid_intake: "fir",
+    chargesheet: "charge_sheet",
+    charge_sheet_copy: "charge_sheet",
+    final_report: "charge_sheet",
+    final_police_report: "charge_sheet",
+    charge_sheet_final_report: "charge_sheet",
+    remand_order_copy: "remand_order",
+    remand_application: "remand_order",
+    judicial_remand_order: "remand_order",
+    detention_order: "remand_order",
+    police_remand_order: "remand_order",
+    nominal_roll_copy: "nominal_roll",
+    certified_nominal_roll: "nominal_roll",
+    prison_nominal_roll: "nominal_roll",
+    custody_certificate_copy: "custody_certificate",
+    nominal_custody_certificate: "custody_certificate",
+    custody_certificate_prison_record: "custody_certificate",
+    trial_court_judgment_copy: "trial_court_judgment",
+    trial_court_order: "trial_court_judgment",
+    trial_court_order_judgment: "trial_court_judgment",
+    trial_court_order_copy: "trial_court_judgment",
+    prior_bail_order: "prior_bail_order_if_any",
+    prior_bail_order_copy: "prior_bail_order_if_any",
+    prior_bail_rejection_order: "prior_bail_order_if_any",
+    bail_application: "bail_application",
+    bail_petition: "bail_application",
+    bail_application_draft: "bail_application",
+    bail_order: "bail_order",
+    bail_grant_order: "bail_order",
+    certified_bail_order: "bail_order",
+    release_memo: "release_memo",
+    release_order: "release_memo",
+    jail_release_memo: "release_memo",
+    prison_admission: "prison_admission_record",
+    prison_admission_record: "prison_admission_record",
+    admission_record: "prison_admission_record",
+    prison_conduct: "prison_conduct_record",
+    prison_conduct_record: "prison_conduct_record",
+    conduct_certificate: "prison_conduct_record",
+    medical_report: "medical_certificate",
+    medical_certificate: "medical_certificate",
+    medical_examination_record: "medical_certificate",
+    case_diary_extract: "case_diary_extract",
+    case_diary: "case_diary_extract",
+    arrest_memo: "arrest_memo",
+    panchnama: "arrest_memo",
+    supervisory_review_note: "supervisory_review_note",
+    supervisory_note: "supervisory_review_note",
+    vakalatnama: "vakalatnama",
+    memo_of_appearance: "vakalatnama",
+    dlsa_application: "dlsa_application",
+    legal_aid_application: "dlsa_application",
+  };
+  return aliases[clean] || clean;
+}
+
 export function CaseIntelligence() {
   const { user, hasRole, can } = useAuth();
   const isPolice = user?.role === "POLICE_OFFICER";
   const isDlsa = user?.role === "DLSA_OFFICER";
   const isJail = user?.role === "JAIL_OFFICER";
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+
+  const tabParam = searchParams.get("tab");
+  const validTab = (tabParam && ["dossier", "draft", "timeline", "evidence", "statutes", "legalaid"].includes(tabParam))
+    ? (tabParam as "dossier" | "draft" | "timeline" | "evidence" | "statutes" | "legalaid")
+    : "dossier";
 
   const [caseData, setCaseData] = useState<any>(null);
   const [caseDocDetails, setCaseDocDetails] = useState<any[]>([]);
@@ -91,7 +161,14 @@ export function CaseIntelligence() {
   };
   const [dlsaComment, setDlsaComment] = useState<string>("");
   const [submittingComment, setSubmittingComment] = useState(false);
-  const [activeTab, setActiveTab] = useState<"dossier" | "draft" | "timeline" | "evidence" | "statutes" | "legalaid">("dossier");
+  const [activeTab, setActiveTab] = useState<"dossier" | "draft" | "timeline" | "evidence" | "statutes" | "legalaid">(validTab);
+
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t && ["dossier", "draft", "timeline", "evidence", "statutes", "legalaid"].includes(t)) {
+      setActiveTab(t as any);
+    }
+  }, [searchParams]);
 
   const [verifyingEvidenceId, setVerifyingEvidenceId] = useState<string | null>(null);
   const [evidenceVerificationResult, setEvidenceVerificationResult] = useState<any>(null);
@@ -255,7 +332,10 @@ export function CaseIntelligence() {
     setSigningOff(true);
     setActionBanner(null);
     try {
-      await signOffCase(id, editableDraft);
+      const res = await signOffCase(id, editableDraft);
+      if (res?.status === "error" || res?.error) {
+        throw new Error(res?.message || res?.error || "Counsel sign-off failed.");
+      }
       setAdvocateSignedOff(true);
       setActionBanner({
         type: "success",
@@ -271,7 +351,7 @@ export function CaseIntelligence() {
         const updater = resolveCaseUpdater(err?.detail, fresh || caseData, caseData?.case?.district);
         addToast("conflict", "Case Already Updated", `${updater} just made updates to this case. We have automatically refreshed your screen to show the latest information.`);
       } else {
-        addToast("error", "Unable to Sign Off", "Could not complete the sign-off right now. Please check your connection and try again.");
+        addToast("error", "Unable to Sign Off", err.message || "Could not complete the sign-off right now. Please check your connection and try again.");
       }
       setActionBanner({
         type: "error",
@@ -287,7 +367,10 @@ export function CaseIntelligence() {
     setSavingDraft(true);
     setActionBanner(null);
     try {
-      await saveCaseDraft(id, editableDraft);
+      const res = await saveCaseDraft(id, editableDraft);
+      if (res?.status === "error" || res?.error) {
+        throw new Error(res?.message || res?.error || "Failed to save draft changes.");
+      }
       setActionBanner({
         type: "success",
         text: "Bail petition draft changes saved successfully to database.",
@@ -302,11 +385,11 @@ export function CaseIntelligence() {
         const updater = resolveCaseUpdater(err?.detail, fresh || caseData, caseData?.case?.district);
         addToast("conflict", "Draft Already Updated", `${updater} just made updates to this draft. We have refreshed your screen with their latest changes.`);
       } else {
-        addToast("error", "Could Not Save Draft", "Your changes could not be saved right now. Please check your connection and try again.");
+        addToast("error", "Could Not Save Draft", err.message || "Your changes could not be saved right now. Please check your connection and try again.");
       }
       setActionBanner({
         type: "error",
-        text: "Draft save failed: " + (err.message || err),
+        text: "Save draft failed: " + (err.message || err),
       });
     } finally {
       setSavingDraft(false);
@@ -364,24 +447,53 @@ export function CaseIntelligence() {
     }
   };
 
-  const generateBailDraftPDF = () => {
+  const generateBailDraftPDF = async () => {
     const currentCase = caseData?.case || {};
     if (!currentCase.case_id) return;
     const counselAssigned = Boolean(
       currentCase.assigned_lawyer_id ||
       currentCase.assigned_lawyer ||
+      currentCase.assigned_advocate_id ||
+      currentCase.assigned_advocate_name ||
+      currentCase.assignment_status === "ASSIGNED" ||
       caseData?.counsel_assigned ||
       caseData?.assigned_lawyer_id ||
       caseData?.assigned_lawyer ||
-      caseData?.assignment_status === "ASSIGNED"
+      caseData?.assigned_advocate_id ||
+      caseData?.assigned_advocate_name ||
+      caseData?.assignment_status === "ASSIGNED" ||
+      (matterState && !["INTAKE", "VERIFICATION"].includes(matterState))
     );
     if (!counselAssigned) {
       addToast("error", "Counsel Required", "Legal Aid Defense Counsel must be assigned before downloading petition PDF.");
       return;
     }
-    if (!editableDraft.trim()) {
-      addToast("error", "Draft Not Ready", "Draft petition text must be generated or saved first.");
-      return;
+
+    let activeDraft = editableDraft;
+    if (!activeDraft || !activeDraft.trim()) {
+      if (user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE") {
+        try {
+          setGeneratingDraft(true);
+          addToast("info", "Generating Draft", "Fetching statutory Section 479 BNSS draft petition from AI drafting engine...");
+          const res = await generateBailDraft(currentCase.case_id);
+          if (res?.draft_text) {
+            activeDraft = res.draft_text;
+            setEditableDraft(res.draft_text);
+            addToast("success", "Draft Generated", "Statutory draft prepared and compiled into petition PDF.");
+          } else {
+            throw new Error((res as any)?.detail || res?.message || "No draft content returned by the server.");
+          }
+        } catch (err: any) {
+          const errMsg = err?.detail || err?.message || String(err);
+          addToast("error", "Draft Generation Failed", errMsg);
+          return;
+        } finally {
+          setGeneratingDraft(false);
+        }
+      } else {
+        addToast("error", "Draft Not Ready", "Draft petition has not yet been generated by the assigned defence advocate.");
+        return;
+      }
     }
     const doc = new jsPDF({
       unit: "mm",
@@ -483,7 +595,7 @@ export function CaseIntelligence() {
     doc.setFontSize(9);
     
     // Split editable draft paragraphs
-    const draftContent = editableDraft || "Statutory grounds under Section 479 of the Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023. The petitioner has served the requisite statutory period in undertrial detention and has not been convicted of any prior offenses punishable by life or death.";
+    const draftContent = activeDraft || editableDraft || "Statutory grounds under Section 479 of the Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023. The petitioner has served the requisite statutory period in undertrial detention and has not been convicted of any prior offenses punishable by life or death.";
     const draftLines = doc.splitTextToSize(draftContent, contentWidth);
 
     for (let i = 0; i < draftLines.length; i++) {
@@ -588,7 +700,7 @@ export function CaseIntelligence() {
     yPos += 4;
 
     doc.setFont("helvetica", "normal");
-    const lawyerName = c.assigned_lawyer_id || "Adv. DLSA Legal Aid Counsel";
+    const lawyerName = c.assigned_advocate_name || c.assigned_lawyer || c.assigned_advocate_id || c.assigned_lawyer_id || "Adv. DLSA Legal Aid Counsel";
     doc.text(lawyerName, margin, yPos);
     doc.text("Verified at Delhi that the contents", pageWidth - margin - 50, yPos);
     yPos += 3.5;
@@ -622,6 +734,7 @@ export function CaseIntelligence() {
     }
 
     doc.save(`Statutory_Bail_Petition_${c.case_id}.pdf`);
+    addToast("success", "Petition Downloaded", "Statutory Bail Petition PDF compiled and downloaded successfully.");
   };
 
 
@@ -673,10 +786,16 @@ export function CaseIntelligence() {
   const hasAssignedCounsel = Boolean(
     c.assigned_lawyer_id ||
     c.assigned_lawyer ||
+    c.assigned_advocate_id ||
+    c.assigned_advocate_name ||
+    c.assignment_status === "ASSIGNED" ||
     caseData?.counsel_assigned ||
     caseData?.assigned_lawyer_id ||
     caseData?.assigned_lawyer ||
-    caseData?.assignment_status === "ASSIGNED"
+    caseData?.assigned_advocate_id ||
+    caseData?.assigned_advocate_name ||
+    caseData?.assignment_status === "ASSIGNED" ||
+    (matterState && !["INTAKE", "VERIFICATION"].includes(matterState))
   );
   const eligibility = caseData.eligibility || {};
   const completeness = caseData.completeness || {};
@@ -707,11 +826,20 @@ export function CaseIntelligence() {
     if (!id) return;
     setReferringDlsa(true);
     try {
-      await referJailCaseToDlsa(id, "Prison custody desk legal-aid counsel assignment referral.");
+      const res = await referJailCaseToDlsa(id, "Prison custody desk legal-aid counsel assignment referral.");
+      if (res?.status === "error" || res?.error) {
+        throw new Error(res?.detail || res?.message || "Referral failed.");
+      }
       setReferralDone(true);
+      addToast("success", "Referred to DLSA", "Prison custody desk referral dispatched successfully.");
       await load();
     } catch (err: any) {
-      alert(`Referral failed: ${err.message}`);
+      const errMsg = err?.detail || err?.message || String(err);
+      addToast("error", "Referral Failed", errMsg);
+      setActionBanner({
+        type: "error",
+        text: `Referral failed: ${errMsg}`,
+      });
     } finally {
       setReferringDlsa(false);
     }
@@ -746,10 +874,16 @@ export function CaseIntelligence() {
     const counselAssigned = Boolean(
       currentCase.assigned_lawyer_id ||
       currentCase.assigned_lawyer ||
+      currentCase.assigned_advocate_id ||
+      currentCase.assigned_advocate_name ||
+      currentCase.assignment_status === "ASSIGNED" ||
       caseData?.counsel_assigned ||
       caseData?.assigned_lawyer_id ||
       caseData?.assigned_lawyer ||
-      caseData?.assignment_status === "ASSIGNED"
+      caseData?.assigned_advocate_id ||
+      caseData?.assigned_advocate_name ||
+      caseData?.assignment_status === "ASSIGNED" ||
+      (matterState && !["INTAKE", "VERIFICATION"].includes(matterState))
     );
     if (!counselAssigned) {
       addToast("error", "Counsel Required", "Legal Aid Defense Counsel must be assigned before generating a formal bail petition.");
@@ -759,18 +893,22 @@ export function CaseIntelligence() {
       setGeneratingDraft(true);
       setActionBanner(null);
       const res = await generateBailDraft(id);
+      if (!res || !res.draft_text) {
+        throw new Error((res as any)?.detail || res?.message || "No draft content returned by the server.");
+      }
       setEditableDraft(res.draft_text);
       setActionBanner({
         type: "success",
-        text: `AI Bail Application draft generated successfully (v${res.version_number}, ${res.provenance}). Grounded in Section 479 BNSS.`,
+        text: `AI Bail Application draft generated successfully (v${res.version_number || 1}, ${res.provenance || "AI Generated"}). Grounded in Section 479 BNSS.`,
       });
       addToast("success", "Draft Generated", "A new bail petition draft has been created based on Section 479 guidelines.");
       await load();
     } catch (err: any) {
-      addToast("error", "Draft Creation Failed", "Could not generate draft right now. Please try again.");
+      const errMsg = err?.detail || err?.message || String(err);
+      addToast("error", "Draft Creation Failed", errMsg);
       setActionBanner({
         type: "error",
-        text: `Draft generation failed: ${err.message || err}`,
+        text: `Draft generation failed: ${errMsg}`,
       });
     } finally {
       setGeneratingDraft(false);
@@ -826,6 +964,9 @@ export function CaseIntelligence() {
     setTransitioningAction(action);
     try {
       const res = await requestMatterTransition(id, action, payload, comment, matterVersion || undefined);
+      if (res?.status === "error" || res?.error || res?.success === false) {
+        throw new Error(res?.detail || res?.message || res?.error || `Transition '${action}' failed.`);
+      }
       setActionBanner({
         type: "success",
         text: `State transitioned to ${res.current_state} (Version ${res.version_number}) via ${action}.`,
@@ -861,7 +1002,7 @@ export function CaseIntelligence() {
       addToast("success", friendlyTitle, friendlyMsg);
       await load();
     } catch (err: any) {
-      const errMsg = err.message || "";
+      const errMsg = err?.detail || err?.message || String(err);
       const isConflict = errMsg.includes("409") || errMsg.toLowerCase().includes("conflict") || errMsg.toLowerCase().includes("version mismatch");
       if (isConflict) {
         const fresh = await load();
@@ -875,12 +1016,12 @@ export function CaseIntelligence() {
         addToast(
           "error",
           "Action Could Not Be Completed",
-          "Unable to complete this step right now. Please check the details and try again."
+          errMsg || "Unable to complete this step right now. Please check the details and try again."
         );
       }
       setActionBanner({
         type: "error",
-        text: err.message || `Transition '${action}' failed.`,
+        text: errMsg || `Transition '${action}' failed.`,
       });
     } finally {
       setTransitioningAction(null);
@@ -943,7 +1084,7 @@ export function CaseIntelligence() {
     // Check required fields
     for (const key of activeTransitionModal.required_payload_keys) {
       if (!transitionFormData[key] || !transitionFormData[key].trim()) {
-        alert(`Required field missing: ${key.replace(/_/g, " ")}`);
+        addToast("error", "Required Field Missing", `Please fill in ${key.replace(/_/g, " ")}.`);
         return;
       }
     }
@@ -960,22 +1101,33 @@ export function CaseIntelligence() {
     try {
       setAssigningCounsel(true);
       setAssignmentSuccess(null);
-      await assignCaseCounsel(
+      const res = await assignCaseCounsel(
         caseData.case_id,
         selectedLawyerId,
         selectedLawyerName,
         assignmentNotes || "Statutory Legal Aid Allocation under NALSA / DLSA mandate"
       );
+      if (res?.status === "error" || res?.error) {
+        throw new Error(res?.detail || res?.message || "Counsel Allocation failed.");
+      }
       setCaseData((prev: any) => ({
         ...prev,
         assignment_status: "ASSIGNED",
         assigned_lawyer: selectedLawyerName,
         assigned_lawyer_id: selectedLawyerId,
+        assigned_advocate_name: selectedLawyerName,
+        assigned_advocate_id: selectedLawyerId,
       }));
       setAssignmentSuccess(`Successfully allocated ${selectedLawyerName} (${selectedLawyerId}) to case ${caseData.case_id}`);
+      addToast("success", "Advocate Assigned", `Successfully allocated ${selectedLawyerName} to this matter.`);
       await load();
     } catch (err: any) {
-      alert(`Counsel Allocation failed: ${err.message || err}`);
+      const errMsg = err?.detail || err?.message || String(err);
+      addToast("error", "Counsel Allocation Failed", errMsg);
+      setActionBanner({
+        type: "error",
+        text: `Counsel Allocation failed: ${errMsg}`,
+      });
     } finally {
       setAssigningCounsel(false);
     }
@@ -1061,23 +1213,38 @@ export function CaseIntelligence() {
             <>
               <button
                 onClick={generateBailDraftPDF}
+                disabled={generatingDraft}
                 className="px-3 py-2 border border-border rounded-sm hover:bg-secondary text-xs font-medium flex items-center gap-1.5"
                 title="Download internal working copy — NOT a filed petition"
               >
-                <Download className="w-4 h-4" /> Internal Copy
+                {generatingDraft ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-4 h-4" />} Internal Copy
               </button>
               <span className="px-3 py-1.5 rounded-sm bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs font-mono font-bold flex items-center gap-1.5">
                 <AlertCircle className="w-4 h-4" /> DLSA COORDINATION — Pending Advocate Sign-Off
               </span>
             </>
           ) : (
-            <button
-              onClick={generateBailDraftPDF}
-              className="px-3 py-2 border border-border rounded-sm hover:bg-secondary text-xs font-medium flex items-center gap-1.5"
-              title="Download PDF petition"
-            >
-              <Download className="w-4 h-4" /> PDF
-            </button>
+            <div className="flex items-center gap-2">
+              {hasAssignedCounsel && !editableDraft && hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+                <button
+                  onClick={handleGenerateAiDraft}
+                  disabled={generatingDraft}
+                  className="px-3 py-2 bg-primary text-primary-foreground rounded-sm hover:opacity-90 text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-opacity"
+                  title="Generate Section 479 BNSS draft petition via AI drafting engine"
+                >
+                  {generatingDraft ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />}
+                  ⚡ Generate Draft
+                </button>
+              )}
+              <button
+                onClick={generateBailDraftPDF}
+                disabled={generatingDraft}
+                className="px-3 py-2 border border-border rounded-sm hover:bg-secondary text-xs font-medium flex items-center gap-1.5"
+                title="Download PDF petition"
+              >
+                {generatingDraft ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-4 h-4" />} PDF
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -1677,15 +1844,20 @@ export function CaseIntelligence() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 {c.required_docs?.map((docType: string) => {
                   const normDoc = docType.toLowerCase().trim().replace(/ /g, "_");
-                  const detail = caseDocDetails.find(
-                    (d: any) => d.document_type === normDoc || d.id?.includes(normDoc)
-                  );
-                  const isVerified = (detail && detail.document_status === "VERIFIED") || c.present_docs?.includes(docType) || c.present_docs?.includes(normDoc);
-                  const isReviewed = detail && detail.document_status === "REVIEWED";
-                  const isPending = !isVerified && detail && detail.document_status === "PENDING_VERIFICATION";
-                  const isAvailable = isVerified || isReviewed || Boolean(detail);
-                  const isSupervisor = user?.role === "SUPERVISING_LEGAL_OFFICER";
-                  const isDlsa = user?.role === "DLSA_OFFICER";
+                  const canonDoc = normalizeDocKey(normDoc);
+                  const detail = caseDocDetails.find((d: any) => {
+                    const dNorm = (d.document_type || "").toLowerCase().trim().replace(/ /g, "_");
+                    const dCanon = normalizeDocKey(dNorm) || (d.canonical_type ? normalizeDocKey(d.canonical_type) : "");
+                    return dNorm === normDoc || dCanon === canonDoc || dNorm === canonDoc || dCanon === normDoc || (d.id && (d.id.includes(normDoc) || d.id.includes(canonDoc)));
+                  });
+
+                  const isVerified = (detail && detail.document_status === "VERIFIED") || (c.present_docs || []).map(normalizeDocKey).includes(canonDoc);
+                  const isReviewed = !isVerified && detail && detail.document_status === "REVIEWED";
+                  const isPending = !isVerified && !isReviewed && (detail?.document_status === "PENDING_VERIFICATION" || (detail && detail.is_present && !isVerified));
+                  const isAvailable = isVerified || isReviewed || isPending || Boolean(detail?.is_present);
+                  const isMissing = !isAvailable;
+                  const isSupervisor = user?.role === "SUPERVISING_LEGAL_OFFICER" || user?.role === "PLATFORM_ADMIN" || user?.role === "GOV_ADMIN";
+                  const isDlsa = user?.role === "DLSA_OFFICER" || user?.role === "PLATFORM_ADMIN";
                   const docId = detail?.actual_doc_id || detail?.id || `DOC-${c.case_id}-${normDoc}`;
 
                   return (
@@ -1722,22 +1894,22 @@ export function CaseIntelligence() {
                         <div className="shrink-0">
                           {isVerified && (
                             <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-600 border border-emerald-500/30">
-                              VERIFIED
+                              VERIFIED IN VAULT
                             </span>
                           )}
-                          {isReviewed && !isVerified && (
+                          {isReviewed && (
                             <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/20 text-blue-600 border border-blue-500/30">
-                              REVIEWED (INTAKE)
+                              REVIEWED (INTAKE) &bull; IN VAULT
                             </span>
                           )}
                           {isPending && (
                             <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30">
-                              PENDING VERIFICATION
+                              PENDING VERIFICATION &bull; STORED IN VAULT
                             </span>
                           )}
-                          {!isVerified && !isReviewed && !isPending && (
+                          {isMissing && (
                             <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-destructive/20 text-destructive border border-destructive/30">
-                              RECORD MISSING
+                              RECORD MISSING FROM VAULT
                             </span>
                           )}
                         </div>
@@ -1750,9 +1922,9 @@ export function CaseIntelligence() {
                         ) : isReviewed ? (
                           <span>Status: <strong className="text-foreground">Reviewed for DLSA Intake</strong> &bull; Origin: <strong className="text-foreground">{detail?.uploaded_by || "Institutional Officer"}</strong></span>
                         ) : isPending ? (
-                          <span>Uploaded by: <strong className="text-foreground">{detail?.uploaded_by || "Institutional Officer"}</strong></span>
+                          <span>Stored in Vault &bull; Awaiting Verification &bull; Uploaded by: <strong className="text-foreground">{detail?.uploaded_by || "Institutional Officer"}</strong></span>
                         ) : (
-                          <span className="text-amber-600 dark:text-amber-400 font-medium">Missing record &mdash; blocks eligibility</span>
+                          <span className="text-amber-600 dark:text-amber-400 font-medium">Missing record &mdash; awaiting institutional upload</span>
                         )}
                       </div>
 
@@ -1779,15 +1951,20 @@ export function CaseIntelligence() {
                               </button>
                             </>
                           ) : (
-                            <span className="text-[10px] font-mono text-muted-foreground italic">
-                              Document pending
-                            </span>
+                            <button
+                              onClick={() => handleOpenDocPreview(docId, docType.replace(/_/g, " ").toUpperCase())}
+                              className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-700 dark:text-amber-300 rounded text-xs font-mono font-medium flex items-center gap-1 shadow-sm transition-colors"
+                              title="View statutory requisition notice"
+                            >
+                              <FileText className="w-3.5 h-3.5 text-amber-500" />
+                              <span>Notice</span>
+                            </button>
                           )}
                         </div>
 
                         {/* Right: Operational actions */}
                         <div className="flex flex-wrap items-center gap-1.5">
-                          {/* DLSA Officer: Review Document (only when genuinely pending) */}
+                          {/* DLSA Officer: Review Document (only when pending) */}
                           {isPending && isDlsa && detail?.actual_doc_id && (
                             <button
                               onClick={() => handleReviewCaseDoc(detail.actual_doc_id)}
@@ -1800,16 +1977,16 @@ export function CaseIntelligence() {
                             </button>
                           )}
 
-                          {/* Supervising Legal Officer: Supervisory Verify */}
-                          {(isPending || isReviewed) && !isVerified && isSupervisor && detail?.actual_doc_id && (
+                          {/* Supervising Legal Officer / DLSA Officer: Supervisory Verify */}
+                          {(isPending || isReviewed) && !isVerified && (isSupervisor || isDlsa) && (detail?.actual_doc_id || docId) && (
                             <button
-                              onClick={() => handleVerifyCaseDoc(detail.actual_doc_id)}
-                              disabled={verifyingDocId === detail.actual_doc_id}
+                              onClick={() => handleVerifyCaseDoc(detail?.actual_doc_id || docId)}
+                              disabled={verifyingDocId === (detail?.actual_doc_id || docId)}
                               className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold uppercase flex items-center gap-1 shadow-sm transition-colors disabled:opacity-50"
-                              title="Supervisory verification"
+                              title="Supervisory verification: authenticate record for court filing"
                             >
-                              {verifyingDocId === detail.actual_doc_id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCheck className="w-3 h-3" />}
-                              Supervisory Verify
+                              {verifyingDocId === (detail?.actual_doc_id || docId) ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCheck className="w-3 h-3" />}
+                              {isSupervisor ? "Supervisory Verify" : "Verify Document"}
                             </button>
                           )}
 
@@ -1952,14 +2129,35 @@ export function CaseIntelligence() {
                   )}
                   <button
                     onClick={generateBailDraftPDF}
-                    disabled={!editableDraft.trim() || !hasAssignedCounsel}
+                    disabled={generatingDraft || !hasAssignedCounsel}
                     className="px-3 py-1.5 border border-border rounded-sm hover:bg-secondary text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50"
                     title={isDlsa ? "Download internal working copy — NOT a filed petition" : "Download PDF petition"}
                   >
-                    <Download className="w-4 h-4" /> {isDlsa ? "Internal Copy" : "Download PDF"}
+                    {generatingDraft ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} {isDlsa ? "Internal Copy" : "Download PDF"}
                   </button>
                 </div>
               </div>
+
+              {!editableDraft.trim() && hasAssignedCounsel && hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+                <div className="p-4 rounded-sm border border-primary/20 bg-primary/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground flex items-center gap-2">
+                      <Bot className="w-4 h-4 text-primary" /> AI Bail Petition Generation Ready
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Counsel is assigned. Click below to request AI generation of a formal Section 479 BNSS statutory bail petition draft.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleGenerateAiDraft}
+                    disabled={generatingDraft}
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded-sm hover:opacity-90 text-xs font-bold font-mono uppercase tracking-wider flex items-center gap-2 shadow-sm transition-opacity shrink-0"
+                  >
+                    {generatingDraft ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
+                    Generate Draft Now
+                  </button>
+                </div>
+              )}
 
             {/* In-Line Draft Editor — Role-Scoped */}
             {isDlsa ? (
@@ -2117,7 +2315,7 @@ export function CaseIntelligence() {
                 </div>
 
                 {/* ── Level 2: Supervisory Legal Officer Approval Gateway ── */}
-                {hasRole("SUPERVISING_LEGAL_OFFICER") && (matterState === "SUBMITTED" || c.status === "LAWYER_REVIEW" || advocateSignedOff) && matterState !== "APPROVED" && c.status !== "APPROVED_READY_FOR_FILING" && c.status !== "FILED" && (
+                {hasRole("SUPERVISING_LEGAL_OFFICER") && c.assignment_status === "ASSIGNED" && Boolean(c.assigned_lawyer || c.assigned_lawyer_id) && (matterState === "SUBMITTED" || c.status === "LAWYER_REVIEW" || advocateSignedOff) && matterState !== "APPROVED" && c.status !== "APPROVED_READY_FOR_FILING" && c.status !== "FILED" && (
                   <div className="p-4 rounded-sm border border-emerald-500/30 bg-emerald-500/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-3">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
@@ -2128,19 +2326,33 @@ export function CaseIntelligence() {
                         Counsel legal sign-off has been verified. As Supervisory Legal Officer, issue institutional approval so defense counsel can proceed to file in court.
                       </p>
                     </div>
-                    <button
-                      onClick={() => handleWorkflowTransition("SUPERVISORY_APPROVE")}
-                      disabled={transitioningAction === "SUPERVISORY_APPROVE"}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-sm text-xs font-bold font-serif uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-colors shrink-0"
-                    >
-                      {transitioningAction === "SUPERVISORY_APPROVE" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCheck className="w-3.5 h-3.5" />}
-                      Approve Bail Petition for Filing
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => handleTransitionButtonClick({
+                          action: "REQUEST_REVISIONS",
+                          required_payload_keys: ["comment"],
+                          description: "Return petition draft to assigned counsel with revision notes"
+                        })}
+                        disabled={transitioningAction === "REQUEST_REVISIONS"}
+                        className="px-3 py-2 bg-secondary hover:bg-secondary/80 text-foreground border border-border rounded-sm text-xs font-bold font-serif uppercase tracking-wider flex items-center gap-1.5 transition-colors"
+                      >
+                        <Send className="w-3.5 h-3.5 text-amber-500" />
+                        Request Revisions
+                      </button>
+                      <button
+                        onClick={() => handleWorkflowTransition("SUPERVISORY_APPROVE")}
+                        disabled={transitioningAction === "SUPERVISORY_APPROVE"}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-sm text-xs font-bold font-serif uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-colors"
+                      >
+                        {transitioningAction === "SUPERVISORY_APPROVE" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCheck className="w-3.5 h-3.5" />}
+                        Approve Bail Petition
+                      </button>
+                    </div>
                   </div>
                 )}
 
                 {/* ── Level 3: Defence Legal-Aid Advocate Files In Court ── */}
-                {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (matterState === "APPROVED" || c.status === "APPROVED_READY_FOR_FILING" || c.status === "APPROVED") && c.status !== "FILED" && (
+                {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && c.assignment_status === "ASSIGNED" && (matterState === "APPROVED" || c.status === "APPROVED_READY_FOR_FILING" || c.status === "APPROVED") && c.status !== "FILED" && (
                   <div className="p-4 rounded-sm border border-blue-500/30 bg-blue-500/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-3">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
@@ -2286,44 +2498,56 @@ export function CaseIntelligence() {
           <div className="space-y-4">
             {(() => {
               const list: any[] = [];
-              const seenTypes = new Set<string>();
+              const seenCanonKeys = new Set<string>();
 
+              // 1. Add all documents already indexed from caseDocDetails
               (caseDocDetails || []).forEach((d: any) => {
                 const norm = (d.document_type || "").toLowerCase().trim().replace(/ /g, "_");
-                if (norm && !seenTypes.has(norm)) {
-                  seenTypes.add(norm);
-                  list.push(d);
+                const canon = normalizeDocKey(norm) || (d.canonical_type ? normalizeDocKey(d.canonical_type) : norm);
+                if (canon && !seenCanonKeys.has(canon)) {
+                  seenCanonKeys.add(canon);
+                  list.push({
+                    ...d,
+                    canonical_type: canon,
+                    actual_doc_id: d.actual_doc_id || d.id || `DOC-${c.case_id}-${norm}`,
+                  });
                 }
               });
 
+              // 2. Add required docs not yet in caseDocDetails
               (c.required_docs || []).forEach((reqDoc: string) => {
                 const norm = reqDoc.toLowerCase().trim().replace(/ /g, "_");
-                if (!seenTypes.has(norm)) {
-                  seenTypes.add(norm);
-                  const isPresent = (c.present_docs || []).includes(reqDoc) || (c.present_docs || []).includes(norm);
+                const canon = normalizeDocKey(norm);
+                if (!seenCanonKeys.has(canon)) {
+                  seenCanonKeys.add(canon);
+                  const isBaselinePresent = (c.present_docs || []).map(normalizeDocKey).includes(canon);
                   list.push({
-                    id: isPresent ? `DOC-${c.case_id}-${norm}` : null,
-                    actual_doc_id: isPresent ? `DOC-${c.case_id}-${norm}` : null,
+                    id: `DOC-${c.case_id}-${norm}`,
+                    actual_doc_id: `DOC-${c.case_id}-${norm}`,
                     document_type: norm,
+                    canonical_type: canon,
                     document_title: reqDoc.replace(/_/g, " ").toUpperCase(),
-                    status: isPresent ? "Verified & Present" : "Missing Action Required",
-                    document_status: isPresent ? "VERIFIED" : "MISSING",
-                    is_present: isPresent,
-                    uploaded_by: isPresent ? "Court Registry (Baseline)" : null,
-                    uploaded_at: isPresent ? c.arrest_date : null,
+                    status: isBaselinePresent ? "Verified & Present" : "Missing Action Required",
+                    document_status: isBaselinePresent ? "VERIFIED" : "MISSING",
+                    is_present: isBaselinePresent,
+                    uploaded_by: isBaselinePresent ? "Court Registry (Baseline)" : null,
+                    uploaded_at: isBaselinePresent ? c.arrest_date : null,
                     evidence_id: `EVI-${c.case_id}-${norm}`,
                   });
                 }
               });
 
+              // 3. Add any present_docs not yet seen
               (c.present_docs || []).forEach((presDoc: string) => {
                 const norm = presDoc.toLowerCase().trim().replace(/ /g, "_");
-                if (!seenTypes.has(norm)) {
-                  seenTypes.add(norm);
+                const canon = normalizeDocKey(norm);
+                if (!seenCanonKeys.has(canon)) {
+                  seenCanonKeys.add(canon);
                   list.push({
                     id: `DOC-${c.case_id}-${norm}`,
                     actual_doc_id: `DOC-${c.case_id}-${norm}`,
                     document_type: norm,
+                    canonical_type: canon,
                     document_title: presDoc.replace(/_/g, " ").toUpperCase(),
                     status: "Verified & Present",
                     document_status: "VERIFIED",
@@ -2345,17 +2569,20 @@ export function CaseIntelligence() {
 
               return list.map((docItem: any) => {
                 const normDoc = (docItem.document_type || "").toLowerCase().trim().replace(/ /g, "_");
+                const canonDoc = docItem.canonical_type || normalizeDocKey(normDoc);
                 const docTitle = docItem.document_title || normDoc.replace(/_/g, " ").toUpperCase();
-                const isVerified = docItem.document_status === "VERIFIED" || (c.present_docs || []).includes(normDoc) || (c.present_docs || []).includes(docItem.document_type);
-                const isReviewed = docItem.document_status === "REVIEWED";
-                const isPending = docItem.document_status === "PENDING_VERIFICATION";
-                const isMissing = !isVerified && !isReviewed && !isPending;
+                const isVerified = docItem.document_status === "VERIFIED" || (c.present_docs || []).map(normalizeDocKey).includes(canonDoc);
+                const isReviewed = !isVerified && docItem.document_status === "REVIEWED";
+                const isPending = !isVerified && !isReviewed && (docItem.document_status === "PENDING_VERIFICATION" || (docItem.is_present && !isVerified));
+                const isMissing = !isVerified && !isReviewed && !isPending && !docItem.is_present;
                 const docId = docItem.actual_doc_id || docItem.id || `DOC-${c.case_id}-${normDoc}`;
                 const eviId = docItem.evidence_id || `EVI-${c.case_id}-${normDoc}`;
+                const isSupervisor = user?.role === "SUPERVISING_LEGAL_OFFICER" || user?.role === "PLATFORM_ADMIN" || user?.role === "GOV_ADMIN";
+                const isDlsa = user?.role === "DLSA_OFFICER" || user?.role === "PLATFORM_ADMIN";
 
                 return (
                   <div
-                    key={normDoc}
+                    key={canonDoc || normDoc}
                     className={`p-4 border rounded-sm flex flex-wrap items-center justify-between gap-4 transition-all ${
                       isVerified
                         ? "border-emerald-500/30 bg-emerald-500/5"
@@ -2388,12 +2615,12 @@ export function CaseIntelligence() {
                           )}
                           {isReviewed && (
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-600 border border-blue-500/30">
-                              REVIEWED (INTAKE)
+                              REVIEWED (INTAKE) &bull; STORED IN VAULT
                             </span>
                           )}
                           {isPending && (
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 border border-amber-500/30">
-                              PENDING VERIFICATION
+                              PENDING VERIFICATION &bull; STORED IN VAULT
                             </span>
                           )}
                           {isMissing && (
@@ -2403,11 +2630,11 @@ export function CaseIntelligence() {
                           )}
                         </div>
                         <p className="text-xs font-mono text-muted-foreground mt-0.5">
-                          Evidence ID: {eviId} • Format: Digitised Judicial Record
-                          {docItem.uploaded_by && ` • Origin: ${docItem.uploaded_by}`}
+                          Evidence ID: {eviId} &bull; Format: Digitised Judicial Record
+                          {docItem.uploaded_by && ` &bull; Origin: ${docItem.uploaded_by}`}
                           {docItem.file_hash && (
                             <span className="ml-2 font-mono text-[10px] text-muted-foreground/80" title={docItem.file_hash}>
-                              • SHA256: {docItem.file_hash.slice(0, 8)}...
+                              &bull; SHA256: {docItem.file_hash.slice(0, 8)}...
                             </span>
                           )}
                         </p>
@@ -2432,6 +2659,33 @@ export function CaseIntelligence() {
                           >
                             <Download className="w-3.5 h-3.5" />
                           </button>
+
+                          {/* DLSA Intake Review */}
+                          {isPending && isDlsa && docItem.actual_doc_id && (
+                            <button
+                              onClick={() => handleReviewCaseDoc(docItem.actual_doc_id)}
+                              disabled={reviewingDocId === docItem.actual_doc_id}
+                              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold uppercase flex items-center gap-1 shadow-sm transition-colors disabled:opacity-50"
+                              title="Mark reviewed for DLSA legal-aid intake"
+                            >
+                              {reviewingDocId === docItem.actual_doc_id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                              Review
+                            </button>
+                          )}
+
+                          {/* Supervisory / DLSA Verification */}
+                          {(isPending || isReviewed) && !isVerified && (isSupervisor || isDlsa) && (docItem.actual_doc_id || docId) && (
+                            <button
+                              onClick={() => handleVerifyCaseDoc(docItem.actual_doc_id || docId)}
+                              disabled={verifyingDocId === (docItem.actual_doc_id || docId)}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold uppercase flex items-center gap-1 shadow-sm transition-colors disabled:opacity-50"
+                              title="Supervisory verification: authenticate record for court filing"
+                            >
+                              {verifyingDocId === (docItem.actual_doc_id || docId) ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCheck className="w-3 h-3" />}
+                              {isSupervisor ? "Supervisory Verify" : "Verify Document"}
+                            </button>
+                          )}
+
                           {hasRole("SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "JAIL_OFFICER") ? (
                             <button
                               onClick={() => handleVerifyEvidence(eviId)}
@@ -2439,7 +2693,7 @@ export function CaseIntelligence() {
                               className="px-3 py-1.5 bg-secondary border border-border text-foreground hover:bg-muted text-xs font-semibold rounded flex items-center gap-1.5"
                             >
                               {verifyingEvidenceId === eviId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                              Verify Document Integrity
+                              Verify Integrity
                             </button>
                           ) : (
                             <span className="px-2.5 py-1 text-[11px] font-sans text-muted-foreground bg-muted/50 border border-border rounded flex items-center gap-1" title="Evidence verification is performed by DLSA, Supervisory Legal Officer, or Jail Custody Officer">
@@ -3292,6 +3546,8 @@ export function CaseIntelligence() {
         onClose={() => setPreviewDocId(null)}
         docId={previewDocId}
         docTitle={previewDocTitle}
+        onVerified={() => load()}
+        onReviewed={() => load()}
       />
     </div>
   );

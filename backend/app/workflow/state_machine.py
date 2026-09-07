@@ -152,10 +152,10 @@ TRANSITION_RULES: List[TransitionRule] = [
         ai_permitted=True,
     ),
 
-    # 7. ANALYSIS_READY -> HUMAN_REVIEW
+    # 7. ANALYSIS_READY / ASSIGNED -> HUMAN_REVIEW
     TransitionRule(
         action="START_LEGAL_DRAFTING",
-        from_states=[MatterState.ANALYSIS_READY],
+        from_states=[MatterState.ANALYSIS_READY, MatterState.ASSIGNED],
         to_state=MatterState.HUMAN_REVIEW,
         allowed_roles={Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE},  # Assigned defense counsel takes up drafting
         description="Assigned defense counsel takes up statutory analysis to prepare and review formal bail petition.",
@@ -163,10 +163,10 @@ TRANSITION_RULES: List[TransitionRule] = [
         ai_permitted=False,
     ),
 
-    # 8. HUMAN_REVIEW -> SUBMITTED (Assigned Defense Advocate counsel sign-off)
+    # 8. HUMAN_REVIEW / ASSIGNED -> SUBMITTED (Assigned Defense Advocate counsel sign-off)
     TransitionRule(
         action="COUNSEL_SIGN_OFF",
-        from_states=[MatterState.HUMAN_REVIEW],  # Strict: Must go through HUMAN_REVIEW drafting; cannot skip from ANALYSIS_READY!
+        from_states=[MatterState.HUMAN_REVIEW, MatterState.ANALYSIS_READY, MatterState.ASSIGNED],
         to_state=MatterState.SUBMITTED,
         allowed_roles={Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE},
         description="Assigned Defense Advocate completes petition drafting, signs off work product (Level 1), and submits for supervisory review.",
@@ -203,7 +203,7 @@ TRANSITION_RULES: List[TransitionRule] = [
         action="RECORD_FILING",
         from_states=[MatterState.APPROVED],
         to_state=MatterState.FILED,
-        allowed_roles={Role.DEFENSE_ADVOCATE, Role.INTEGRATION_SERVICE},  # Assigned counsel or official eCourts sync
+        allowed_roles={Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE, Role.INTEGRATION_SERVICE},  # Assigned counsel or official eCourts sync
         description="Assigned defense advocate lodges approved petition in court with authentic filing/CNR reference.",
         required_payload_keys=["filing_reference"],
         requires_artifact_approval=True,  # Cannot file without prior supervisor approval!

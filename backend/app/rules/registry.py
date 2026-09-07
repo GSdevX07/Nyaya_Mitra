@@ -157,8 +157,9 @@ class LegalRuleRegistry:
     def _sync_with_db(self):
         """Persist seeded rules to DB if table is empty, or load persistent rules from DB."""
         try:
-            from app.database import get_db_connection
+            from app.database import get_db_connection, _init_sqlite_tables
             conn = get_db_connection()
+            _init_sqlite_tables(conn)
             cursor = conn.cursor()
 
             # Check existing rules count

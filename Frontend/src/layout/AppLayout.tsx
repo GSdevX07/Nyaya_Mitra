@@ -6,7 +6,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { NotificationsModal, type NotificationItem } from "@/components/NotificationsModal";
 import { LawyerProfileModal } from "@/components/LawyerProfileModal";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { fetchNotifications, clearNotificationsApi } from "@/lib/api";
+import { fetchNotifications, clearNotificationsApi, subscribeToNotificationsStream, triggerTestNotificationApi } from "@/lib/api";
 import { useAuth, type Role } from "@/lib/auth";
 
 interface NavItem {
@@ -83,8 +83,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
 
     case "SUPERVISING_LEGAL_OFFICER":
       return [
-        { path: "/dashboard", label: "Command Center" },
-        { path: "/cases", label: "Cases" },
+        { path: "/supervisor", label: "Supervisory Workbench" },
         { path: "/identity-review", label: "Identity Review" },
         { path: "/radar", label: "Eligibility Radar" },
         { path: "/documents", label: "Documents" },
@@ -99,7 +98,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
     case "DLSA_OFFICER":
     default:
       return [
-        { path: "/dashboard", label: "Command Center" },
+        { path: "/dashboard", label: "Legal-Aid Workbench" },
         { path: "/cases", label: "Cases" },
         { path: "/identity-review", label: "Identity Review" },
         { path: "/radar", label: "Eligibility Radar" },
@@ -129,145 +128,6 @@ export function formatRoleTitle(role?: string): string {
     default: return role ? role.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Authorized Official";
   }
 }
-
-function getDefaultNotificationsForRole(role?: string): NotificationItem[] {
-  switch (role) {
-    case "POLICE_OFFICER":
-      return [
-        {
-          id: "SYS-POLICE-1",
-          title: "Remand Compliance Monitoring Active",
-          message: "Statutory 15-day police custody and Section 187 BNSS investigation compliance tracking active for jurisdictional police station.",
-          timestamp: "Active",
-          type: "info",
-        },
-        {
-          id: "SYS-POLICE-2",
-          title: "Charge Sheet Statutory Tracking",
-          message: "Automated investigation timeline and charge sheet submission tracker active under Section 193 BNSS.",
-          timestamp: "Active",
-          type: "info",
-        },
-      ];
-
-    case "JAIL_OFFICER":
-      return [
-        {
-          id: "SYS-JAIL-1",
-          title: "Custody Threshold Scrutiny Active",
-          message: "All admitted undertrial prisoners are actively tracked for Section 479 BNSS statutory detention eligibility.",
-          timestamp: "Active",
-          type: "info",
-        },
-        {
-          id: "SYS-JAIL-2",
-          title: "Nominal Roll & Custody Verification",
-          message: "Institutional nominal rolls and custody conduct certificates synchronized for judicial requisition.",
-          timestamp: "Active",
-          type: "info",
-        },
-      ];
-
-    case "DEFENSE_ADVOCATE":
-    case "CONTROLLED_EXTERNAL_ADVOCATE":
-      return [
-        {
-          id: "SYS-ADV-1",
-          title: "Legal Aid Drafting Desk Synchronized",
-          message: "Assigned undertrial cases are available for BNSS statutory bail petition drafting and dossier compilation.",
-          timestamp: "Active",
-          type: "info",
-        },
-        {
-          id: "SYS-ADV-2",
-          title: "Statutory Eligibility Radar Active",
-          message: "Continuous monitoring for Section 479(1) first-time offender one-third and one-half detention thresholds.",
-          timestamp: "Active",
-          type: "info",
-        },
-      ];
-
-    case "DLSA_OFFICER":
-      return [
-        {
-          id: "SYS-DLSA-1",
-          title: "Empanelled Counsel Allocation Active",
-          message: "Institutional panel defense advocates and LADCs roster synchronized for district undertrial assignments.",
-          timestamp: "Active",
-          type: "info",
-        },
-        {
-          id: "SYS-DLSA-2",
-          title: "Statutory Bail Scrutiny Queue",
-          message: "High-priority Section 479 undertrial cases flagged for timely legal aid review.",
-          timestamp: "Active",
-          type: "info",
-        },
-      ];
-
-    case "SUPERVISING_LEGAL_OFFICER":
-    case "GOV_ADMIN":
-      return [
-        {
-          id: "SYS-SLSA-1",
-          title: "Supervisory Review Queue Active",
-          message: "Legal aid bail applications requiring institutional supervisory sign-off are monitored in real time.",
-          timestamp: "Active",
-          type: "info",
-        },
-        {
-          id: "SYS-SLSA-2",
-          title: "Statutory Knowledge Grounding",
-          message: "Statutory provisions cross-verified against Bharatiya Nagarik Suraksha Sanhita (BNSS 2023).",
-          timestamp: "Active",
-          type: "info",
-        },
-      ];
-
-    case "READ_ONLY_AUDITOR":
-      return [
-        {
-          id: "SYS-AUDIT-1",
-          title: "Statutory Compliance Audit Log Active",
-          message: "Immutable cryptographic audit trail active across all custody, evidence, and legal aid events.",
-          timestamp: "Active",
-          type: "info",
-        },
-      ];
-
-    case "ACCUSED_USER":
-    case "FAMILY_GUARDIAN":
-      return [
-        {
-          id: "SYS-CITIZEN-1",
-          title: "Legal Aid Tracking Active",
-          message: "Your case proceedings and legal aid defense status are updated dynamically as actions are recorded.",
-          timestamp: "Active",
-          type: "info",
-        },
-        {
-          id: "SYS-CITIZEN-2",
-          title: "National Legal Aid Helpline",
-          message: "Call 15100 (Toll-Free 24x7) for round-the-clock free legal aid assistance from NALSA / DLSA.",
-          timestamp: "Active",
-          type: "info",
-        },
-      ];
-
-    case "PLATFORM_ADMIN":
-    default:
-      return [
-        {
-          id: "SYS-ADMIN-1",
-          title: "Database Sync & Health Check",
-          message: "PostgreSQL dual-write adapter active. SQLite primary replica synchronized.",
-          timestamp: "Active",
-          type: "info",
-        },
-      ];
-  }
-}
-
 
 const READ_STORAGE_KEY = "nyaya_read_notification_ids";
 const CLEARED_STORAGE_KEY = "nyaya_cleared_notification_ids";
@@ -315,17 +175,8 @@ export function AppLayout() {
 
   const navItems = useMemo(() => getNavItemsForRole(user?.role), [user?.role]);
 
-  // Notification state
-  const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
-    const readIds = getReadIdsFromStorage();
-    const clearedIds = getClearedIdsFromStorage();
-    return getDefaultNotificationsForRole(user?.role)
-      .filter((n) => !clearedIds.includes(n.id))
-      .map((n) => ({
-        ...n,
-        read: readIds.includes(n.id),
-      }));
-  });
+  // Notification state — live, server-backed only
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
   const [notifLoading, setNotifLoading] = useState(false);
 
@@ -392,35 +243,40 @@ export function AppLayout() {
               }))
           );
         } else {
-          setNotifications(
-            getDefaultNotificationsForRole(user?.role)
-              .filter((n) => !clearedIds.includes(n.id))
-              .map((n) => ({
-                ...n,
-                read: readIds.includes(n.id),
-              }))
-          );
+          setNotifications([]);
         }
       })
       .catch((err) => {
-        console.warn("Could not load backend notifications, falling back to role defaults:", err);
+        console.warn("Backend notifications unavailable:", err);
         if (!isMounted) return;
-        const readIds = getReadIdsFromStorage();
-        const clearedIds = getClearedIdsFromStorage();
-        setNotifications(
-          getDefaultNotificationsForRole(user?.role)
-            .filter((n) => !clearedIds.includes(n.id))
-            .map((n) => ({
-              ...n,
-              read: readIds.includes(n.id),
-            }))
-        );
+        setNotifications([]);
       })
       .finally(() => {
         if (isMounted) setNotifLoading(false);
       });
+
+    // Real-time live notifications stream via SSE
+    const unsubscribeStream = subscribeToNotificationsStream(
+      (incoming: NotificationItem) => {
+        if (!isMounted || !incoming || !incoming.id) return;
+        const clearedIds = getClearedIdsFromStorage();
+        if (clearedIds.includes(incoming.id)) return;
+
+        setNotifications((prev) => {
+          if (prev.some((n) => n.id === incoming.id)) {
+            return prev.map((n) => (n.id === incoming.id ? { ...n, ...incoming } : n));
+          }
+          return [{ ...incoming, read: false }, ...prev];
+        });
+      },
+      (err) => {
+        console.debug("Live notification stream disconnected or reconnecting:", err?.message || err);
+      }
+    );
+
     return () => {
       isMounted = false;
+      unsubscribeStream();
     };
   }, [user?.role, user?.id]);
 
@@ -730,6 +586,10 @@ export function AppLayout() {
         onClearAll={handleClearAll}
         onClearItem={handleClearItem}
         loading={notifLoading}
+        onTestAlert={async () => {
+          const nowStr = new Date().toLocaleTimeString();
+          await triggerTestNotificationApi("UTP-0001", `Live Real-Time Notification (${nowStr})`);
+        }}
       />
       <LawyerProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
     </div>

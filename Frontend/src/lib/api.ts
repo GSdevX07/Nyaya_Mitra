@@ -646,6 +646,10 @@ export async function triggerAction(actionId: string) {
       `${API_BASE_URL}/actions/trigger?action_id=${encodeURIComponent(actionId)}`,
       { method: "POST" }
     );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.message || `Action dispatch failed: HTTP ${res.status}`);
+    }
     return await res.json();
   } catch (err) {
     console.error("Trigger action error:", err);
@@ -700,6 +704,98 @@ export async function clearNotificationsApi(notificationId?: string) {
     console.warn("Backend API clear notifications error:", err);
     return { status: "cleared_locally", cleared_count: 0 };
   }
+}
+
+export function subscribeToNotificationsStream(
+  onNotification: (notif: any) => void,
+  onError?: (err: any) => void,
+): () => void {
+  let isClosed = false;
+  let abortController: AbortController | null = null;
+  let retryTimeout: any = null;
+
+  async function connect() {
+    if (isClosed) return;
+    const token = getAuthToken();
+
+    abortController = new AbortController();
+
+    try {
+      const headers: Record<string, string> = {
+        Accept: "text/event-stream",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const streamUrl = token
+        ? `${API_BASE_URL}/notifications/stream?token=${encodeURIComponent(token)}`
+        : `${API_BASE_URL}/notifications/stream`;
+
+      const response = await fetch(streamUrl, {
+        headers,
+        signal: abortController.signal,
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error(`SSE stream connection failed with status ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (!isClosed) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("data:")) {
+            try {
+              const data = JSON.parse(trimmed.slice(5).trim());
+              onNotification(data);
+            } catch (err) {
+              console.warn("Error parsing real-time notification data:", err);
+            }
+          }
+        }
+      }
+
+      if (!isClosed) {
+        retryTimeout = setTimeout(connect, 2000);
+      }
+    } catch (err: any) {
+      if (!isClosed && err.name !== "AbortError") {
+        if (onError) onError(err);
+        retryTimeout = setTimeout(connect, 2500);
+      }
+    }
+  }
+
+  connect();
+
+  return () => {
+    isClosed = true;
+    if (abortController) abortController.abort();
+    if (retryTimeout) clearTimeout(retryTimeout);
+  };
+}
+
+export async function triggerTestNotificationApi(caseId: string = "UTP-0001", title: string = "Live Real-Time Notification Test"): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/notifications/test-broadcast`, {
+    method: "POST",
+    body: JSON.stringify({ case_id: caseId, title }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || err.message || `Notification broadcast failed: HTTP ${res.status}`);
+  }
+  return await res.json();
 }
 
 export async function assessUploadedDocument(file: File) {
@@ -1531,5 +1627,223 @@ export async function downloadCaseDocument(docId: string, fileName: string = "do
   window.URL.revokeObjectURL(url);
 }
 
+// ── Operational Task Queue & Authority Operations APIs ──────────────────────
 
+export interface TaskQueueItem {
+  id: string;
+  case_id: string;
+  accused_name: string;
+  task_type: string;
+  title: string;
+  description?: string;
+  owner_role: string;
+  owner_user_id?: string;
+  owner_name?: string;
+  priority: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+  due_date: string;
+  source: string;
+  reason: string;
+  status: "NEW" | "PENDING_ACTION" | "WAITING_FOR_DOCUMENTS" | "UNDER_REVIEW" | "OVERDUE" | "ESCALATED" | "COMPLETED" | "EXCEPTION";
+  escalation_path: string;
+  facility?: string;
+  district?: string;
+  custody_duration_days: number;
+  document_completeness_pct: number;
+  has_data_conflict: boolean;
+  legal_aid_need: boolean;
+  assignment_status: string;
+  matter_status: string;
+  hearing_date?: string;
+  is_consequential: boolean;
+  metadata_json?: any;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+  completed_by?: string;
+}
 
+export interface TaskFilterParams {
+  owner_role?: string;
+  case_id?: string;
+  facility?: string;
+  district?: string;
+  priority?: string;
+  custody_duration_min?: number;
+  document_completeness_max?: number;
+  legal_aid_need?: boolean;
+  hearing_date_from?: string;
+  hearing_date_to?: string;
+  has_data_conflict?: boolean;
+  assignment_status?: string;
+  matter_status?: string;
+  status?: string;
+  search?: string;
+  sort_by?: string;
+  sort_order?: string;
+}
+
+export async function fetchTaskQueue(params: TaskFilterParams = {}): Promise<TaskQueueItem[]> {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, val]) => {
+    if (val !== undefined && val !== null && val !== "") {
+      query.append(key, String(val));
+    }
+  });
+  const res = await authFetch(`${API_BASE_URL}/tasks/queue?${query.toString()}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch task queue: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function updateTaskApi(taskId: string, updates: Partial<TaskQueueItem>): Promise<TaskQueueItem> {
+  const res = await authFetch(`${API_BASE_URL}/tasks/${encodeURIComponent(taskId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to update task: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function executeBulkTaskActionApi(
+  action: string,
+  taskIds: string[],
+  payload: any = {}
+): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/tasks/bulk-action`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, task_ids: taskIds, ...payload }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Bulk action failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export interface CustodyIntakePayload {
+  name: string;
+  facility_id: string;
+  facility_name?: string;
+  district: string;
+  court_name?: string;
+  arrest_date: string;
+  admission_date?: string;
+  offense_sections: string[];
+  max_sentence_days?: number;
+  refer_to_dlsa: boolean;
+  notes?: string;
+}
+
+export async function intakeCustodyRecordApi(payload: CustodyIntakePayload): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/cases/intake-custody`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Custody intake failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export interface CustodyEventPayload {
+  event_type: string;
+  event_date: string;
+  court_name?: string;
+  notes: string;
+  verified?: boolean;
+}
+
+export async function recordCustodyEventApi(caseId: string, payload: CustodyEventPayload): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/custody-events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to record custody event: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export interface AccusedProfileUpdatePayload {
+  father_name?: string;
+  date_of_birth?: string;
+  age?: number;
+  gender?: string;
+  permanent_address?: string;
+  contact_number?: string;
+  emergency_family_contact_name?: string;
+  emergency_family_contact_phone?: string;
+  emergency_family_contact_relation?: string;
+}
+
+export async function updateAccusedProfileApi(caseId: string, payload: AccusedProfileUpdatePayload): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/accused-profile`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to update accused profile: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export interface PrisonReleasePayload {
+  release_date: string;
+  gate_pass_number: string;
+  surety_verification_ref?: string;
+  superintendent_notes?: string;
+}
+
+export async function confirmPrisonReleaseApi(caseId: string, payload: PrisonReleasePayload): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/confirm-release`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to confirm prison release: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchEligibleCounselApi(caseId: string): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/eligible-counsel`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch eligible counsel: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export interface AssignCounselPayload {
+  lawyer_id: string;
+  lawyer_name?: string;
+  notes?: string;
+}
+
+export async function assignCounselToCaseApi(caseId: string, payload: AssignCounselPayload): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/assign-counsel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to assign counsel: HTTP ${res.status}`);
+  }
+  return await res.json();
+}

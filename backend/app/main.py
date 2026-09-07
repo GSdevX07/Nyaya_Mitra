@@ -1307,7 +1307,7 @@ def assign_counsel_to_case(
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found.")
 
     from app.database import update_case_status
-    from app.models.domain import CaseState
+    from app.models.schemas import CaseState
     update_case_status(case_id, CaseState.ASSIGNED)
 
     try:

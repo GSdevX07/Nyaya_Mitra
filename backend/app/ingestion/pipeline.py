@@ -304,7 +304,7 @@ class IngestionPipeline:
                     relative_name=norm.get("relative_name"),
                     relative_phone=norm.get("relative_phone"),
                     assignment_status="AVAILABLE",
-                    status=CaseState.LEGAL_NEED_IDENTIFIED,
+                    status=CaseState.LEGAL_AID_REQUIRED,
                 )
 
                 # Persist to SQLite

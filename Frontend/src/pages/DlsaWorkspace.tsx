@@ -136,12 +136,12 @@ export function DlsaWorkspace() {
   }, [loadData]);
 
   // Derived subsets
-  // Assignment-ready matters: strictly in LEGAL_AID_REQUIRED (or legacy LEGAL_NEED_IDENTIFIED) and unassigned
+  // Assignment-ready matters: strictly in LEGAL_AID_REQUIRED and unassigned
   const assignmentReadyCases = cases.filter(
     (c) =>
       !c.assigned_lawyer &&
       c.assignment_status !== "ASSIGNED" &&
-      (c.status === "LEGAL_AID_REQUIRED" || c.status === "LEGAL_NEED_IDENTIFIED")
+      c.status === "LEGAL_AID_REQUIRED"
   );
 
   const unassignedCases = cases.filter(
@@ -255,7 +255,7 @@ export function DlsaWorkspace() {
   });
 
   const handleOpenAssignModal = async (c: CaseRecord) => {
-    if (c.status !== "LEGAL_AID_REQUIRED" && c.status !== "LEGAL_NEED_IDENTIFIED") {
+    if (c.status !== "LEGAL_AID_REQUIRED") {
       setActionNotice({
         type: "error",
         message: `Cannot assign defense counsel: Matter stage must be 'LEGAL_AID_REQUIRED'. Current stage: '${c.status}'.`,
@@ -744,7 +744,7 @@ export function DlsaWorkspace() {
                       </td>
 
                       <td className="p-3 text-right">
-                        {(c.status === "LEGAL_AID_REQUIRED" || c.status === "LEGAL_NEED_IDENTIFIED") && c.assignment_status !== "ASSIGNED" ? (
+                        {c.status === "LEGAL_AID_REQUIRED" && c.assignment_status !== "ASSIGNED" ? (
                           <button
                             onClick={() => handleOpenAssignModal(c)}
                             className="px-3 py-1.5 bg-primary text-primary-foreground font-mono text-xs font-bold rounded-sm inline-flex items-center gap-1.5 hover:opacity-90 shadow-sm"
@@ -1088,7 +1088,7 @@ export function DlsaWorkspace() {
                       </td>
 
                       <td className="p-3 text-right">
-                        {!c.assigned_lawyer && (c.status === "LEGAL_AID_REQUIRED" || c.status === "LEGAL_NEED_IDENTIFIED") ? (
+                        {!c.assigned_lawyer && c.status === "LEGAL_AID_REQUIRED" ? (
                           <button
                             onClick={() => handleOpenAssignModal(c)}
                             className="px-2.5 py-1 bg-primary text-primary-foreground text-xs font-mono font-bold rounded-sm hover:opacity-90 inline-flex items-center gap-1"

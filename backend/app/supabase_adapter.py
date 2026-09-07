@@ -17,9 +17,12 @@ from __future__ import annotations
 import os
 import datetime
 import json
+import logging
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from dotenv import load_dotenv
+
+logger = logging.getLogger("nyaya_mitra.supabase_adapter")
 
 _env_path = Path(__file__).resolve().parent.parent / ".env"
 if _env_path.exists():
@@ -473,4 +476,187 @@ def supa_update_police_action(action_id: str, updates: Dict) -> bool:
         return True
     except Exception as e:
         return False
+
+
+# ── Operational Task Queue Queries & Mutations ──────────────────────────────
+
+def supa_get_task_queue(
+    current_user_role: str,
+    user_id: str,
+    user_facilities: List[str],
+    user_district: Optional[str],
+    linked_case_id: Optional[str],
+    police_station: Optional[str] = None,
+    facility: Optional[str] = None,
+    district: Optional[str] = None,
+    priority: Optional[str] = None,
+    custody_duration_min: Optional[int] = None,
+    document_completeness_max: Optional[int] = None,
+    legal_aid_need: Optional[bool] = None,
+    hearing_date_from: Optional[str] = None,
+    hearing_date_to: Optional[str] = None,
+    has_data_conflict: Optional[bool] = None,
+    assignment_status: Optional[str] = None,
+    matter_status: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    sort_by: Optional[str] = "due_date",
+    sort_order: Optional[str] = "asc",
+) -> List[Dict]:
+    """
+    Retrieve task queue items directly from authoritative Supabase PostgreSQL table.
+    Enforces strict role boundaries and dynamic filter criteria.
+    """
+    client = get_supabase_client()
+    if not client:
+        return []
+
+    q = client.table("task_queue").select("*")
+
+    # 1. Role boundaries
+    if current_user_role == "JAIL_OFFICER":
+        q = q.eq("owner_role", "JAIL_OFFICER")
+        if user_facilities:
+            q = q.in_("facility", user_facilities)
+    elif current_user_role in ("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE"):
+        q = q.eq("owner_role", "DEFENSE_ADVOCATE").eq("assignment_status", "ASSIGNED")
+        if user_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma"):
+            q = q.in_("owner_user_id", ["demo_advocate", "adv_001", "adv_rajesh_sharma"])
+        elif user_id in ("demo_ext_advocate", "adv_ext_001"):
+            q = q.in_("owner_user_id", ["demo_ext_advocate", "adv_ext_001"])
+        else:
+            q = q.eq("owner_user_id", user_id)
+    elif current_user_role == "DLSA_OFFICER":
+        q = q.in_("owner_role", ["DLSA_OFFICER", "SUPERVISING_LEGAL_OFFICER"])
+        if user_district:
+            q = q.eq("district", user_district)
+    elif current_user_role == "SUPERVISING_LEGAL_OFFICER":
+        q = q.in_("owner_role", ["SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER"])
+        if user_district:
+            q = q.eq("district", user_district)
+    elif current_user_role == "POLICE_OFFICER":
+        if police_station:
+            q = q.eq("facility", police_station)
+        else:
+            return []
+    elif current_user_role in ("ACCUSED_USER", "FAMILY_GUARDIAN"):
+        if linked_case_id:
+            q = q.eq("case_id", linked_case_id)
+        else:
+            return []
+
+    # 2. Dynamic filters
+    if facility:
+        q = q.ilike("facility", f"%{facility}%")
+    if district:
+        q = q.ilike("district", f"%{district}%")
+    if priority:
+        q = q.eq("priority", priority.upper())
+    if custody_duration_min is not None:
+        q = q.gte("custody_duration_days", custody_duration_min)
+    if document_completeness_max is not None:
+        q = q.lte("document_completeness_pct", document_completeness_max)
+    if legal_aid_need is not None:
+        q = q.eq("legal_aid_need", 1 if legal_aid_need else 0)
+    if has_data_conflict is not None:
+        q = q.eq("has_data_conflict", 1 if has_data_conflict else 0)
+    if assignment_status:
+        q = q.eq("assignment_status", assignment_status.upper())
+    if matter_status:
+        q = q.eq("matter_status", matter_status.upper())
+
+    today_iso = datetime.date.today().isoformat()
+    if status:
+        if status.upper() == "OVERDUE":
+            q = q.neq("status", "COMPLETED").lt("due_date", today_iso)
+        else:
+            q = q.eq("status", status.upper())
+
+    # Order
+    is_desc = (sort_order or "").lower() == "desc"
+    order_col = sort_by if sort_by in ("due_date", "priority", "custody_duration_days", "created_at", "status") else "due_date"
+    q = q.order(order_col, desc=is_desc)
+
+    res = q.execute()
+    items = res.data or []
+
+    # Post-filtering for advocate preliminary state exclusions & search
+    results = []
+    for d in items:
+        if current_user_role in ("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE"):
+            m_st = d.get("matter_status") or ""
+            if m_st in ('INTAKE', 'INTAKE_PENDING', 'DETECTED', 'VERIFICATION', 'CUSTODY_VERIFIED', 'CUSTODY_PENDING', 'REVIEW', 'LEGAL_AID_REQUIRED', 'LEGAL_NEED_IDENTIFIED', 'PRE_INTAKE', 'DOCUMENTS_MISSING', 'DRAFT_INTAKE'):
+                continue
+
+        if d.get("status") not in ("COMPLETED", "EXCEPTION") and d.get("due_date") and d["due_date"] < today_iso:
+            d["status"] = "OVERDUE"
+
+        if search:
+            s = search.strip().lower()
+            t_title = (d.get("title") or "").lower()
+            t_reason = (d.get("reason") or "").lower()
+            t_acc = (d.get("accused_name") or "").lower()
+            t_cid = (d.get("case_id") or "").lower()
+            if not (s in t_title or s in t_reason or s in t_acc or s in t_cid):
+                continue
+
+        results.append(d)
+
+    return results
+
+
+def supa_get_task_by_id(task_id: str) -> Optional[Dict]:
+    """Fetch single task from Supabase PostgreSQL."""
+    client = get_supabase_client()
+    if not client:
+        return None
+    try:
+        res = client.table("task_queue").select("*").eq("id", task_id).single().execute()
+        return res.data
+    except Exception:
+        return None
+
+
+def supa_upsert_task_queue_items(tasks: List[Dict]) -> bool:
+    """Upsert batch of operational tasks directly into Supabase PostgreSQL."""
+    client = get_supabase_client()
+    if not client or not tasks:
+        return False
+    try:
+        chunk_size = 100
+        for i in range(0, len(tasks), chunk_size):
+            chunk = tasks[i:i + chunk_size]
+            client.table("task_queue").upsert(chunk).execute()
+        return True
+    except Exception as e:
+        logger.warning(f"supa_upsert_task_queue_items error: {e}")
+        return False
+
+
+def supa_update_task(task_id: str, updates: Dict) -> Optional[Dict]:
+    """Update single task in Supabase PostgreSQL."""
+    client = get_supabase_client()
+    if not client:
+        return None
+    try:
+        res = client.table("task_queue").update(updates).eq("id", task_id).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0]
+        return None
+    except Exception as e:
+        logger.warning(f"supa_update_task error: {e}")
+        return None
+
+
+def supa_bulk_update_tasks(task_ids: List[str], updates: Dict) -> int:
+    """Bulk update tasks in Supabase PostgreSQL."""
+    client = get_supabase_client()
+    if not client or not task_ids:
+        return 0
+    try:
+        res = client.table("task_queue").update(updates).in_("id", task_ids).execute()
+        return len(res.data or [])
+    except Exception as e:
+        logger.warning(f"supa_bulk_update_tasks error: {e}")
+        return 0
 

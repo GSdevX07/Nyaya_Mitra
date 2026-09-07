@@ -41,7 +41,7 @@ import hashlib
 import json
 import datetime
 import logging
-from typing import Optional
+from typing import Optional, Any, List, Dict, Tuple, Union, Callable
 
 logger = logging.getLogger("nyaya_mitra.api")
 
@@ -557,7 +557,7 @@ def refer_case_to_dlsa(
         status="ACTION_REQUIRED",
     )
     case.legal_needs.append(new_need)
-    update_case_status(case.case_id, CaseState.LEGAL_NEED_IDENTIFIED)
+    update_case_status(case.case_id, CaseState.LEGAL_AID_REQUIRED)
 
     # Dispatch notification to DLSA & Supervisor
     add_notification(
@@ -1290,6 +1290,11 @@ def assign_counsel_to_case(
     # ANALYSIS_READY, HUMAN_REVIEW, SUBMITTED, APPROVED, FILED, or terminal states.
     raw_status = getattr(case, "status", None)
     status_str = raw_status.value if hasattr(raw_status, "value") else str(raw_status or "").strip().upper()
+    if status_str == "LEGAL_NEED_IDENTIFIED":
+        from app.database import update_case_status
+        from app.models.schemas import CaseState
+        update_case_status(case_id, CaseState.LEGAL_AID_REQUIRED)
+        status_str = "LEGAL_AID_REQUIRED"
     if status_str != "LEGAL_AID_REQUIRED":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

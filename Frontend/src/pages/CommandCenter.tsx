@@ -89,7 +89,7 @@ export function CommandCenter() {
   }, [loadData]);
 
   const handleOpenAssignModal = async (c: CaseRecord) => {
-    if (c.status !== "LEGAL_AID_REQUIRED" && c.status !== "LEGAL_NEED_IDENTIFIED") {
+    if (c.status !== "LEGAL_AID_REQUIRED") {
       setActionNotice({
         type: "error",
         message: `Cannot assign defense counsel: Matter stage must be 'LEGAL_AID_REQUIRED'. Current stage: '${c.status}'.`,
@@ -154,7 +154,7 @@ export function CommandCenter() {
   );
 
   const assignmentReadyUndertrials = undertrials.filter(
-    (c) => c.assignment_status !== "ASSIGNED" && (c.status === "LEGAL_AID_REQUIRED" || c.status === "LEGAL_NEED_IDENTIFIED")
+    (c) => c.assignment_status !== "ASSIGNED" && c.status === "LEGAL_AID_REQUIRED"
   );
 
   const sec479Signals = undertrials.filter(
@@ -420,7 +420,7 @@ export function CommandCenter() {
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        {(c.status === "LEGAL_AID_REQUIRED" || c.status === "LEGAL_NEED_IDENTIFIED") && c.assignment_status !== "ASSIGNED" ? (
+                        {c.status === "LEGAL_AID_REQUIRED" && c.assignment_status !== "ASSIGNED" ? (
                           <button
                             onClick={() => handleOpenAssignModal(c)}
                             className="px-3.5 py-1.5 bg-primary text-primary-foreground font-mono text-xs font-bold uppercase rounded-sm flex items-center gap-1.5 hover:opacity-90 transition-opacity"

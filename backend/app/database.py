@@ -1747,6 +1747,24 @@ def init_db():
         except Exception:
             pass
 
+        # Migrate any legacy LEGAL_NEED_IDENTIFIED records to canonical LEGAL_AID_REQUIRED
+        cursor.execute("UPDATE cases SET status = 'LEGAL_AID_REQUIRED' WHERE status = 'LEGAL_NEED_IDENTIFIED'")
+        cursor.execute("UPDATE court_cases SET current_status = 'LEGAL_AID_REQUIRED' WHERE current_status = 'LEGAL_NEED_IDENTIFIED'")
+        cursor.execute("UPDATE task_queue SET matter_status = 'LEGAL_AID_REQUIRED' WHERE matter_status = 'LEGAL_NEED_IDENTIFIED'")
+        try:
+            from app.supabase_adapter import get_supabase_client, is_supabase_active
+            if is_supabase_active():
+                cli = get_supabase_client()
+                if cli:
+                    try:
+                        cli.table("cases").update({"status": "LEGAL_AID_REQUIRED"}).eq("status", "LEGAL_NEED_IDENTIFIED").execute()
+                        cli.table("court_cases").update({"current_status": "LEGAL_AID_REQUIRED"}).eq("current_status", "LEGAL_NEED_IDENTIFIED").execute()
+                        cli.table("task_queue").update({"matter_status": "LEGAL_AID_REQUIRED"}).eq("matter_status", "LEGAL_NEED_IDENTIFIED").execute()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
         # Seed normalized organizations and facilities
         cursor.execute(
             "INSERT OR IGNORE INTO organizations (id, code, name, org_type, state, district) VALUES (?, ?, ?, ?, ?, ?)",

@@ -385,17 +385,15 @@ class TaskService:
 
             conn.commit()
 
-            # Authoritative Cloud Sync to Supabase PostgreSQL
+            # Authoritative Cloud Persistence in Supabase PostgreSQL
             try:
-                from app.supabase_adapter import get_supabase_client, is_supabase_active
+                from app.supabase_adapter import is_supabase_active, supa_upsert_task_queue_items
                 if is_supabase_active():
-                    cli = get_supabase_client()
-                    if cli:
-                        cur_supa = conn.cursor()
-                        cur_supa.row_factory = sqlite3.Row
-                        all_t = [dict(r) for r in cur_supa.execute("SELECT * FROM task_queue").fetchall()]
-                        if all_t:
-                            cli.table("task_queue").upsert(all_t).execute()
+                    cur_supa = conn.cursor()
+                    cur_supa.row_factory = sqlite3.Row
+                    all_t = [dict(r) for r in cur_supa.execute("SELECT * FROM task_queue").fetchall()]
+                    if all_t:
+                        supa_upsert_task_queue_items(all_t)
             except Exception as supa_err:
                 logger.warning(f"Supabase task_queue sync note: {supa_err}")
         except Exception as e:
@@ -438,6 +436,45 @@ class TaskService:
         """
         cls.sync_operational_tasks()
 
+        # ── Authoritative Primary: Supabase PostgreSQL ────────────────────────
+        try:
+            from app.supabase_adapter import is_supabase_active, supa_get_task_queue
+            if is_supabase_active():
+                role_str = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+                user_id_str = getattr(current_user, "id", "")
+                user_facs = getattr(current_user, "facility_ids", []) or []
+                user_dist = getattr(current_user, "district", None) or getattr(current_user, "extra_claims", {}).get("district")
+                linked_case = getattr(current_user, "linked_case_id", None)
+                station = getattr(current_user, "police_station", None) or getattr(current_user, "extra_claims", {}).get("police_station", "")
+                supa_items = supa_get_task_queue(
+                    current_user_role=role_str,
+                    user_id=user_id_str,
+                    user_facilities=user_facs,
+                    user_district=user_dist,
+                    linked_case_id=linked_case,
+                    police_station=station,
+                    facility=facility,
+                    district=district,
+                    priority=priority,
+                    custody_duration_min=custody_duration_min,
+                    document_completeness_max=document_completeness_max,
+                    legal_aid_need=legal_aid_need,
+                    hearing_date_from=hearing_date_from,
+                    hearing_date_to=hearing_date_to,
+                    has_data_conflict=has_data_conflict,
+                    assignment_status=assignment_status,
+                    matter_status=matter_status,
+                    status=status,
+                    search=search,
+                    sort_by=sort_by,
+                    sort_order=sort_order,
+                )
+                if supa_items:
+                    return supa_items
+        except Exception as supa_err:
+            logger.warning(f"Supabase get_task_queue error: {supa_err}. Falling back to SQLite.")
+
+        # ── Local Developmental Sandbox: SQLite Fallback ──────────────────────
         conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         try:
@@ -632,18 +669,16 @@ class TaskService:
             cursor.execute(f"UPDATE task_queue SET {', '.join(fields)} WHERE id = ?", vals)
             conn.commit()
 
-            # Authoritative Cloud Sync to Supabase PostgreSQL
+            # Authoritative Cloud Persistence in Supabase PostgreSQL
             try:
-                from app.supabase_adapter import get_supabase_client, is_supabase_active
+                from app.supabase_adapter import is_supabase_active, supa_update_task
                 if is_supabase_active():
-                    cli = get_supabase_client()
-                    if cli:
-                        supa_updates = {k: v for k, v in updates.items() if k in ("status", "priority", "owner_user_id", "owner_name", "due_date")}
-                        if updates.get("status") == "COMPLETED":
-                            supa_updates["completed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                            supa_updates["completed_by"] = current_user.full_name or current_user.id
-                        supa_updates["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                        cli.table("task_queue").update(supa_updates).eq("id", task_id).execute()
+                    supa_updates = {k: v for k, v in updates.items() if k in ("status", "priority", "owner_user_id", "owner_name", "due_date")}
+                    if updates.get("status") == "COMPLETED":
+                        supa_updates["completed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                        supa_updates["completed_by"] = current_user.full_name or current_user.id
+                    supa_updates["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    supa_update_task(task_id, supa_updates)
             except Exception as e:
                 logger.warning(f"Supabase task update note: {e}")
 
@@ -737,6 +772,30 @@ class TaskService:
                         updated_ids.append(tid)
 
             conn.commit()
+
+            # Authoritative Cloud Persistence in Supabase PostgreSQL
+            if updated_ids:
+                try:
+                    from app.supabase_adapter import is_supabase_active, supa_bulk_update_tasks
+                    if is_supabase_active():
+                        supa_payload: Dict[str, Any] = {
+                            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                        }
+                        if act_upper == "ASSIGN_OWNER":
+                            if payload.get("owner_user_id"):
+                                supa_payload["owner_user_id"] = payload.get("owner_user_id")
+                            if payload.get("owner_name"):
+                                supa_payload["owner_name"] = payload.get("owner_name")
+                        elif act_upper == "MARK_REVIEWED":
+                            supa_payload["status"] = "UNDER_REVIEW"
+                        elif act_upper == "ACKNOWLEDGE":
+                            supa_payload["status"] = "PENDING_ACTION"
+                        elif act_upper == "UPDATE_METADATA":
+                            if payload.get("priority"):
+                                supa_payload["priority"] = payload.get("priority").upper()
+                        supa_bulk_update_tasks(updated_ids, supa_payload)
+                except Exception as supa_bulk_err:
+                    logger.warning(f"Supabase bulk task update note: {supa_bulk_err}")
 
             return {
                 "action": act_upper,

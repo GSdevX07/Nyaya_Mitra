@@ -21,6 +21,7 @@ from app.models.tasks import (
     CustodyEventRequest,
     AccusedProfileUpdateRequest,
     PrisonReleaseConfirmationRequest,
+    ExpediteCoordinationRequest,
 )
 from app.services.task_service import TaskService
 
@@ -209,3 +210,35 @@ async def confirm_prison_release_endpoint(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/cases/{case_id}/expedite-coordination", tags=["DLSA Operations"])
+async def expedite_document_coordination_endpoint(
+    case_id: str,
+    req: Optional[ExpediteCoordinationRequest] = None,
+    current_user: AuthUser = Depends(require_role(
+        Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN
+    )),
+):
+    """
+    Dispatch institutional document coordination notice to Police and Jail authorities.
+    Creates an operational task in the universal task queue, appends a case timeline event,
+    and sends targeted real-time alerts to Jail and Police officers.
+    """
+    try:
+        notes = req.notes if req else "Expediting missing charge sheet / custody certificate."
+        target_roles = req.target_roles if req else ["JAIL_OFFICER", "POLICE_OFFICER"]
+        result = TaskService.dispatch_document_coordination(
+            case_id=case_id,
+            notes=notes,
+            current_user=current_user,
+            target_roles=target_roles,
+        )
+        return result
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+

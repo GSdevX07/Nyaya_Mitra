@@ -10,6 +10,7 @@ from __future__ import annotations
 import sqlite3
 import datetime
 import logging
+import uuid
 from typing import List, Dict, Any, Optional
 
 from app.database import (
@@ -18,7 +19,6 @@ from app.database import (
     get_case,
     append_case_timeline_event,
     add_notification,
-    DB_PATH,
 )
 from app.models.schemas import TimelineEvent, MatterState, CaseRecord
 from app.auth.roles import Role
@@ -1177,4 +1177,162 @@ class TaskService:
             "release_date": data.release_date,
             "canonical_state": result["canonical_state"],
             "message": f"Inmate physical discharge confirmed. Case '{case_id}' transitioned to post-release follow-up.",
+        }
+
+    @classmethod
+    def dispatch_document_coordination(
+        cls,
+        case_id: str,
+        notes: str,
+        current_user: AuthUser,
+        target_roles: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Dispatches institutional document coordination notice from DLSA / Supervisor to Police and Jail authorities.
+        Persists operational task in task_queue, appends verifiable timeline event, and notifies target roles.
+        """
+        if current_user.role not in (Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN):
+            raise PermissionError("Forbidden: Only DLSA Officers or Supervisors can dispatch document coordination notices.")
+
+        case = get_case(case_id)
+        if not case:
+            raise LookupError(f"Case '{case_id}' not found.")
+
+        # District check for DLSA
+        if current_user.role == Role.DLSA_OFFICER:
+            from app.main import _check_dlsa_district_match
+            if not _check_dlsa_district_match(case, current_user):
+                raise PermissionError(
+                    f"Forbidden: Case '{case_id}' belongs to district '{case.district}', outside your authorized DLSA district '{current_user.district}'."
+                )
+
+        clean_notes = notes.strip() if notes else f"Expediting missing charge sheet / custody records for case {case_id}."
+        today = datetime.date.today()
+        due_date = (today + datetime.timedelta(days=3)).isoformat()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        # 1. Create or update operational task in task_queue
+        task_id = f"TASK-{case_id}-EXPEDITE-DOCS"
+        task_title = f"Expedite Missing Records for {case.case_id} ({case.name})"
+        task_reason = f"DLSA document coordination request: {clean_notes}"
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO task_queue (
+                    id, case_id, accused_name, task_type, title, description,
+                    owner_role, owner_user_id, owner_name, priority, due_date,
+                    source, reason, status, escalation_path, facility, district,
+                    custody_duration_days, document_completeness_pct, has_data_conflict,
+                    legal_aid_need, assignment_status, matter_status, is_consequential,
+                    created_at, updated_at
+                ) VALUES (
+                    ?, ?, ?, 'EXPEDITE_MISSING_CHARGE_SHEET', ?, ?,
+                    'DLSA_OFFICER', ?, ?, 'HIGH', ?,
+                    'DLSA Document Coordination Desk', ?, 'PENDING_ACTION',
+                    'Supervising Legal Officer & CMM Court', ?, ?,
+                    ?, ?, 0, 1, ?, ?, 0,
+                    ?, ?
+                )
+            """, (
+                task_id, case.case_id, case.name, task_title, clean_notes,
+                current_user.id, current_user.full_name or "DLSA Legal Aid Officer", due_date,
+                task_reason, case.jail_location or "Designated Correctional Facility",
+                case.district or "Competent Judicial District",
+                case.custody_days, 50, case.assignment_status,
+                case.status.value if hasattr(case.status, "value") else str(case.status),
+                now_iso, now_iso,
+            ))
+            conn.commit()
+
+            # Supabase PostgreSQL sync
+            try:
+                from app.supabase_adapter import get_supabase_client, is_supabase_active
+                if is_supabase_active():
+                    cli = get_supabase_client()
+                    if cli:
+                        cli.table("task_queue").upsert({
+                            "id": task_id,
+                            "case_id": case.case_id,
+                            "accused_name": case.name,
+                            "task_type": "EXPEDITE_MISSING_CHARGE_SHEET",
+                            "title": task_title,
+                            "description": clean_notes,
+                            "owner_role": "DLSA_OFFICER",
+                            "owner_user_id": current_user.id,
+                            "owner_name": current_user.full_name or "DLSA Legal Aid Officer",
+                            "priority": "HIGH",
+                            "due_date": due_date,
+                            "source": "DLSA Document Coordination Desk",
+                            "reason": task_reason,
+                            "status": "PENDING_ACTION",
+                            "escalation_path": "Supervising Legal Officer & CMM Court",
+                            "facility": case.jail_location,
+                            "district": case.district,
+                            "custody_duration_days": case.custody_days,
+                            "document_completeness_pct": 50,
+                            "has_data_conflict": 0,
+                            "legal_aid_need": 1,
+                            "assignment_status": case.assignment_status,
+                            "matter_status": case.status.value if hasattr(case.status, "value") else str(case.status),
+                            "is_consequential": 0,
+                        }).execute()
+            except Exception as supa_err:
+                logger.warning(f"Supabase task_queue expedite sync note: {supa_err}")
+        finally:
+            conn.close()
+
+        # 2. Append Timeline Event
+        ev = TimelineEvent(
+            id=f"EV-COORD-{case_id}-{uuid.uuid4().hex[:6]}",
+            timestamp=now_iso,
+            event_type="DOCUMENT",
+            title="Institutional Document Coordination Notice Dispatched",
+            description=f"DLSA dispatched document collection notice to Police and Jail authorities. Directives: {clean_notes}",
+            actor=current_user.full_name or "DLSA Officer",
+            actor_role=current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role),
+            source="DLSA Institutional Coordination Desk",
+            is_human_verified=True,
+        )
+        append_case_timeline_event(case.case_id, ev)
+
+        # 3. Add Notifications for Target Roles
+        effective_roles = target_roles or ["JAIL_OFFICER", "POLICE_OFFICER"]
+        if "JAIL_OFFICER" in effective_roles:
+            add_notification(
+                case_id=case.case_id,
+                title=f"Expedite Custody Certificate: Case {case.case_id}",
+                message=f"DLSA has expedited custody records / nominal roll for {case.name} ({case.case_id}). {clean_notes}",
+                notif_type="action_required",
+                target_role="JAIL_OFFICER",
+            )
+        if "POLICE_OFFICER" in effective_roles:
+            add_notification(
+                case_id=case.case_id,
+                title=f"Expedite Charge Sheet: Case {case.case_id}",
+                message=f"DLSA has expedited investigation / charge sheet submission for {case.name} ({case.case_id}). {clean_notes}",
+                notif_type="action_required",
+                target_role="POLICE_OFFICER",
+            )
+
+        # 4. Record Audit Event
+        try:
+            from app.repositories.audit_repository import audit_record_access
+            audit_record_access(
+                user_id=current_user.id,
+                user_role=current_user.role.value,
+                resource_type="court_case",
+                resource_id=case.case_id,
+                action="EXPEDITE_COORDINATION",
+                details={"notes": clean_notes, "target_roles": effective_roles},
+            )
+        except Exception:
+            pass
+
+        return {
+            "status": "SUCCESS",
+            "task_id": task_id,
+            "case_id": case.case_id,
+            "message": f"Institutional coordination notice logged for Case {case.case_id}. Police Station and Jail Superintendent alerted.",
         }

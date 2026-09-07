@@ -29,7 +29,6 @@ export function AdvocateWorkspace() {
     try {
       const raw = await fetchCases();
       const extracted = (raw || []).map((item: any) => (item.case || item) as CaseRecord);
-      const userFullName = (user?.full_name || "").toLowerCase().trim();
       const userId = (user?.id || "").toLowerCase().trim();
 
       const preliminaryStates = [
@@ -48,27 +47,13 @@ export function AdvocateWorkspace() {
 
         // 3. Strict Counsel Matching
         const lawyerId = (c.assigned_lawyer_id || "").toLowerCase().trim();
-        const lawyerName = (c.assigned_lawyer || "").toLowerCase().trim();
 
         // Direct ID match
         if (lawyerId && userId && lawyerId === userId) return true;
 
-        // Demo advocate aliases
-        if (userId === "demo_advocate") {
-          if (["demo_advocate", "adv_001", "adv_rajesh_sharma"].includes(lawyerId)) return true;
-          if (lawyerName.includes("rajesh") && (!lawyerId || ["demo_advocate", "adv_001", "adv_rajesh_sharma"].includes(lawyerId))) return true;
-        }
-
-        if (userId === "demo_ext_advocate") {
-          if (["demo_ext_advocate", "adv_ext_001"].includes(lawyerId)) return true;
-          if ((lawyerName.includes("external") || lawyerName.includes("controlled")) && (!lawyerId || ["demo_ext_advocate", "adv_ext_001"].includes(lawyerId))) return true;
-        }
-
-        // Substantive Name match (ensure not assigned to a different explicit lawyer ID)
-        if (userFullName && userFullName.length >= 4 && lawyerName) {
-          if ((lawyerName.includes(userFullName) || userFullName.includes(lawyerName)) && (!lawyerId || lawyerId === userId)) {
-            return true;
-          }
+        // User profile linked case match
+        if (user?.linked_case_id && c.case_id === user.linked_case_id && (!lawyerId || lawyerId === userId)) {
+          return true;
         }
 
         return false;

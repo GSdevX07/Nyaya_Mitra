@@ -121,3 +121,8 @@ class PrisonReleaseConfirmationRequest(BaseModel):
     gate_pass_number: str = Field(..., min_length=2, description="Official prison gate-pass / discharge memo number")
     surety_verification_ref: Optional[str] = Field(None, description="Court release order / solvent surety verification reference")
     superintendent_notes: Optional[str] = Field(None, description="Discharge log remarks")
+
+
+class ExpediteCoordinationRequest(BaseModel):
+    notes: Optional[str] = Field("Expediting missing charge sheet / custody certificate.", description="Institutional coordination directives")
+    target_roles: Optional[List[str]] = Field(default_factory=lambda: ["JAIL_OFFICER", "POLICE_OFFICER"], description="Agencies / roles to alert")

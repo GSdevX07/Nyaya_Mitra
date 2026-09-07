@@ -21,6 +21,7 @@ import {
   fetchCases,
   fetchEligibleCounselApi,
   assignCounselToCaseApi,
+  expediteCoordinationApi,
   type CaseRecord,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -38,6 +39,47 @@ function isSec479Eligible(c: CaseRecord): boolean {
   return c.custody_days > 90 || c.status === "ELIGIBLE";
 }
 
+function PaginationBar({
+  currentPage,
+  totalItems,
+  pageSize,
+  onPageChange,
+}: {
+  currentPage: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (p: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  if (totalItems <= pageSize) return null;
+  return (
+    <div className="flex items-center justify-between p-3 border-t border-border bg-card text-xs font-mono">
+      <div className="text-muted-foreground">
+        Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, totalItems)} of {totalItems} records
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+          disabled={currentPage <= 1}
+          className="px-2.5 py-1 bg-secondary text-foreground border border-border rounded-sm hover:bg-secondary/80 disabled:opacity-40"
+        >
+          Previous
+        </button>
+        <span className="text-foreground">
+          Page {currentPage} of {totalPages}
+        </span>
+        <button
+          onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+          disabled={currentPage >= totalPages}
+          className="px-2.5 py-1 bg-secondary text-foreground border border-border rounded-sm hover:bg-secondary/80 disabled:opacity-40"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function DlsaWorkspace() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -46,9 +88,11 @@ export function DlsaWorkspace() {
     "queue" | "assignment" | "tracking" | "missing_docs" | "hearings" | "overdue"
   >("queue");
 
-  // Search & Filters
+  // Search, Filters & Pagination
   const [search, setSearch] = useState("");
   const [filterDistrict, setFilterDistrict] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 6;
 
   // Assignment Modal State
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -150,7 +194,53 @@ export function DlsaWorkspace() {
       c.name.toLowerCase().includes(q) ||
       c.case_id.toLowerCase().includes(q) ||
       (c.assigned_lawyer && c.assigned_lawyer.toLowerCase().includes(q));
-    return matchesSearch;
+    const matchesDistrict =
+      !filterDistrict ||
+      (c.district || "").toLowerCase() === filterDistrict.toLowerCase();
+    return matchesSearch && matchesDistrict;
+  });
+
+  const availableDistricts = Array.from(
+    new Set(cases.map((c) => c.district).filter(Boolean))
+  ) as string[];
+
+  const filteredMissingDocs = missingDocCases.filter((c) => {
+    const q = search.toLowerCase();
+    const matchesSearch =
+      !q ||
+      c.name.toLowerCase().includes(q) ||
+      c.case_id.toLowerCase().includes(q) ||
+      (c.fir_number && c.fir_number.toLowerCase().includes(q));
+    const matchesDistrict =
+      !filterDistrict ||
+      (c.district || "").toLowerCase() === filterDistrict.toLowerCase();
+    return matchesSearch && matchesDistrict;
+  });
+
+  const filteredHearings = hearingCases.filter((c) => {
+    const q = search.toLowerCase();
+    const matchesSearch =
+      !q ||
+      c.name.toLowerCase().includes(q) ||
+      c.case_id.toLowerCase().includes(q) ||
+      (c.assigned_lawyer && c.assigned_lawyer.toLowerCase().includes(q));
+    const matchesDistrict =
+      !filterDistrict ||
+      (c.district || "").toLowerCase() === filterDistrict.toLowerCase();
+    return matchesSearch && matchesDistrict;
+  });
+
+  const filteredOverdue = overdueCases.filter((c) => {
+    const q = search.toLowerCase();
+    const matchesSearch =
+      !q ||
+      c.name.toLowerCase().includes(q) ||
+      c.case_id.toLowerCase().includes(q) ||
+      (c.assigned_lawyer && c.assigned_lawyer.toLowerCase().includes(q));
+    const matchesDistrict =
+      !filterDistrict ||
+      (c.district || "").toLowerCase() === filterDistrict.toLowerCase();
+    return matchesSearch && matchesDistrict;
   });
 
   const handleOpenAssignModal = async (c: CaseRecord) => {
@@ -224,15 +314,17 @@ export function DlsaWorkspace() {
     if (!coordCase) return;
     setCoordinating(true);
     try {
+      await expediteCoordinationApi(coordCase.case_id, coordNotes);
       setShowCoordModal(false);
       setActionNotice({
         type: "success",
         message: `Institutional coordination notice logged for Case ${coordCase.case_id}. Police Station and Jail Superintendent alerted.`,
       });
+      loadData();
     } catch (err: any) {
       setActionNotice({
         type: "error",
-        message: err.message || "Failed to log coordination notice.",
+        message: err.message || "Failed to dispatch coordination notice.",
       });
     } finally {
       setCoordinating(false);
@@ -256,11 +348,11 @@ export function DlsaWorkspace() {
           <p className="text-xs text-muted-foreground mt-0.5">
             Jurisdiction:{" "}
             <strong className="text-foreground font-mono">
-              {user?.district || "Central Delhi"} DLSA
+              {user?.district ? `${user.district} DLSA` : "Jurisdiction not configured"}
             </strong>{" "}
             • State:{" "}
             <strong className="text-foreground font-mono">
-              {user?.state || "Delhi"} SLSA
+              {user?.state ? `${user.state} SLSA` : "State SLSA not configured"}
             </strong>{" "}
             • Section 12 Free Legal Aid Scheme Oversight
           </p>
@@ -369,7 +461,10 @@ export function DlsaWorkspace() {
       {/* Navigation Tabs (Strictly Neutral / Black / Red / Green) */}
       <div className="flex border-b border-border text-xs font-mono gap-1">
         <button
-          onClick={() => setActiveTab("queue")}
+          onClick={() => {
+            setActiveTab("queue");
+            setCurrentPage(1);
+          }}
           className={`px-4 py-2 border-b-2 font-bold transition-colors flex items-center gap-1.5 ${
             activeTab === "queue"
               ? "border-foreground text-foreground bg-secondary/30"
@@ -381,7 +476,10 @@ export function DlsaWorkspace() {
         </button>
 
         <button
-          onClick={() => setActiveTab("assignment")}
+          onClick={() => {
+            setActiveTab("assignment");
+            setCurrentPage(1);
+          }}
           className={`px-4 py-2 border-b-2 font-bold transition-colors flex items-center gap-1.5 ${
             activeTab === "assignment"
               ? "border-foreground text-foreground bg-secondary/30"
@@ -393,7 +491,10 @@ export function DlsaWorkspace() {
         </button>
 
         <button
-          onClick={() => setActiveTab("tracking")}
+          onClick={() => {
+            setActiveTab("tracking");
+            setCurrentPage(1);
+          }}
           className={`px-4 py-2 border-b-2 font-bold transition-colors flex items-center gap-1.5 ${
             activeTab === "tracking"
               ? "border-foreground text-foreground bg-secondary/30"
@@ -405,7 +506,10 @@ export function DlsaWorkspace() {
         </button>
 
         <button
-          onClick={() => setActiveTab("missing_docs")}
+          onClick={() => {
+            setActiveTab("missing_docs");
+            setCurrentPage(1);
+          }}
           className={`px-4 py-2 border-b-2 font-bold transition-colors flex items-center gap-1.5 ${
             activeTab === "missing_docs"
               ? "border-foreground text-foreground bg-secondary/30"
@@ -417,7 +521,10 @@ export function DlsaWorkspace() {
         </button>
 
         <button
-          onClick={() => setActiveTab("hearings")}
+          onClick={() => {
+            setActiveTab("hearings");
+            setCurrentPage(1);
+          }}
           className={`px-4 py-2 border-b-2 font-bold transition-colors flex items-center gap-1.5 ${
             activeTab === "hearings"
               ? "border-foreground text-foreground bg-secondary/30"
@@ -429,7 +536,10 @@ export function DlsaWorkspace() {
         </button>
 
         <button
-          onClick={() => setActiveTab("overdue")}
+          onClick={() => {
+            setActiveTab("overdue");
+            setCurrentPage(1);
+          }}
           className={`px-4 py-2 border-b-2 font-bold transition-colors flex items-center gap-1.5 ${
             activeTab === "overdue"
               ? "border-foreground text-foreground bg-secondary/30"
@@ -440,6 +550,42 @@ export function DlsaWorkspace() {
           Overdue & Exceptions ({overdueCases.length})
         </button>
       </div>
+
+      {/* Shared Search & District Filter Bar for Operational Desks */}
+      {activeTab !== "queue" && (
+        <div className="flex flex-col md:flex-row items-center gap-3">
+          <div className="relative flex-1 w-full">
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-muted-foreground" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setCurrentPage(1);
+              }}
+              placeholder="Search matters by accused name, case ID, FIR, or counsel..."
+              className="w-full pl-9 pr-3 py-1.5 text-xs bg-card border border-border rounded-sm focus:outline-none focus:ring-1 focus:ring-primary font-sans"
+            />
+          </div>
+          <div className="flex items-center gap-2 w-full md:w-auto">
+            <select
+              value={filterDistrict}
+              onChange={(e) => {
+                setFilterDistrict(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="py-1.5 px-3 text-xs bg-card border border-border rounded-sm font-mono text-foreground focus:outline-none"
+            >
+              <option value="">All Districts ({availableDistricts.length})</option>
+              {availableDistricts.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
 
       {/* TAB 1: Universal Task Queue */}
       {activeTab === "queue" && (
@@ -462,33 +608,6 @@ export function DlsaWorkspace() {
       {/* TAB 2: Counsel Assignment Desk */}
       {activeTab === "assignment" && (
         <div className="space-y-4">
-          {/* Desk Search & Filter Bar */}
-          <div className="flex flex-col md:flex-row items-center gap-3">
-            <div className="relative flex-1 w-full">
-              <Search className="w-4 h-4 absolute left-3 top-2.5 text-muted-foreground" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search unassigned matters by accused name, case ID, or FIR..."
-                className="w-full pl-9 pr-3 py-1.5 text-xs bg-card border border-border rounded-sm focus:outline-none focus:ring-1 focus:ring-primary font-sans"
-              />
-            </div>
-            <div className="flex items-center gap-2 w-full md:w-auto">
-              <select
-                value={filterDistrict}
-                onChange={(e) => setFilterDistrict(e.target.value)}
-                className="py-1.5 px-3 text-xs bg-card border border-border rounded-sm font-mono text-foreground focus:outline-none"
-              >
-                <option value="">All Districts</option>
-                <option value="Central Delhi">Central Delhi</option>
-                <option value="South Delhi">South Delhi</option>
-                <option value="North Delhi">North Delhi</option>
-                <option value="West Delhi">West Delhi</option>
-                <option value="Bengaluru Urban">Bengaluru Urban</option>
-              </select>
-            </div>
-          </div>
 
           {loading ? (
             <div className="p-12 text-center text-xs font-mono text-muted-foreground flex items-center justify-center gap-2">
@@ -518,7 +637,9 @@ export function DlsaWorkspace() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {filteredUnassigned.map((c) => (
+                  {filteredUnassigned
+                    .slice((currentPage - 1) * pageSize, currentPage * pageSize)
+                    .map((c) => (
                     <tr key={c.case_id} className="hover:bg-secondary/20 transition-colors">
                       <td className="p-3">
                         <div className="font-serif font-bold text-sm text-foreground">
@@ -574,6 +695,12 @@ export function DlsaWorkspace() {
                   ))}
                 </tbody>
               </table>
+              <PaginationBar
+                currentPage={currentPage}
+                totalItems={filteredUnassigned.length}
+                pageSize={pageSize}
+                onPageChange={setCurrentPage}
+              />
             </div>
           )}
         </div>
@@ -602,7 +729,9 @@ export function DlsaWorkspace() {
                     </td>
                   </tr>
                 ) : (
-                  filteredAssigned.map((c) => (
+                  filteredAssigned
+                    .slice((currentPage - 1) * pageSize, currentPage * pageSize)
+                    .map((c) => (
                     <tr key={c.case_id} className="hover:bg-secondary/20 transition-colors">
                       <td className="p-3">
                         <div className="font-serif font-bold text-sm text-foreground">
@@ -655,6 +784,12 @@ export function DlsaWorkspace() {
                 )}
               </tbody>
             </table>
+            <PaginationBar
+              currentPage={currentPage}
+              totalItems={filteredAssigned.length}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+            />
           </div>
         </div>
       )}
@@ -684,14 +819,16 @@ export function DlsaWorkspace() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {missingDocCases.length === 0 ? (
+                {filteredMissingDocs.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="p-8 text-center text-muted-foreground font-mono text-xs">
                       No missing document bottlenecks recorded.
                     </td>
                   </tr>
                 ) : (
-                  missingDocCases.map((c) => (
+                  filteredMissingDocs
+                    .slice((currentPage - 1) * pageSize, currentPage * pageSize)
+                    .map((c) => (
                     <tr key={c.case_id} className="hover:bg-secondary/20 transition-colors">
                       <td className="p-3">
                         <div className="font-serif font-bold text-sm text-foreground">
@@ -722,7 +859,7 @@ export function DlsaWorkspace() {
                       <td className="p-3 text-[11px]">
                         <div>{c.jail_location || "Sub-Jail"}</div>
                         <div className="text-[10px] font-mono text-muted-foreground">
-                          Police Station: Kotwali / Respective PS
+                          Police Station: {c.police_station || "Station Record Pending"}
                         </div>
                       </td>
 
@@ -739,6 +876,12 @@ export function DlsaWorkspace() {
                 )}
               </tbody>
             </table>
+            <PaginationBar
+              currentPage={currentPage}
+              totalItems={filteredMissingDocs.length}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+            />
           </div>
         </div>
       )}
@@ -758,14 +901,16 @@ export function DlsaWorkspace() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {hearingCases.length === 0 ? (
+                {filteredHearings.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="p-8 text-center text-muted-foreground font-mono text-xs">
                       No active court hearings or scheduled bail proceedings currently pending.
                     </td>
                   </tr>
                 ) : (
-                  hearingCases.map((c) => (
+                  filteredHearings
+                    .slice((currentPage - 1) * pageSize, currentPage * pageSize)
+                    .map((c) => (
                     <tr key={c.case_id} className="hover:bg-secondary/20 transition-colors">
                       <td className="p-3">
                         <div className="font-serif font-bold text-sm text-foreground">
@@ -803,6 +948,12 @@ export function DlsaWorkspace() {
                 )}
               </tbody>
             </table>
+            <PaginationBar
+              currentPage={currentPage}
+              totalItems={filteredHearings.length}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+            />
           </div>
         </div>
       )}
@@ -822,14 +973,16 @@ export function DlsaWorkspace() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {overdueCases.length === 0 ? (
+                {filteredOverdue.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="p-8 text-center text-muted-foreground font-mono text-xs">
                       Zero matters currently exceeding SLA or Section 479 benchmarks.
                     </td>
                   </tr>
                 ) : (
-                  overdueCases.map((c) => (
+                  filteredOverdue
+                    .slice((currentPage - 1) * pageSize, currentPage * pageSize)
+                    .map((c) => (
                     <tr key={c.case_id} className="hover:bg-secondary/20 transition-colors">
                       <td className="p-3">
                         <div className="font-serif font-bold text-sm text-foreground">
@@ -878,6 +1031,12 @@ export function DlsaWorkspace() {
                 )}
               </tbody>
             </table>
+            <PaginationBar
+              currentPage={currentPage}
+              totalItems={filteredOverdue.length}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+            />
           </div>
         </div>
       )}

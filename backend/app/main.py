@@ -263,13 +263,22 @@ def _check_police_jurisdiction(case: Any, user: AuthUser) -> bool:
 
 def _check_dlsa_district_match(case, user: AuthUser) -> bool:
     """Validate that the case belongs to the DLSA user's authorized district."""
-    if not user.district or user.district.lower() == "all":
+    auth_dists = [d.strip().lower() for d in (getattr(user, "authorized_district_ids", None) or []) if d]
+    user_dist = (getattr(user, "district", None) or "").strip().lower()
+
+    if "all" in auth_dists or user_dist in ("all", "all (statewide)"):
         return True
-    user_dist = user.district.strip().lower()
+
+    if user_dist and user_dist not in auth_dists:
+        auth_dists.append(user_dist)
+
+    if not auth_dists:
+        return True
+
     case_dist = (getattr(case, "district", None) or "").strip().lower()
     if not case_dist:
-        return True
-    return user_dist in case_dist or case_dist in user_dist
+        return False
+    return any(ad in case_dist or case_dist in ad for ad in auth_dists)
 
 
 def _is_case_assigned_to_advocate(case: Any, user: AuthUser) -> bool:
@@ -281,16 +290,13 @@ def _is_case_assigned_to_advocate(case: Any, user: AuthUser) -> bool:
        (Prison Custody Intake, Custody Verification, and Legal Aid Eligibility Evaluation).
        Cases in preliminary states (INTAKE, VERIFICATION, REVIEW, LEGAL_AID_REQUIRED, etc.)
        must NEVER be accessible to defense advocates.
-    3. The assigned_lawyer_id matches the user's ID or known demo aliases, OR
-       the assigned_lawyer display name matches the user's full name.
+    3. The assigned_lawyer_id strictly matches the authenticated advocate ID.
     """
     assign_status = getattr(case, "assignment_status", None)
     if assign_status != "ASSIGNED":
         return False
 
     # ── Prerequisite Lifecycle Gate ──────────────────────────────────────────
-    # Defense counsel may strictly ONLY access matters that have formally completed
-    # prison intake, nominal roll custody verification, and statutory legal aid determination.
     raw_status = getattr(case, "status", None)
     status_str = raw_status.value if hasattr(raw_status, "value") else str(raw_status or "").strip().upper()
     preliminary_states = {
@@ -310,55 +316,30 @@ def _is_case_assigned_to_advocate(case: Any, user: AuthUser) -> bool:
             MatterState.REVIEW,
             MatterState.LEGAL_AID_REQUIRED,
         ):
-            # Only allow if the raw status is an accepted post-assignment state
             if status_str not in ("ASSIGNED", "DOCUMENT_PENDING", "ANALYSIS_READY", "HUMAN_REVIEW", "SUBMITTED", "APPROVED", "FILED"):
                 return False
     except Exception:
         pass
 
-    lawyer_id = getattr(case, "assigned_lawyer_id", None)
-    lawyer_name = getattr(case, "assigned_lawyer", None)
+    lawyer_id = getattr(case, "assigned_lawyer_id", None) or getattr(case, "assigned_advocate_id", None)
 
     # 0. User scoped to a specific case via linked_case_id
     if getattr(user, "linked_case_id", None):
-        if getattr(case, "case_id", None) != user.linked_case_id:
-            return False
+        if getattr(case, "case_id", None) == user.linked_case_id:
+            return True
+        return False
 
     # 1. Direct ID match
-    if lawyer_id and str(lawyer_id).strip() == str(user.id).strip():
+    if lawyer_id and str(lawyer_id).strip().lower() == str(user.id).strip().lower():
         return True
 
-    # 2. Demo advocate aliases
-    if user.id == "demo_advocate":
-        if getattr(user, "linked_case_id", None) and getattr(case, "case_id", None) == user.linked_case_id:
-            return True
-        if lawyer_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma", "lwyr-test-01", "lwyr-001", "l-1", "l-001") or (lawyer_id and str(lawyer_id).startswith("adv_test")):
-            return True
-        if lawyer_name and "rajesh" in lawyer_name.lower():
-            # Ensure not allocated to another distinct panel advocate
-            if not lawyer_id or lawyer_id in ("demo_advocate", "adv_001", "adv_rajesh_sharma", "lwyr-test-01", "lwyr-001", "l-1", "l-001") or str(lawyer_id).startswith("adv_test"):
-                return True
+    # 2. Known demo advocate aliases
+    if user.id == "demo_advocate" and str(lawyer_id).strip().lower() in ("adv_rajesh_sharma", "adv_001", "demo_advocate"):
+        return True
 
-    if user.id == "demo_ext_advocate":
-        if lawyer_id in ("demo_ext_advocate", "adv_ext_001"):
-            return True
-        if lawyer_name and ("external" in lawyer_name.lower() or "controlled" in lawyer_name.lower()):
-            if not lawyer_id or lawyer_id in ("demo_ext_advocate", "adv_ext_001"):
-                return True
-        if getattr(user, "linked_case_id", None) and getattr(case, "case_id", None) == user.linked_case_id:
-            return True
-
-    # Test harness synthetic advocate users
+    # 3. Test harness synthetic advocate users
     if user.id.startswith("adv_test") and lawyer_id in ("demo_advocate", user.id):
         return True
-
-    # 3. Exact or substantive name match (avoid short or generic substrings)
-    user_full = (user.full_name or "").strip().lower()
-    if user_full and len(user_full) >= 4 and lawyer_name:
-        l_name = lawyer_name.strip().lower()
-        if l_name and l_name != "unassigned" and (user_full in l_name or l_name in user_full):
-            if not lawyer_id or lawyer_id == user.id or user.id.startswith("adv_test"):
-                return True
 
     return False
 
@@ -401,6 +382,8 @@ def get_cases(
                 if (c.district and dist in c.district.lower())
                 or c.status in (CaseState.LAWYER_REVIEW, CaseState.APPROVED_READY_FOR_FILING, CaseState.MANUAL_REVIEW)
             ]
+    elif current_user.role == Role.DLSA_OFFICER:
+        cases = [c for c in cases if _check_dlsa_district_match(c, current_user)]
     elif current_user.role == Role.READ_ONLY_AUDITOR:
         if getattr(current_user, "authorized_district_ids", None):
             auth_dists = [d.strip().lower() for d in current_user.authorized_district_ids]
@@ -469,6 +452,8 @@ def get_available_cases(
     last take_up_case / decline_case call.
     """
     all_cases = get_all_cases()  # ← SQLite, not MOCK_DB
+    if current_user.role == Role.DLSA_OFFICER:
+        all_cases = [c for c in all_cases if _check_dlsa_district_match(c, current_user)]
     available = [c for c in all_cases if c.assignment_status == "AVAILABLE"]
     case_evaluations = []
     for case in available:
@@ -1023,6 +1008,12 @@ def get_case_by_id(
             "agent_activity_log": [],
             "urgency": None,
         }
+    elif current_user.role == Role.DLSA_OFFICER:
+        if not _check_dlsa_district_match(case, current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Case '{case_id}' belongs to district '{case.district}', outside your authorized DLSA district '{current_user.district}'.",
+            )
     elif current_user.role == Role.SUPERVISING_LEGAL_OFFICER:
         if current_user.district and current_user.district.lower() != "all":
             dist = current_user.district.lower()

@@ -210,7 +210,7 @@ async def create_artifact_endpoint(
     current_user: AuthUser = Depends(get_current_user),
 ):
     """Create an immutable artifact version N+1 with SHA-256 hash. Strictly assigned defense counsel only."""
-    if current_user.role not in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
+    if current_user.role != Role.DEFENSE_ADVOCATE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Forbidden: Role '{current_user.role.value}' cannot create legal artifacts. Drafting is exclusively reserved for assigned Defence Legal-Aid Advocates.",
@@ -464,10 +464,7 @@ async def generate_draft_endpoint(
     guaranteed statutory fallback, and persists active artifact version.
     """
     # Procedural Rule: Bail petition drafting is exclusively reserved for assigned Defence Legal-Aid Advocates
-    if current_user.role not in (
-        Role.DEFENSE_ADVOCATE,
-        Role.CONTROLLED_EXTERNAL_ADVOCATE,
-    ):
+    if current_user.role != Role.DEFENSE_ADVOCATE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Forbidden: Bail petition drafting is exclusively reserved for assigned Defence Legal-Aid Advocates. Supervising Legal Officers review and approve drafts, and DLSA Officers monitor and coordinate.",

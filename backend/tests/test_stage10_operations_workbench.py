@@ -281,3 +281,107 @@ def test_platform_admin_cannot_approve_or_file_legal_matters(admin_tok):
         headers={"Authorization": f"Bearer {admin_tok}"},
     )
     assert file_res.status_code == 403
+
+
+# ── 7. DLSA District Scoping & Cross-District Isolation ──────────────────────
+
+def test_dlsa_district_scoping_and_cross_district_isolation(dlsa_tok):
+    """DLSA officer workspace is strictly scoped to their jurisdiction district."""
+    # Central Delhi DLSA querying cases
+    res = client.get("/cases", headers={"Authorization": f"Bearer {dlsa_tok}"})
+    assert res.status_code == 200
+    cases = res.json()
+    assert len(cases) > 0
+    # None of the returned cases should be from South Delhi
+    for c in cases:
+        record = c.get("case", c)
+        assert record.get("district") != "South Delhi", f"Leak: Case {record.get('case_id')} from South Delhi returned to Central DLSA"
+
+    # Central Delhi DLSA querying available cases
+    avail_res = client.get("/cases/available", headers={"Authorization": f"Bearer {dlsa_tok}"})
+    assert avail_res.status_code == 200
+    avail_cases = avail_res.json()
+    for c in avail_cases:
+        record = c.get("case", c)
+        assert record.get("district") != "South Delhi"
+
+    # Central Delhi DLSA attempting to access South Delhi case UTP-0007 (Strict 403)
+    cross_res = client.get("/cases/UTP-0007", headers={"Authorization": f"Bearer {dlsa_tok}"})
+    assert cross_res.status_code == 403
+    assert "jurisdiction" in cross_res.text.lower() or "district" in cross_res.text.lower()
+
+    # South Delhi DLSA querying UTP-0007 (Permitted 200)
+    south_tok = make_token(Role.DLSA_OFFICER, "dlsa_south_sec", "South DLSA Secretary", {"district": "South Delhi"})
+    south_res = client.get("/cases/UTP-0007", headers={"Authorization": f"Bearer {south_tok}"})
+    assert south_res.status_code == 200
+    res_data = south_res.json()
+    case_obj = res_data.get("case", res_data)
+    assert case_obj.get("district") == "South Delhi"
+
+
+# ── 8. Expedite Coordination Dispatch & Cross-Role Notification Flow ─────────
+
+def test_expedite_coordination_dispatch_and_cross_role_notifications(dlsa_tok, jail_tok, police_tok):
+    """DLSA expedite coordination creates task in queue and delivers alerts to Jail and Police."""
+    payload = {
+        "notes": "Urgent missing charge sheet and remand records required for §479 evaluation.",
+        "target_roles": ["JAIL_OFFICER", "POLICE_OFFICER"],
+    }
+    coord_res = client.post(
+        "/cases/UTP-0001/expedite-coordination",
+        json=payload,
+        headers={"Authorization": f"Bearer {dlsa_tok}"},
+    )
+    assert coord_res.status_code == 200
+    coord_data = coord_res.json()
+    assert coord_data.get("status") in ("SUCCESS", "DISPATCHED")
+    assert "task_id" in coord_data
+
+    # Verify task in task queue
+    q_res = client.get("/tasks/queue", headers={"Authorization": f"Bearer {dlsa_tok}"})
+    assert q_res.status_code == 200
+    all_tasks = q_res.json()
+    matching_tasks = [t for t in all_tasks if t.get("case_id") == "UTP-0001" and t.get("task_type") == "EXPEDITE_MISSING_CHARGE_SHEET"]
+    assert len(matching_tasks) > 0
+
+    # Verify notification delivered to Jail Officer
+    jail_notifs_res = client.get("/notifications", headers={"Authorization": f"Bearer {jail_tok}"})
+    assert jail_notifs_res.status_code == 200
+    jail_notifs = jail_notifs_res.json()
+    assert any("UTP-0001" in n.get("title", "") or "UTP-0001" in n.get("message", "") for n in jail_notifs)
+
+    # Verify notification delivered to Police Officer
+    pol_notifs_res = client.get("/notifications", headers={"Authorization": f"Bearer {police_tok}"})
+    assert pol_notifs_res.status_code == 200
+    pol_notifs = pol_notifs_res.json()
+    assert any("UTP-0001" in n.get("title", "") or "UTP-0001" in n.get("message", "") for n in pol_notifs)
+
+
+# ── 9. Controlled External Advocate Institutional Boundaries ─────────────────
+
+def test_controlled_external_advocate_strictly_barred_from_drafting_signing_filing():
+    """Controlled external advocates cannot draft artifacts, sign off, or file in court."""
+    ext_tok = make_token(Role.CONTROLLED_EXTERNAL_ADVOCATE, "ext_adv_01", "Adv. External Counsel")
+
+    # Barred from drafting legal artifacts (403)
+    art_res = client.post(
+        "/cases/UTP-0001/artifacts",
+        json={"artifact_id": "art_ext_01", "artifact_type": "BAIL_APPLICATION", "content_text": "Draft"},
+        headers={"Authorization": f"Bearer {ext_tok}"},
+    )
+    assert art_res.status_code == 403
+
+    # Barred from signing off or approving (403)
+    appr_res = client.post(
+        "/cases/UTP-0001/approve",
+        headers={"Authorization": f"Bearer {ext_tok}"},
+    )
+    assert appr_res.status_code == 403
+
+    # Barred from filing in court (403)
+    file_res = client.post(
+        "/cases/UTP-0001/file",
+        headers={"Authorization": f"Bearer {ext_tok}"},
+    )
+    assert file_res.status_code == 403
+

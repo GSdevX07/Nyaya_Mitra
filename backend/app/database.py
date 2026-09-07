@@ -4309,6 +4309,7 @@ def get_notifications_for_user(
 ) -> List[dict]:
     """Retrieve notifications filtered specifically by recipient role, user ID, or linked case ID — Supabase primary."""
     rows = []
+    seen_ids = set()
     from app.supabase_adapter import is_supabase_active, get_supabase_client
     if is_supabase_active():
         try:
@@ -4316,31 +4317,36 @@ def get_notifications_for_user(
             if client:
                 res = client.table("notifications").select("id, case_id, title, message, type, is_read, timestamp, target_role, user_id").order("timestamp", desc=True).execute()
                 if res.data:
-                    rows = [
-                        (r.get("id"), r.get("case_id"), r.get("title"), r.get("message"), r.get("type"), 1 if r.get("is_read") else 0, r.get("timestamp"), r.get("target_role"), r.get("user_id"))
-                        for r in res.data
-                    ]
+                    for r in res.data:
+                        nid = r.get("id")
+                        if nid and nid not in seen_ids:
+                            seen_ids.add(nid)
+                            rows.append(
+                                (nid, r.get("case_id"), r.get("title"), r.get("message"), r.get("type"), 1 if r.get("is_read") else 0, r.get("timestamp"), r.get("target_role"), r.get("user_id"))
+                            )
         except Exception as e:
             logger.warning(f"Supabase get_notifications_for_user error: {e}")
 
-    if not rows:
-        conn_n = None
-        try:
-            conn_n = get_db_connection()
-            cursor = conn_n.cursor()
-            cursor.execute(
-                """
-                SELECT id, case_id, title, message, type, is_read, timestamp, target_role, user_id 
-                FROM notifications 
-                ORDER BY timestamp DESC
-                """
-            )
-            rows = cursor.fetchall()
-        except Exception as e:
-            logger.warning(f"SQLite get_notifications_for_user error: {e}")
-        finally:
-            if conn_n:
-                conn_n.close()
+    conn_n = None
+    try:
+        conn_n = get_db_connection()
+        cursor = conn_n.cursor()
+        cursor.execute(
+            """
+            SELECT id, case_id, title, message, type, is_read, timestamp, target_role, user_id 
+            FROM notifications 
+            ORDER BY timestamp DESC
+            """
+        )
+        for r in cursor.fetchall():
+            if r[0] not in seen_ids:
+                seen_ids.add(r[0])
+                rows.append(r)
+    except Exception as e:
+        logger.warning(f"SQLite get_notifications_for_user error: {e}")
+    finally:
+        if conn_n:
+            conn_n.close()
 
     results = []
     user_role_upper = (role or "").strip().upper()

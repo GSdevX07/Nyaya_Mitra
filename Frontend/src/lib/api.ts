@@ -1847,3 +1847,25 @@ export async function assignCounselToCaseApi(caseId: string, payload: AssignCoun
   }
   return await res.json();
 }
+
+export interface ExpediteCoordinationPayload {
+  notes?: string;
+  target_roles?: string[];
+}
+
+export async function expediteCoordinationApi(caseId: string, notes?: string, targetRoles?: string[]): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/expedite-coordination`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      notes: notes || "Expediting missing charge sheet / custody certificate.",
+      target_roles: targetRoles || ["JAIL_OFFICER", "POLICE_OFFICER"],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to dispatch coordination notice: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+

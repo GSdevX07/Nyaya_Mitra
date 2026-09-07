@@ -226,3 +226,32 @@ def test_family_guardian_linked_gets_case_document_status():
     assert data["role_view"] == "FAMILY_GUARDIAN"
     assert data["ui_label"] == "Case Document Status"
     assert "high_level_status" in data
+
+
+def test_accused_user_gets_complete_provenance_metadata():
+    """Accused User gets complete 7-field provenance metadata on their linked document."""
+    headers = _token(Role.ACCUSED_USER, user_id="demo_accused", extra={"linked_case_id": "UTP-0001"})
+    resp = client.get(f"/documents/{DOC_ID}/evidence-chain", headers=headers)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["verification_status"] in ("Verified", "Pending Verification")
+    assert data["document_name"]
+    assert data["case_reference"] == "UTP-0001"
+    assert data["source_authority"]
+    assert data["uploaded_by"]
+    assert data["uploaded_at"]
+    assert isinstance(data["version_history"], list)
+    assert len(data["version_history"]) > 0
+
+
+def test_citizen_entitled_document_evidence_chain_resolution():
+    """Entitled document id doc_UTP-0001_custody_certificate resolves correctly."""
+    headers = _token(Role.ACCUSED_USER, user_id="demo_accused", extra={"linked_case_id": "UTP-0001"})
+    resp = client.get("/documents/doc_UTP-0001_custody_certificate/evidence-chain", headers=headers)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["case_reference"] == "UTP-0001"
+    assert data["verification_status"] == "Verified"
+    assert "Custody Certificate" in data["document_name"]
+    assert len(data["version_history"]) > 0
+

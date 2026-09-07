@@ -5234,7 +5234,13 @@ def build_evidence_chain(document_id: str) -> Optional[dict]:
         # Check if this is a baseline judicial document, e.g. DOC-UTP-0001-remand_order, DOC-UTP-5572-fir_copy, etc.
         case_id = "UTP-0001"
         doc_type = "official_document"
-        if document_id.startswith("DOC-") or document_id.startswith("EVI-"):
+        if document_id.startswith("doc_"):
+            # Entitled citizen document format: doc_{case_id}_{doc_type}
+            sub = document_id[4:]
+            parts = sub.split("_")
+            case_id = parts[0]
+            doc_type = "_".join(parts[1:]) if len(parts) > 1 else "official_document"
+        elif document_id.startswith("DOC-") or document_id.startswith("EVI-"):
             parts = document_id.split("-")
             if len(parts) >= 4:
                 case_id = f"{parts[1]}-{parts[2]}"

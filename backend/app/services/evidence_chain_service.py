@@ -76,7 +76,7 @@ def project_evidence_chain_for_user(
     role = user.role
     doc_info = doc or {}
     case_id = raw_chain.get("case_id") or getattr(case, "case_id", None) or "Not recorded"
-    doc_name = raw_chain.get("file_name") or raw_chain.get("document_type") or (doc_info.get("document_type") if doc_info else None) or "Document on file"
+    doc_name = raw_chain.get("document_type") or raw_chain.get("file_name") or (doc_info.get("document_type") if doc_info else None) or "Document on file"
     doc_status = raw_chain.get("document_status", "PENDING_VERIFICATION")
     is_verified = doc_status == "VERIFIED"
     uploaded_by = raw_chain.get("uploaded_by") or (doc_info.get("uploaded_by") if doc_info else None) or "Not recorded"
@@ -396,24 +396,41 @@ def project_evidence_chain_for_user(
         return {
             "role_view": "ACCUSED_USER",
             "ui_label": "Document Status",
+            "document_id": raw_chain.get("document_id"),
             "document_name": doc_name,
             "case_reference": case_id,
+            "source_authority": raw_chain.get("source_authority") or "Judicial / Prison Custody Record",
+            "uploaded_by": uploaded_by or "Court Registry (Official Docket)",
+            "uploaded_at": uploaded_at or "Recorded on file",
+            "verification_status": "Verified" if is_verified else "Pending Verification",
+            "simple_status": status_label,
             "is_received": True,
             "is_verified": is_verified,
-            "simple_status": status_label,
+            "integrity_status": integrity_status,
+            "version_history": raw_chain.get("version_history", []),
             "next_step": "Presented before court by assigned legal aid counsel" if is_verified else "Under official verification by legal aid authority",
             "support_note": "Your legal aid team is actively tracking all required records for your case.",
         }
 
     # 11. FAMILY / GUARDIAN PROJECTION (Linked Accused Case Only)
     if role == Role.FAMILY_GUARDIAN:
+        status_label = "Institutionally Verified" if is_verified else "Under Legal Aid Review"
         return {
             "role_view": "FAMILY_GUARDIAN",
             "ui_label": "Case Document Status",
+            "document_id": raw_chain.get("document_id"),
             "document_name": doc_name,
             "case_reference": case_id,
+            "source_authority": raw_chain.get("source_authority") or "Judicial / Prison Custody Record",
+            "uploaded_by": uploaded_by or "Court Registry (Official Docket)",
+            "uploaded_at": uploaded_at or "Recorded on file",
+            "verification_status": "Verified" if is_verified else "Pending Verification",
+            "simple_status": status_label,
+            "high_level_status": status_label,
             "document_received": True,
-            "high_level_status": "Institutionally Verified" if is_verified else "Under Legal Aid Review",
+            "is_verified": is_verified,
+            "integrity_status": integrity_status,
+            "version_history": raw_chain.get("version_history", []),
             "next_action": "Application being prepared by assigned counsel" if is_verified else "Awaiting institutional document intake",
             "support_note": "DLSA legal aid services are free of charge. No payment is required.",
         }

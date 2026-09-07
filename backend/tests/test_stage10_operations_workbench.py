@@ -181,21 +181,60 @@ def test_jail_officer_cannot_draft_or_approve(jail_tok):
 # ── 3. DLSA Officer Role Boundaries ──────────────────────────────────────────
 
 def test_dlsa_officer_counsel_assignment_desk(dlsa_tok):
-    """DLSA officer can query eligible counsel roster and assign panel advocate."""
-    # Query eligible counsel for verified matter
-    roster_res = client.get("/cases/UTP-0001/eligible-counsel", headers={"Authorization": f"Bearer {dlsa_tok}"})
-    assert roster_res.status_code == 200, roster_res.text
-    roster = roster_res.json()
-    assert "counsel" in roster or "counsel_list" in roster
+    """
+    DLSA officer can assign counsel ONLY when matter is in LEGAL_AID_REQUIRED state
+    and unassigned. Rejects INTAKE, VERIFICATION, REVIEW, and already-assigned cases.
+    """
+    from app.database import update_case_status, get_case, unassign_case_lawyer
+    from app.models.schemas import CaseState
 
-    # Assign counsel to the verified matter
     assign_payload = {
         "lawyer_id": "ADV-TEST-01",
         "lawyer_name": "Adv. S. K. Raman",
         "notes": "Assigned under Section 12 Legal Services Authorities Act.",
     }
+
+    # 1. Verify INTAKE stage cannot be assigned
+    unassign_case_lawyer("UTP-0001", CaseState.INTAKE)
+    res_intake = client.post("/cases/UTP-0001/assign-counsel", json=assign_payload, headers={"Authorization": f"Bearer {dlsa_tok}"})
+    assert res_intake.status_code == 400
+    assert "Matter state must be 'LEGAL_AID_REQUIRED'" in res_intake.json()["detail"]
+
+    # 2. Verify VERIFICATION stage cannot be assigned
+    update_case_status("UTP-0001", CaseState.VERIFICATION)
+    res_verif = client.post("/cases/UTP-0001/assign-counsel", json=assign_payload, headers={"Authorization": f"Bearer {dlsa_tok}"})
+    assert res_verif.status_code == 400
+    assert "Matter state must be 'LEGAL_AID_REQUIRED'" in res_verif.json()["detail"]
+
+    # 3. Verify REVIEW stage cannot be assigned
+    update_case_status("UTP-0001", CaseState.REVIEW)
+    res_review = client.post("/cases/UTP-0001/assign-counsel", json=assign_payload, headers={"Authorization": f"Bearer {dlsa_tok}"})
+    assert res_review.status_code == 400
+    assert "Matter state must be 'LEGAL_AID_REQUIRED'" in res_review.json()["detail"]
+
+    # 4. Query eligible counsel for matter
+    roster_res = client.get("/cases/UTP-0001/eligible-counsel", headers={"Authorization": f"Bearer {dlsa_tok}"})
+    assert roster_res.status_code == 200, roster_res.text
+    roster = roster_res.json()
+    assert "counsel" in roster or "counsel_list" in roster
+
+    # 5. Verify LEGAL_AID_REQUIRED can be assigned and transitions to ASSIGNED
+    update_case_status("UTP-0001", CaseState.LEGAL_AID_REQUIRED)
     assign_res = client.post("/cases/UTP-0001/assign-counsel", json=assign_payload, headers={"Authorization": f"Bearer {dlsa_tok}"})
     assert assign_res.status_code == 200, assign_res.text
+    data = assign_res.json()
+    assert data["status"] == "success"
+    assert data["assigned_lawyer_id"] == "ADV-TEST-01"
+
+    updated_case = get_case("UTP-0001")
+    assert updated_case.status == CaseState.ASSIGNED or updated_case.status == "ASSIGNED"
+    assert updated_case.assignment_status == "ASSIGNED"
+    assert updated_case.assigned_lawyer == "Adv. S. K. Raman"
+
+    # 6. Verify already assigned matter cannot be assigned again
+    reassign_res = client.post("/cases/UTP-0001/assign-counsel", json=assign_payload, headers={"Authorization": f"Bearer {dlsa_tok}"})
+    assert reassign_res.status_code == 400
+    assert "already assigned" in reassign_res.json()["detail"]
 
 
 def test_dlsa_officer_cannot_supervisory_approve_or_file(dlsa_tok):

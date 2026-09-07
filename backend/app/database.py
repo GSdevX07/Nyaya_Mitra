@@ -3521,6 +3521,48 @@ def assign_case_lawyer(case_id: str, lawyer_id: str, lawyer_name: Optional[str] 
     return True
 
 
+def unassign_case_lawyer(case_id: str, new_status: CaseState = CaseState.LEGAL_AID_REQUIRED) -> bool:
+    """Reset counsel assignment — dual-writes to Supabase (when active) and SQLite."""
+    case = get_case(case_id)
+    if not case:
+        return False
+    case.assignment_status = "AVAILABLE"
+    case.assigned_lawyer_id = None
+    case.assigned_lawyer = None
+    case.status = new_status
+    _MEMORY_CASES[case_id] = case
+
+    from app.supabase_adapter import is_supabase_active, supa_upsert_legacy_case
+    if is_supabase_active():
+        try:
+            supa_upsert_legacy_case(
+                case_id=case_id,
+                data=case.model_dump(),
+                status=new_status.value if hasattr(new_status, "value") else str(new_status),
+                assignment_status="AVAILABLE",
+                assigned_lawyer_id=None,
+            )
+        except Exception as e:
+            logger.warning(f"Supabase unassign_case_lawyer error: {e}")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE cases SET assignment_status = 'AVAILABLE', assigned_lawyer_id = NULL, status = ?, data = ? WHERE case_id = ?",
+            (new_status.value, case.model_dump_json(), case_id),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"SQLite unassign_case_lawyer error: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+    return True
+
+
 def get_eligible_counsel_for_case(case_id: str) -> Dict[str, Any]:
     """
     Retrieve and filter eligible Legal Aid Defense Counsel (LADC) and Panel Advocates

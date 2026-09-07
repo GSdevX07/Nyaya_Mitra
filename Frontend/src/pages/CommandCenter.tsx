@@ -89,6 +89,13 @@ export function CommandCenter() {
   }, [loadData]);
 
   const handleOpenAssignModal = async (c: CaseRecord) => {
+    if (c.status !== "LEGAL_AID_REQUIRED" && c.status !== "LEGAL_NEED_IDENTIFIED") {
+      setActionNotice({
+        type: "error",
+        message: `Cannot assign defense counsel: Matter stage must be 'LEGAL_AID_REQUIRED'. Current stage: '${c.status}'.`,
+      });
+      return;
+    }
     setAssignCase(c);
     setShowAssignModal(true);
     setCounselLoading(true);
@@ -144,6 +151,10 @@ export function CommandCenter() {
 
   const unassignedUndertrials = undertrials.filter(
     (c) => c.assignment_status !== "ASSIGNED"
+  );
+
+  const assignmentReadyUndertrials = undertrials.filter(
+    (c) => c.assignment_status !== "ASSIGNED" && (c.status === "LEGAL_AID_REQUIRED" || c.status === "LEGAL_NEED_IDENTIFIED")
   );
 
   const sec479Signals = undertrials.filter(
@@ -353,7 +364,7 @@ export function CommandCenter() {
           <div className="bg-card border-2 border-border rounded-sm overflow-hidden">
             <div className="p-4 border-b border-border bg-secondary/40 flex flex-col md:flex-row md:items-center justify-between gap-3">
               <span className="font-serif font-bold text-xs uppercase tracking-wider text-muted-foreground">
-                Undertrials Awaiting Defense Counsel ({unassignedUndertrials.length} Matters)
+                Undertrials Awaiting Defense Counsel ({assignmentReadyUndertrials.length} Ready / {unassignedUndertrials.length} Total)
               </span>
 
               <div className="relative w-full md:w-64">
@@ -409,12 +420,30 @@ export function CommandCenter() {
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={() => handleOpenAssignModal(c)}
-                          className="px-3.5 py-1.5 bg-primary text-primary-foreground font-mono text-xs font-bold uppercase rounded-sm flex items-center gap-1.5 hover:opacity-90 transition-opacity"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" /> Assign Panel Advocate
-                        </button>
+                        {(c.status === "LEGAL_AID_REQUIRED" || c.status === "LEGAL_NEED_IDENTIFIED") && c.assignment_status !== "ASSIGNED" ? (
+                          <button
+                            onClick={() => handleOpenAssignModal(c)}
+                            className="px-3.5 py-1.5 bg-primary text-primary-foreground font-mono text-xs font-bold uppercase rounded-sm flex items-center gap-1.5 hover:opacity-90 transition-opacity"
+                          >
+                            <UserPlus className="w-3.5 h-3.5" /> Assign Counsel
+                          </button>
+                        ) : c.status === "VERIFICATION" ? (
+                          <span className="text-xs font-mono text-muted-foreground px-2.5 py-1 bg-secondary/60 border border-border rounded-sm">
+                            Awaiting Legal-Aid Review
+                          </span>
+                        ) : c.status === "REVIEW" ? (
+                          <span className="text-xs font-mono text-muted-foreground px-2.5 py-1 bg-secondary/60 border border-border rounded-sm">
+                            DLSA Review Pending
+                          </span>
+                        ) : c.status === "INTAKE" ? (
+                          <span className="text-xs font-mono text-muted-foreground px-2.5 py-1 bg-secondary/60 border border-border rounded-sm">
+                            Custody Intake Pending
+                          </span>
+                        ) : (
+                          <span className="text-xs font-mono text-muted-foreground px-2.5 py-1 bg-secondary/60 border border-border rounded-sm">
+                            {c.status || "Unassigned"}
+                          </span>
+                        )}
 
                         <Link
                           to={`/case/${c.case_id}`}

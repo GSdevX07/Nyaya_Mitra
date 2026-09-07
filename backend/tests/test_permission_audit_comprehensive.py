@@ -62,6 +62,11 @@ def test_platform_admin_cannot_assign_counsel():
 
 # 2. DLSA COUNSEL ASSIGNMENT WORKFLOW
 def test_dlsa_can_assign_counsel_within_district():
+    from app.database import unassign_case_lawyer
+    from app.models.schemas import CaseState
+
+    unassign_case_lawyer("UTP-0001", CaseState.LEGAL_AID_REQUIRED)
+
     headers = _get_auth_headers(Role.DLSA_OFFICER, user_id="demo_dlsa", district="Central Delhi")
     payload = {
         "lawyer_id": "adv_rajesh_sharma",

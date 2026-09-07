@@ -249,6 +249,11 @@ def test_audit_events_access_permissions(auditor_token, supervising_token, admin
 
 def test_counsel_assignment_permissions(dlsa_token, admin_token, police_token):
     """DLSA Officer can assign legal-aid counsel; Admin and Police are denied (403)."""
+    from app.database import unassign_case_lawyer
+    from app.models.schemas import CaseState
+
+    unassign_case_lawyer("UTP-0001", CaseState.LEGAL_AID_REQUIRED)
+
     payload = {
         "lawyer_id": "LWYR-TEST-01",
         "lawyer_name": "Adv. Tested Legal Aid",

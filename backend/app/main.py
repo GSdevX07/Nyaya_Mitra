@@ -1277,29 +1277,29 @@ def assign_counsel_to_case(
             detail=f"Forbidden: Case '{case_id}' belongs to district '{case.district}', outside your authorized DLSA district.",
         )
 
-    # ── Prerequisite Lifecycle Gate ──────────────────────────────────────────
-    # DLSA may ONLY allocate defense counsel after prison custody intake and
-    # nominal roll custody verification have been formally completed.
-    raw_status = getattr(case, "status", None)
-    status_str = raw_status.value if hasattr(raw_status, "value") else str(raw_status or "").strip().upper()
-    unready_prerequisite_states = {
-        "INTAKE", "INTAKE_PENDING", "DETECTED", "VERIFICATION", "CUSTODY_VERIFIED",
-        "CUSTODY_PENDING", "PRE_INTAKE", "DRAFT_INTAKE",
-    }
-    if status_str in unready_prerequisite_states:
+    # ── Already Assigned Gate ─────────────────────────────────────────────────
+    if getattr(case, "assignment_status", None) == "ASSIGNED":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot assign defense counsel: Prerequisite custody intake and nominal roll verification must be completed first. Current stage: '{status_str}'.",
+            detail=f"Cannot assign defense counsel: Case '{case_id}' is already assigned to {getattr(case, 'assigned_lawyer', None) or 'counsel'}.",
+        )
+
+    # ── Prerequisite Lifecycle Gate ──────────────────────────────────────────
+    # DLSA may ONLY allocate defense counsel when matter state is LEGAL_AID_REQUIRED.
+    # Assignment is strictly barred for INTAKE, VERIFICATION, REVIEW, DOCUMENT_PENDING,
+    # ANALYSIS_READY, HUMAN_REVIEW, SUBMITTED, APPROVED, FILED, or terminal states.
+    raw_status = getattr(case, "status", None)
+    status_str = raw_status.value if hasattr(raw_status, "value") else str(raw_status or "").strip().upper()
+    if status_str != "LEGAL_AID_REQUIRED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot assign defense counsel: Matter state must be 'LEGAL_AID_REQUIRED'. Current stage: '{status_str}'.",
         )
 
     lawyer_display = payload.lawyer_name or payload.lawyer_id
     success = assign_case_lawyer(case_id, payload.lawyer_id, lawyer_display)
     if not success:
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found.")
-
-    from app.database import update_case_status
-    from app.models.schemas import CaseState
-    update_case_status(case_id, CaseState.ASSIGNED)
 
     try:
         from app.workflow.service import WorkflowService
@@ -1316,6 +1316,10 @@ def assign_counsel_to_case(
         )
     except Exception as e:
         logger.info(f"State machine transition on counsel assignment: {e}")
+
+    from app.database import update_case_status
+    from app.models.schemas import CaseState
+    update_case_status(case_id, CaseState.ASSIGNED)
 
     append_case_timeline_event(
         case_id,

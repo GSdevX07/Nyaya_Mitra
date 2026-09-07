@@ -92,7 +92,8 @@ export function DlsaWorkspace() {
   const [search, setSearch] = useState("");
   const [filterDistrict, setFilterDistrict] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 6;
+  const pageSize = 4;
+  const [assignmentDeskFilter, setAssignmentDeskFilter] = useState<"ready" | "all">("ready");
 
   // Assignment Modal State
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -135,9 +136,18 @@ export function DlsaWorkspace() {
   }, [loadData]);
 
   // Derived subsets
+  // Assignment-ready matters: strictly in LEGAL_AID_REQUIRED (or legacy LEGAL_NEED_IDENTIFIED) and unassigned
+  const assignmentReadyCases = cases.filter(
+    (c) =>
+      !c.assigned_lawyer &&
+      c.assignment_status !== "ASSIGNED" &&
+      (c.status === "LEGAL_AID_REQUIRED" || c.status === "LEGAL_NEED_IDENTIFIED")
+  );
+
   const unassignedCases = cases.filter(
     (c) =>
       !c.assigned_lawyer &&
+      c.assignment_status !== "ASSIGNED" &&
       c.status !== "DISCHARGED" &&
       c.status !== "RELEASE_CONFIRMED"
   );
@@ -173,8 +183,9 @@ export function DlsaWorkspace() {
       c.status === "APPROVED"
   );
 
-  // Filtered lists based on search
-  const filteredUnassigned = unassignedCases.filter((c) => {
+  // Filtered lists based on search & queue desk filter
+  const baseAssignmentList = assignmentDeskFilter === "ready" ? assignmentReadyCases : unassignedCases;
+  const filteredUnassigned = baseAssignmentList.filter((c) => {
     const q = search.toLowerCase();
     const matchesSearch =
       !q ||
@@ -244,6 +255,13 @@ export function DlsaWorkspace() {
   });
 
   const handleOpenAssignModal = async (c: CaseRecord) => {
+    if (c.status !== "LEGAL_AID_REQUIRED" && c.status !== "LEGAL_NEED_IDENTIFIED") {
+      setActionNotice({
+        type: "error",
+        message: `Cannot assign defense counsel: Matter stage must be 'LEGAL_AID_REQUIRED'. Current stage: '${c.status}'.`,
+      });
+      return;
+    }
     setAssignCase(c);
     setShowAssignModal(true);
     setCounselLoading(true);
@@ -399,13 +417,13 @@ export function DlsaWorkspace() {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <div className="p-3 bg-card border border-border rounded-sm">
           <div className="text-[11px] font-mono text-muted-foreground uppercase flex items-center gap-1">
-            <UserPlus className="w-3 h-3 text-red-600" /> Unassigned Intake
+            <UserPlus className="w-3 h-3 text-red-600" /> Awaiting Counsel
           </div>
           <div className="text-xl font-bold font-serif text-foreground mt-1">
-            {unassignedCases.length}
+            {assignmentReadyCases.length}
           </div>
           <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
-            Require Counsel Assignment
+            Stage: LEGAL_AID_REQUIRED
           </div>
         </div>
 
@@ -487,7 +505,7 @@ export function DlsaWorkspace() {
           }`}
         >
           <UserPlus className="w-3.5 h-3.5" />
-          Counsel Assignment Desk ({unassignedCases.length})
+          Counsel Assignment Desk ({assignmentReadyCases.length})
         </button>
 
         <button
@@ -608,6 +626,43 @@ export function DlsaWorkspace() {
       {/* TAB 2: Counsel Assignment Desk */}
       {activeTab === "assignment" && (
         <div className="space-y-4">
+          {/* Sub-filter for Assignment Desk: Awaiting Counsel Assignment vs All Unassigned */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-card p-3 border border-border rounded-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono text-muted-foreground uppercase font-bold">Queue Scope:</span>
+              <button
+                onClick={() => {
+                  setAssignmentDeskFilter("ready");
+                  setCurrentPage(1);
+                }}
+                className={`px-3 py-1 text-xs font-mono rounded-sm border transition-colors ${
+                  assignmentDeskFilter === "ready"
+                    ? "bg-foreground text-background border-foreground font-bold"
+                    : "bg-secondary/40 text-muted-foreground border-border hover:text-foreground"
+                }`}
+              >
+                Awaiting Counsel Assignment ({assignmentReadyCases.length})
+              </button>
+              <button
+                onClick={() => {
+                  setAssignmentDeskFilter("all");
+                  setCurrentPage(1);
+                }}
+                className={`px-3 py-1 text-xs font-mono rounded-sm border transition-colors ${
+                  assignmentDeskFilter === "all"
+                    ? "bg-foreground text-background border-foreground font-bold"
+                    : "bg-secondary/40 text-muted-foreground border-border hover:text-foreground"
+                }`}
+              >
+                All Unassigned Matters ({unassignedCases.length})
+              </button>
+            </div>
+            <div className="text-[11px] font-mono text-muted-foreground">
+              {assignmentDeskFilter === "ready"
+                ? "Showing matters in LEGAL_AID_REQUIRED ready for panel counsel assignment"
+                : "Showing all unassigned matters including preliminary custody & review stages"}
+            </div>
+          </div>
 
           {loading ? (
             <div className="p-12 text-center text-xs font-mono text-muted-foreground flex items-center justify-center gap-2">
@@ -620,7 +675,9 @@ export function DlsaWorkspace() {
                 Assignment Desk Clear
               </h3>
               <p className="text-xs text-muted-foreground mt-1">
-                No unassigned matters awaiting legal-aid counsel assignment matching filter criteria.
+                {assignmentDeskFilter === "ready"
+                  ? "No matters in LEGAL_AID_REQUIRED stage awaiting counsel assignment matching filter criteria."
+                  : "No unassigned matters found matching filter criteria."}
               </p>
             </div>
           ) : (
@@ -632,7 +689,7 @@ export function DlsaWorkspace() {
                     <th className="p-3">Custody Duration</th>
                     <th className="p-3">Alleged Offenses</th>
                     <th className="p-3">Facility & District</th>
-                    <th className="p-3">Status</th>
+                    <th className="p-3">Lifecycle State</th>
                     <th className="p-3 text-right">Assignment Action</th>
                   </tr>
                 </thead>
@@ -642,9 +699,12 @@ export function DlsaWorkspace() {
                     .map((c) => (
                     <tr key={c.case_id} className="hover:bg-secondary/20 transition-colors">
                       <td className="p-3">
-                        <div className="font-serif font-bold text-sm text-foreground">
+                        <Link
+                          to={`/case/${c.case_id}`}
+                          className="font-serif font-bold text-sm text-foreground hover:underline"
+                        >
                           {c.name}
-                        </div>
+                        </Link>
                         <div className="font-mono text-[10px] text-muted-foreground mt-0.5">
                           {c.case_id} {c.fir_number && `• FIR: ${c.fir_number}`}
                         </div>
@@ -684,12 +744,30 @@ export function DlsaWorkspace() {
                       </td>
 
                       <td className="p-3 text-right">
-                        <button
-                          onClick={() => handleOpenAssignModal(c)}
-                          className="px-3 py-1.5 bg-primary text-primary-foreground font-mono text-xs font-bold rounded-sm inline-flex items-center gap-1.5 hover:opacity-90 shadow-sm"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" /> Assign Legal-Aid Counsel
-                        </button>
+                        {(c.status === "LEGAL_AID_REQUIRED" || c.status === "LEGAL_NEED_IDENTIFIED") && c.assignment_status !== "ASSIGNED" ? (
+                          <button
+                            onClick={() => handleOpenAssignModal(c)}
+                            className="px-3 py-1.5 bg-primary text-primary-foreground font-mono text-xs font-bold rounded-sm inline-flex items-center gap-1.5 hover:opacity-90 shadow-sm"
+                          >
+                            <UserPlus className="w-3.5 h-3.5" /> Assign Counsel
+                          </button>
+                        ) : c.status === "VERIFICATION" ? (
+                          <span className="inline-flex items-center px-2 py-1 rounded-sm text-[11px] font-mono font-medium text-muted-foreground bg-secondary/60 border border-border">
+                            Awaiting Legal-Aid Review
+                          </span>
+                        ) : c.status === "REVIEW" ? (
+                          <span className="inline-flex items-center px-2 py-1 rounded-sm text-[11px] font-mono font-medium text-muted-foreground bg-secondary/60 border border-border">
+                            DLSA Review Pending
+                          </span>
+                        ) : c.status === "INTAKE" ? (
+                          <span className="inline-flex items-center px-2 py-1 rounded-sm text-[11px] font-mono font-medium text-muted-foreground bg-secondary/60 border border-border">
+                            Custody Intake Pending
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-1 rounded-sm text-[11px] font-mono font-medium text-muted-foreground bg-secondary/60 border border-border">
+                            {c.status}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -1010,13 +1088,25 @@ export function DlsaWorkspace() {
                       </td>
 
                       <td className="p-3 text-right">
-                        {!c.assigned_lawyer ? (
+                        {!c.assigned_lawyer && (c.status === "LEGAL_AID_REQUIRED" || c.status === "LEGAL_NEED_IDENTIFIED") ? (
                           <button
                             onClick={() => handleOpenAssignModal(c)}
-                            className="px-2.5 py-1 bg-primary text-primary-foreground text-xs font-mono font-bold rounded-sm hover:opacity-90"
+                            className="px-2.5 py-1 bg-primary text-primary-foreground text-xs font-mono font-bold rounded-sm hover:opacity-90 inline-flex items-center gap-1"
                           >
-                            Assign Immediately
+                            <UserPlus className="w-3.5 h-3.5" /> Assign Counsel
                           </button>
+                        ) : !c.assigned_lawyer && c.status === "VERIFICATION" ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] font-mono font-medium text-muted-foreground bg-secondary/60 border border-border">
+                            Awaiting Legal-Aid Review
+                          </span>
+                        ) : !c.assigned_lawyer && c.status === "REVIEW" ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] font-mono font-medium text-muted-foreground bg-secondary/60 border border-border">
+                            DLSA Review Pending
+                          </span>
+                        ) : !c.assigned_lawyer && c.status === "INTAKE" ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] font-mono font-medium text-muted-foreground bg-secondary/60 border border-border">
+                            Custody Intake Pending
+                          </span>
                         ) : (
                           <Link
                             to={`/case/${c.case_id}`}

@@ -5,7 +5,7 @@ Timeline (Facts vs System Interpretations), Identity Resolution, and Citizen Por
 from __future__ import annotations
 from typing import List, Dict, Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user, require_role
@@ -18,6 +18,20 @@ from app.services.accused_service import (
     resolve_duplicate_candidate,
     update_accused_identity_attributes,
     get_citizen_view,
+)
+from app.models.citizen import (
+    CitizenActionRequestCreate,
+    CitizenNotificationPreferencesUpdate,
+)
+from app.services.language_service import get_supported_languages
+from app.services.citizen_service import (
+    get_citizen_overview,
+    get_citizen_entitled_documents,
+    get_citizen_document_summary,
+    submit_citizen_action_request,
+    get_citizen_action_requests_for_user,
+    get_notification_preferences_service,
+    update_notification_preferences_service,
 )
 
 
@@ -160,3 +174,101 @@ async def get_my_case_citizen_timeline(
         )
     from app.services.accused_service import get_citizen_timeline
     return get_citizen_timeline(case_id=current_user.linked_case_id, user=current_user)
+
+
+# ── Stage 11: Constrained Mobile-First Citizen Endpoints ─────────────────────
+
+@citizen_router.get("/overview", response_model=Dict[str, Any])
+async def get_overview(
+    lang: str = Query("en", description="Target display language (en, hi, kn, te, ta, mr, bn)"),
+    current_user: AuthUser = Depends(require_role(Role.ACCUSED_USER, Role.FAMILY_GUARDIAN)),
+):
+    """
+    Consolidated, mobile-first, low-bandwidth dashboard for Accused Person or Family Guardian.
+    Includes case references, known status, upcoming events, counsel assignment,
+    missing citizen documents, approved entitled copies, and AI explanation with statutory disclaimer.
+    """
+    return get_citizen_overview(user=current_user, lang=lang)
+
+
+@citizen_router.get("/languages", response_model=List[Dict[str, Any]])
+async def list_supported_languages(
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """
+    List configured Indian languages and authoritative status.
+    """
+    return get_supported_languages()
+
+
+@citizen_router.get("/documents", response_model=List[Dict[str, Any]])
+async def list_entitled_documents(
+    lang: str = Query("en"),
+    current_user: AuthUser = Depends(require_role(Role.ACCUSED_USER, Role.FAMILY_GUARDIAN)),
+):
+    """
+    List approved documents that the citizen is entitled to receive,
+    with plain-language text summaries for low-bandwidth environments.
+    """
+    if not current_user.linked_case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active linked case.")
+    return get_citizen_entitled_documents(current_user.linked_case_id, lang=lang)
+
+
+@citizen_router.get("/documents/{doc_id}/summary", response_model=Dict[str, Any])
+async def get_doc_summary(
+    doc_id: str,
+    current_user: AuthUser = Depends(require_role(Role.ACCUSED_USER, Role.FAMILY_GUARDIAN)),
+):
+    """
+    Retrieve plain-text preview and summary of an entitled document for low-bandwidth mode.
+    """
+    if not current_user.linked_case_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active linked case.")
+    return get_citizen_document_summary(doc_id, current_user.linked_case_id)
+
+
+@citizen_router.post("/requests", response_model=Dict[str, Any])
+async def create_request(
+    body: CitizenActionRequestCreate,
+    current_user: AuthUser = Depends(require_role(Role.ACCUSED_USER, Role.FAMILY_GUARDIAN)),
+):
+    """
+    Submit a structured citizen action request (Help, Discrepancy Flag, Copy Request, DLSA Contact).
+    Directly dispatches an operational task to the DLSA Task Queue.
+    """
+    return submit_citizen_action_request(user=current_user, payload=body)
+
+
+@citizen_router.get("/requests", response_model=List[Dict[str, Any]])
+async def list_requests(
+    current_user: AuthUser = Depends(require_role(Role.ACCUSED_USER, Role.FAMILY_GUARDIAN)),
+):
+    """
+    List past citizen requests and their DLSA review status.
+    """
+    return get_citizen_action_requests_for_user(user=current_user)
+
+
+@citizen_router.get("/notification-preferences", response_model=Dict[str, Any])
+async def get_notification_preferences(
+    current_user: AuthUser = Depends(require_role(Role.ACCUSED_USER, Role.FAMILY_GUARDIAN)),
+):
+    """
+    Retrieve active notification preferences, channel settings, and statutory consent record.
+    """
+    return get_notification_preferences_service(user=current_user)
+
+
+@citizen_router.post("/notification-preferences", response_model=Dict[str, Any])
+async def update_notification_preferences(
+    body: CitizenNotificationPreferencesUpdate,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(Role.ACCUSED_USER, Role.FAMILY_GUARDIAN)),
+):
+    """
+    Update channel opt-ins (SMS, WhatsApp, In-App) and record statutory consent.
+    """
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    return update_notification_preferences_service(user=current_user, payload=body, ip_address=client_ip)
+

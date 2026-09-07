@@ -1583,6 +1583,66 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_task_queue_facility ON task_queue(facility)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_task_queue_district ON task_queue(district)")
 
+    # 13. Stage 11: Accused & Family Portal Tables
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS citizen_action_requests (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL,
+            accused_id TEXT NOT NULL,
+            request_type TEXT NOT NULL,
+            requested_by_user_id TEXT NOT NULL,
+            requested_by_role TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            details TEXT NOT NULL,
+            target_document_type TEXT,
+            discrepancy_field TEXT,
+            status TEXT DEFAULT 'SUBMITTED',
+            response_notes TEXT,
+            assigned_officer_id TEXT,
+            task_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_citizen_req_case_id ON citizen_action_requests(case_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_citizen_req_user_id ON citizen_action_requests(requested_by_user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_citizen_req_status ON citizen_action_requests(status)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS citizen_notification_preferences (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL UNIQUE,
+            user_id TEXT NOT NULL,
+            phone_number TEXT,
+            channel_sms_enabled INTEGER DEFAULT 1,
+            channel_whatsapp_enabled INTEGER DEFAULT 1,
+            channel_in_app_enabled INTEGER DEFAULT 1,
+            preferred_language TEXT DEFAULT 'en',
+            consent_status TEXT DEFAULT 'OPTED_IN',
+            consent_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            consent_version TEXT DEFAULT 'v1.0-statutory-notice',
+            consent_text TEXT DEFAULT 'I consent to receive case status updates and legal-aid notices under the Legal Services Authorities Act, 1987.',
+            consent_ip TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_citizen_pref_case_id ON citizen_notification_preferences(case_id)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS citizen_notification_logs (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            recipient TEXT NOT NULL,
+            message TEXT NOT NULL,
+            status TEXT DEFAULT 'SIMULATED_DISPATCHED',
+            dispatch_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            error_message TEXT
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_citizen_notif_logs_case ON citizen_notification_logs(case_id)")
+
     # Performance Indices for Foreign Keys and Lookups
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_court_cases_accused ON court_cases(accused_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_court_cases_status ON court_cases(current_status)")
@@ -5884,6 +5944,216 @@ def get_matter_approval_policy(organization_id: Optional[str], action_type: str)
             "requires_supervisor": 0,
             "authorized_roles_json": json.dumps(["SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "DEFENSE_ADVOCATE"]),
         }
+
+
+# ── Stage 11: Citizen Action Requests & Notification Preferences Helpers ────────
+
+def create_citizen_action_request(
+    case_id: str,
+    accused_id: str,
+    request_type: str,
+    requested_by_user_id: str,
+    requested_by_role: str,
+    subject: str,
+    details: str,
+    target_document_type: Optional[str] = None,
+    discrepancy_field: Optional[str] = None,
+    task_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    req_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO citizen_action_requests (
+                id, case_id, accused_id, request_type, requested_by_user_id,
+                requested_by_role, subject, details, target_document_type,
+                discrepancy_field, status, task_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SUBMITTED', ?, ?, ?)
+        """, (
+            req_id, case_id, accused_id, request_type, requested_by_user_id,
+            requested_by_role, subject, details, target_document_type,
+            discrepancy_field, task_id, now_iso, now_iso,
+        ))
+        conn.commit()
+        return {
+            "id": req_id,
+            "case_id": case_id,
+            "accused_id": accused_id,
+            "request_type": request_type,
+            "requested_by_user_id": requested_by_user_id,
+            "requested_by_role": requested_by_role,
+            "subject": subject,
+            "details": details,
+            "target_document_type": target_document_type,
+            "discrepancy_field": discrepancy_field,
+            "status": "SUBMITTED",
+            "task_id": task_id,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+    finally:
+        conn.close()
+
+
+def get_citizen_action_requests(case_id: str, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        if user_id:
+            cursor.execute("""
+                SELECT * FROM citizen_action_requests
+                WHERE case_id = ? AND requested_by_user_id = ?
+                ORDER BY created_at DESC
+            """, (case_id, user_id))
+        else:
+            cursor.execute("""
+                SELECT * FROM citizen_action_requests
+                WHERE case_id = ?
+                ORDER BY created_at DESC
+            """, (case_id,))
+        rows = cursor.fetchall()
+        cols = [d[0] for d in cursor.description]
+        return [dict(zip(cols, r)) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_citizen_notification_preferences(case_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM citizen_notification_preferences WHERE case_id = ?", (case_id,))
+        row = cursor.fetchone()
+        if row:
+            cols = [d[0] for d in cursor.description]
+            res = dict(zip(cols, row))
+            res["channel_sms_enabled"] = bool(res.get("channel_sms_enabled", 1))
+            res["channel_whatsapp_enabled"] = bool(res.get("channel_whatsapp_enabled", 1))
+            res["channel_in_app_enabled"] = bool(res.get("channel_in_app_enabled", 1))
+            return res
+        return None
+    finally:
+        conn.close()
+
+
+def upsert_citizen_notification_preferences(
+    case_id: str,
+    user_id: str,
+    phone_number: Optional[str] = None,
+    channel_sms_enabled: bool = True,
+    channel_whatsapp_enabled: bool = True,
+    channel_in_app_enabled: bool = True,
+    preferred_language: str = "en",
+    consent_status: str = "OPTED_IN",
+    consent_text: Optional[str] = None,
+    consent_ip: Optional[str] = None,
+) -> Dict[str, Any]:
+    pref_id = f"PREF-{case_id.upper()}"
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    default_text = "I consent to receive case status updates and legal-aid notices under the Legal Services Authorities Act, 1987."
+    final_text = consent_text or default_text
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM citizen_notification_preferences WHERE case_id = ?", (case_id,))
+        exists = cursor.fetchone()
+        if exists:
+            cursor.execute("""
+                UPDATE citizen_notification_preferences
+                SET phone_number = COALESCE(?, phone_number),
+                    channel_sms_enabled = ?,
+                    channel_whatsapp_enabled = ?,
+                    channel_in_app_enabled = ?,
+                    preferred_language = ?,
+                    consent_status = ?,
+                    consent_timestamp = ?,
+                    consent_text = ?,
+                    consent_ip = COALESCE(?, consent_ip),
+                    updated_at = ?
+                WHERE case_id = ?
+            """, (
+                phone_number,
+                1 if channel_sms_enabled else 0,
+                1 if channel_whatsapp_enabled else 0,
+                1 if channel_in_app_enabled else 0,
+                preferred_language,
+                consent_status,
+                now_iso,
+                final_text,
+                consent_ip,
+                now_iso,
+                case_id,
+            ))
+        else:
+            cursor.execute("""
+                INSERT INTO citizen_notification_preferences (
+                    id, case_id, user_id, phone_number,
+                    channel_sms_enabled, channel_whatsapp_enabled, channel_in_app_enabled,
+                    preferred_language, consent_status, consent_timestamp,
+                    consent_version, consent_text, consent_ip, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'v1.0-statutory-notice', ?, ?, ?, ?)
+            """, (
+                pref_id, case_id, user_id, phone_number,
+                1 if channel_sms_enabled else 0,
+                1 if channel_whatsapp_enabled else 0,
+                1 if channel_in_app_enabled else 0,
+                preferred_language, consent_status, now_iso,
+                final_text, consent_ip, now_iso, now_iso,
+            ))
+        conn.commit()
+        return {
+            "id": pref_id,
+            "case_id": case_id,
+            "user_id": user_id,
+            "phone_number": phone_number,
+            "channel_sms_enabled": channel_sms_enabled,
+            "channel_whatsapp_enabled": channel_whatsapp_enabled,
+            "channel_in_app_enabled": channel_in_app_enabled,
+            "preferred_language": preferred_language,
+            "consent_status": consent_status,
+            "consent_timestamp": now_iso,
+            "consent_version": "v1.0-statutory-notice",
+            "consent_text": final_text,
+            "consent_ip": consent_ip,
+            "updated_at": now_iso,
+        }
+    finally:
+        conn.close()
+
+
+def log_citizen_notification(
+    case_id: str,
+    channel: str,
+    recipient: str,
+    message: str,
+    status: str = "SIMULATED_DISPATCHED",
+    error_message: Optional[str] = None,
+) -> Dict[str, Any]:
+    log_id = f"NOTIF-LOG-{uuid.uuid4().hex[:8].upper()}"
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO citizen_notification_logs (
+                id, case_id, channel, recipient, message, status, dispatch_timestamp, error_message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (log_id, case_id, channel, recipient, message, status, now_iso, error_message))
+        conn.commit()
+        return {
+            "id": log_id,
+            "case_id": case_id,
+            "channel": channel,
+            "recipient": recipient,
+            "message": message,
+            "status": status,
+            "dispatch_timestamp": now_iso,
+            "error_message": error_message,
+        }
+    finally:
+        conn.close()
 
 
 # ── Domain Service & Repository Instances ──────────────────────────────────────

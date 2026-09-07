@@ -841,6 +841,218 @@ export async function fetchCitizenTimeline(): Promise<any[]> {
   return await res.json();
 }
 
+// ── Stage 11: Constrained Mobile-First Citizen Types & APIs ──────────────────
+
+export interface CitizenLanguageItem {
+  code: string;
+  name: string;
+  native_name: string;
+  is_authoritative: boolean;
+  legal_authority_note: string;
+}
+
+export interface CitizenUpcomingEvent {
+  event_type: string;
+  title: string;
+  event_date: string;
+  court_or_location: string;
+  instructions: string;
+}
+
+export interface CitizenMissingDocument {
+  document_type: string;
+  title: string;
+  why_needed: string;
+  how_to_submit: string;
+  urgency: "REQUIRED_BEFORE_HEARING" | "OPTIONAL_SUPPORTING";
+}
+
+export interface CitizenEntitledDocument {
+  id: string;
+  document_type: string;
+  title: string;
+  status: string;
+  uploaded_at?: string;
+  file_size_bytes: number;
+  file_size_formatted: string;
+  text_summary: string;
+  is_approved_for_citizen: boolean;
+}
+
+export interface CitizenAiExplanationData {
+  is_ai_generated: boolean;
+  disclaimer_type: string;
+  disclaimer_label: string;
+  disclaimer_text: string;
+  explanation_text: string;
+  derived_language: string;
+  is_derived_display: boolean;
+  authoritative_english_text: string;
+}
+
+export interface CitizenOverviewData {
+  portal_mode: "ACCUSED_USER" | "FAMILY_GUARDIAN";
+  accused_id: string;
+  accused_name: string;
+  case_reference: string;
+  court_name: string;
+  police_station: string;
+  current_known_status: {
+    status_code: string;
+    title: string;
+    detail: string;
+    authoritative_title: string;
+    authoritative_detail: string;
+    is_derived: boolean;
+    disclaimer: string;
+  };
+  filing_details: {
+    is_filed: boolean;
+    filing_status: string;
+    filing_reference: string;
+    court_name?: string;
+  };
+  release_details: {
+    is_released: boolean;
+    release_status: string;
+    verification_source: string;
+  };
+  upcoming_known_events: CitizenUpcomingEvent[];
+  legal_aid_support: {
+    is_assigned: boolean;
+    lawyer_name?: string | null;
+    organization: string;
+    contact_phone?: string;
+    panel_type?: string;
+    status_message?: string;
+    representation_cost: string;
+    office_address: string;
+  };
+  missing_documents_from_citizen: CitizenMissingDocument[];
+  approved_entitled_documents: CitizenEntitledDocument[];
+  ai_procedural_explanation: CitizenAiExplanationData;
+  language_meta: {
+    current_language: string;
+    supported_languages: CitizenLanguageItem[];
+    is_derived_display: boolean;
+    authoritative_language: string;
+    disclaimer: string;
+  };
+  notification_preferences: {
+    case_id: string;
+    user_id: string;
+    phone_number?: string;
+    channel_sms_enabled: boolean;
+    channel_whatsapp_enabled: boolean;
+    channel_in_app_enabled: boolean;
+    preferred_language: string;
+    consent_status: string;
+    consent_timestamp: string;
+    consent_version: string;
+    consent_text: string;
+  };
+  recent_citizen_requests: Array<{
+    id: string;
+    case_id: string;
+    request_type: string;
+    subject: string;
+    details: string;
+    status: string;
+    response_notes?: string;
+    created_at: string;
+  }>;
+  low_bandwidth_mode_supported: boolean;
+  support_helpline: string;
+  support_notice: string;
+}
+
+export async function fetchCitizenOverview(lang: string = "en"): Promise<CitizenOverviewData> {
+  const res = await authFetch(`${API_BASE_URL}/citizen/overview?lang=${encodeURIComponent(lang)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch citizen overview: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchCitizenLanguages(): Promise<CitizenLanguageItem[]> {
+  const res = await authFetch(`${API_BASE_URL}/citizen/languages`);
+  if (!res.ok) return [];
+  return await res.json();
+}
+
+export async function fetchCitizenEntitledDocuments(lang: string = "en"): Promise<CitizenEntitledDocument[]> {
+  const res = await authFetch(`${API_BASE_URL}/citizen/documents?lang=${encodeURIComponent(lang)}`);
+  if (!res.ok) return [];
+  return await res.json();
+}
+
+export async function fetchCitizenDocumentSummary(docId: string): Promise<{
+  id: string;
+  case_id: string;
+  document_type: string;
+  file_name: string;
+  text_preview: string;
+  file_size_formatted: string;
+  status: string;
+}> {
+  const res = await authFetch(`${API_BASE_URL}/citizen/documents/${encodeURIComponent(docId)}/summary`);
+  if (!res.ok) throw new Error("Failed to load document summary");
+  return await res.json();
+}
+
+export async function submitCitizenActionRequest(payload: {
+  request_type: string;
+  subject: string;
+  details: string;
+  target_document_type?: string;
+  discrepancy_field?: string;
+}): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/citizen/requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to submit citizen request: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchCitizenActionRequests(): Promise<any[]> {
+  const res = await authFetch(`${API_BASE_URL}/citizen/requests`);
+  if (!res.ok) return [];
+  return await res.json();
+}
+
+export async function fetchCitizenNotificationPreferences(): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/citizen/notification-preferences`);
+  if (!res.ok) throw new Error("Failed to load notification preferences");
+  return await res.json();
+}
+
+export async function updateCitizenNotificationPreferences(payload: {
+  phone_number?: string;
+  channel_sms_enabled: boolean;
+  channel_whatsapp_enabled: boolean;
+  channel_in_app_enabled: boolean;
+  preferred_language: string;
+  consent_status: string;
+  consent_text?: string;
+}): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/citizen/notification-preferences`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to update notification preferences");
+  }
+  return await res.json();
+}
+
 export async function fetchAccusedProfile(accusedId: string) {
   const res = await authFetch(`${API_BASE_URL}/accused/${encodeURIComponent(accusedId)}`);
   if (!res.ok) {

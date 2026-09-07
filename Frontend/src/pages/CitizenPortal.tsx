@@ -581,13 +581,26 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         </div>
 
         {/* Mandatory Statutory Caution Box */}
-        <div className="p-4 bg-card border-2 border-red-600/40 dark:border-red-500/40 rounded-xl text-xs flex items-start gap-3 shadow-xs">
-          <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-500 shrink-0 mt-0.5" strokeWidth={3} />
-          <div className="space-y-1">
-            <span className="inline-block px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-red-600/10 text-red-600 dark:text-red-400 border border-red-600/20">
+        <div
+          className="p-4 bg-white border-2 border-red-600 rounded-xl text-xs flex items-start gap-3 shadow-xs"
+          style={{ backgroundColor: "#FFFFFF", borderColor: "#DC2626" }}
+        >
+          <AlertTriangle
+            className="w-6 h-6 text-red-600 shrink-0 mt-0.5"
+            strokeWidth={3.5}
+            style={{ color: "#DC2626" }}
+          />
+          <div className="space-y-1.5">
+            <span
+              className="inline-block px-2.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider border border-red-600"
+              style={{ color: "#DC2626", borderColor: "#DC2626", backgroundColor: "#FFFFFF" }}
+            >
               Statutory Caution
             </span>
-            <p className="text-xs text-black dark:text-white font-medium leading-relaxed">
+            <p
+              className="text-xs font-semibold leading-relaxed"
+              style={{ color: "#000000" }}
+            >
               {data.ai_procedural_explanation.disclaimer_text}
             </p>
           </div>

@@ -122,15 +122,19 @@ def draft_bail_application(case: CaseRecord, retrieved_law: str) -> dict:
         },
     )
     res = gateway.execute(req)
-    if res.structured_data and hasattr(res.structured_data, "draft_text") and res.structured_data.draft_text:
-        drafted_document = res.structured_data.draft_text.strip()
-    elif res.content and "unavailable" not in res.content.lower():
-        drafted_document = res.content.strip()
+    candidate = None
+    if res.structured_data:
+        candidate = getattr(res.structured_data, "draft_text", None) or getattr(res.structured_data, "petition_body_text", None)
+    if not candidate and res.content and "offline" not in res.content.lower() and "unavailable" not in res.content.lower():
+        candidate = res.content.strip()
+
+    if candidate and len(candidate.strip()) > 50:
+        drafted_document = candidate.strip()
     else:
         # Fallback template requiring human sign-off
         drafted_document = (
             f"IN THE COURT OF {getattr(case, 'court_name', 'COMPETENT JURISDICTION')}\n\n"
-            f"APPLICATION FOR BAIL UNDER SECTION 479 BNSS\n"
+            f"APPLICATION FOR BAIL UNDER SECTION 479 OF THE BHARATIYA NAGARIK SURAKSHA SANHITA, 2023\n"
             f"IN THE MATTER OF: {case.name} (Case ID: {case.case_id})\n"
             f"Offense: {', '.join(case.offense_sections) if isinstance(case.offense_sections, list) else case.offense_sections}\n"
             f"Detention Duration: {case.custody_days} days\n\n"

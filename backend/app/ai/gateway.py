@@ -258,9 +258,13 @@ class AIGateway:
                 req.untrusted_document_context, document_name=req.document_id or "Attached Record"
             )
 
+        context_str = ""
+        if req.structured_context:
+            context_str = f"OFFICIAL VERIFIED FACTS (Use these exact names, case numbers, and citations in your response):\n{json.dumps(req.structured_context, indent=2)}\n\n"
+
         # 4. Construct Governed System Prompt & JSON Format Request
         system_prompt = self._build_system_prompt(policy, schema_cls, req.target_language)
-        user_prompt = f"{clean_prompt}\n\n{document_boundary}".strip()
+        user_prompt = f"{context_str}{clean_prompt}\n\n{document_boundary}".strip()
 
         # 5. Provider Execution with Failover
         provider_result: Optional[ProviderResult] = None

@@ -602,8 +602,14 @@ def _build_assessment(
         },
     )
     res = gateway.execute(req)
-    if res.structured_data and hasattr(res.structured_data, "synthesis_summary") and res.structured_data.synthesis_summary:
-        generated = res.structured_data.synthesis_summary.strip()
+    if res.structured_data:
+        summary = getattr(res.structured_data, "synthesis_summary", None) or getattr(res.structured_data, "legal_grounds_summary", None)
+        if summary:
+            generated = summary.strip()
+        elif res.content:
+            generated = res.content.strip()
+        else:
+            generated = "Automated legal assessment requires manual review of document records."
     elif res.content:
         generated = res.content.strip()
     else:

@@ -19,6 +19,11 @@ from app.auth.tokens import create_access_token
 from app.database import init_db, get_all_cases
 
 
+@pytest.fixture(autouse=True)
+def setup_db():
+    init_db()
+
+
 @pytest.fixture
 def client():
     return TestClient(app)

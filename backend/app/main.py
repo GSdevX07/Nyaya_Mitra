@@ -4845,7 +4845,7 @@ def get_hearings(
 @app.get("/reports", tags=["Reports"])
 def get_reports(
     current_user: AuthUser = Depends(require_role(
-        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.GOV_ADMIN, Role.DLSA_OFFICER,
         Role.JAIL_OFFICER, Role.SUPERVISING_LEGAL_OFFICER,
         Role.READ_ONLY_AUDITOR,
     )),
@@ -4853,7 +4853,16 @@ def get_reports(
     """
     Retrieve legal analytics, inmate metrics, and DLSA performance report.
     ALL metrics are derived from the canonical EligibilityAgent no duplicate logic.
+
+    Reports access:
+    - Allowed: DLSA, Supervisor, Gov, Auditor, Jail Officer
+    - Denied: Platform Admin (403)
     """
+    if current_user.role == Role.PLATFORM_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Platform Admin cannot access reports",
+        )
     cases = get_all_cases()
     if current_user.role in (Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER) and current_user.district and current_user.district.lower() != "all":
         dist = current_user.district.lower()

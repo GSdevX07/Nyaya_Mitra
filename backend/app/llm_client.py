@@ -38,6 +38,14 @@ _last_provider: str = "not-called"
 
 def get_last_provider() -> str:
     """Return the provider or model that produced the last response."""
+    try:
+        from app.ai import get_ai_gateway
+
+        gw = get_ai_gateway()
+        if gw.last_provider_name and gw.last_provider_name != "not-called":
+            return gw.last_model_name or gw.last_provider_name
+    except Exception:
+        pass
     return _last_provider
 
 

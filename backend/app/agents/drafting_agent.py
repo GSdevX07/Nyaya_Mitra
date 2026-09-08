@@ -77,11 +77,26 @@ def draft_bail_application(case: CaseRecord, retrieved_law: str) -> dict:
     Enforces prompt injection quarantine and input neutralization.
     """
     import json
-    raw_case_json = json.dumps(case.model_dump(), default=str)
+    advocate_display = case.assigned_lawyer or "DLSA Legal Aid Panel Counsel"
+    draft_facts = {
+        "case_id": case.case_id,
+        "name": case.name,
+        "offense_sections": case.offense_sections,
+        "fir_number": getattr(case, "fir_number", None) or "Not Recorded",
+        "police_station": getattr(case, "police_station", None) or "Not Recorded",
+        "court_name": getattr(case, "court_name", None) or "Court of Competent Jurisdiction",
+        "district": getattr(case, "district", None) or "Central District",
+        "arrest_date": getattr(case, "arrest_date", None),
+        "custody_days": case.custody_days,
+        "max_sentence_days_for_offense": case.max_sentence_days_for_offense,
+        "jail_location": getattr(case, "jail_location", None),
+        "present_docs": case.present_docs,
+        "required_docs": case.required_docs,
+        "assigned_lawyer": advocate_display,
+    }
+    raw_case_json = json.dumps(draft_facts, default=str)
     safe_case_facts = sanitize_untrusted_text(raw_case_json)
     safe_retrieved_law = sanitize_untrusted_text(retrieved_law)
-
-    advocate_display = case.assigned_lawyer or "DLSA Legal Aid Panel Counsel"
     present_str = ", ".join(case.present_docs or [])
     missing_docs = [d for d in (case.required_docs or []) if d not in (case.present_docs or [])]
     missing_str = ", ".join(missing_docs) if missing_docs else "None"

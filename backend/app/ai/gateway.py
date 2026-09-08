@@ -99,6 +99,8 @@ class AIGateway:
         ]
         if "deterministic_fallback" not in self._provider_order:
             self._provider_order.append("deterministic_fallback")
+        self.last_provider_name: str = "not-called"
+        self.last_model_name: str = "not-called"
 
     @classmethod
     def get_instance(cls) -> "AIGateway":
@@ -325,7 +327,10 @@ class AIGateway:
             fallback_triggered = True
             fallback_reason = f"Schema validation fallback: {parse_err}"
             fallback_dict = self.fallback_provider.synthesize_capability_fallback(
-                req.capability, req.structured_context, req.untrusted_document_context or "", req.target_language
+                req.capability,
+                req.structured_context,
+                req.untrusted_document_context or req.prompt_input or "",
+                req.target_language,
             )
             structured_data = schema_cls(**fallback_dict)
             status = GatewayStatus.FALLBACK_USED
@@ -455,6 +460,9 @@ Output ONLY the JSON object. Do not include markdown code block fencing (e.g. no
             })
         except Exception as log_err:
             logger.warning(f"Could not persist AI governance log: {log_err}")
+
+        self.last_provider_name = provider_result.provider_name
+        self.last_model_name = provider_result.model_name
 
         return GatewayResponse(
             request_id=req_id,

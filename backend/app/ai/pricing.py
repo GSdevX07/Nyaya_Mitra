@@ -71,6 +71,13 @@ PRICING_REGISTRY: List[ModelPricingRule] = [
     ),
     ModelPricingRule(
         provider="groq",
+        model_pattern=r"(?i)qwen",
+        input_cost_per_1k_inr=0.015,
+        output_cost_per_1k_inr=0.020,
+        description="Groq Qwen 27B Tier",
+    ),
+    ModelPricingRule(
+        provider="groq",
         model_pattern=r".*",
         input_cost_per_1k_inr=0.035,
         output_cost_per_1k_inr=0.045,

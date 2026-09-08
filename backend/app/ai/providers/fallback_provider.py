@@ -139,10 +139,17 @@ class DeterministicFallbackProvider(BaseProvider):
             if isinstance(verified_statutes, str):
                 verified_statutes = [verified_statutes]
 
+            retrieved_law = str(
+                structured_context.get("retrieved_law")
+                or structured_context.get("retrieved_statutes")
+                or structured_context.get("retrieved_sources")
+                or ""
+            )
             is_479 = (
                 any("479" in str(s) for s in (list(sections) if isinstance(sections, list) else [str(sections)]))
                 or any("479" in str(s) for s in verified_statutes)
                 or ("479" in untrusted_text)
+                or ("479" in retrieved_law)
                 or ("479" in str(structured_context.get("statutory_provision", "")))
             )
             pet_title = (
@@ -223,10 +230,17 @@ class DeterministicFallbackProvider(BaseProvider):
             if isinstance(verified_statutes, str):
                 verified_statutes = [verified_statutes]
 
+            retrieved_law = str(
+                structured_context.get("retrieved_law")
+                or structured_context.get("retrieved_statutes")
+                or structured_context.get("retrieved_sources")
+                or ""
+            )
             is_479 = (
                 any("479" in str(s) for s in (list(sections) if isinstance(sections, list) else [str(sections)]))
                 or any("479" in str(s) for s in verified_statutes)
                 or ("479" in untrusted_text)
+                or ("479" in retrieved_law)
                 or ("479" in str(structured_context.get("statutory_provision", "")))
             )
             retrieved_sources = ["src_bnss_2023_sec_479"] if is_479 else []

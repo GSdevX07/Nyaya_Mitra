@@ -27,9 +27,15 @@ class GroqProvider(BaseProvider):
 
     @property
     def candidate_models(self) -> List[str]:
-        configured_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+        configured_model = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
         models = [configured_model]
-        for m in ["openai/gpt-oss-20b", "openai/gpt-oss-120b"]:
+        for m in [
+            "qwen/qwen3.8-27b",
+            "qwen/qwen3.6-27b",
+            "groq/compound-mini",
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+        ]:
             if m not in models:
                 models.append(m)
         return models

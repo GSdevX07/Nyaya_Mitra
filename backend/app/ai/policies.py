@@ -38,17 +38,18 @@ def redact_sensitive_pii(text: str) -> str:
 # ── 2. PROMPT INJECTION DEFENSE ─────────────────────────────────────────────
 
 _INJECTION_PATTERNS = [
-    re.compile(r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions", re.IGNORECASE),
-    re.compile(r"disregard\s+(all\s+)?(previous|prior|above)\s+instructions", re.IGNORECASE),
-    re.compile(r"you\s+are\s+now\s+(a|an|in)\s+", re.IGNORECASE),
-    re.compile(r"system\s*prompt", re.IGNORECASE),
+    re.compile(r"\bignore\s+(all\s+)?(previous|prior|above)\s+instructions\b", re.IGNORECASE),
+    re.compile(r"\bdisregard\s+(all\s+)?(previous|prior|above)\s+instructions\b", re.IGNORECASE),
+    re.compile(r"\byou\s+are\s+now\s+(a|an|in)\s+", re.IGNORECASE),
+    re.compile(r"\bsystem\s*prompt\b", re.IGNORECASE),
     re.compile(r"\[/?inst\]", re.IGNORECASE),
     re.compile(r"<\/?sys>", re.IGNORECASE),
-    re.compile(r"dan\s+mode", re.IGNORECASE),
-    re.compile(r"override\s+guidelines", re.IGNORECASE),
-    re.compile(r"forget\s+(everything|all\s+rules)", re.IGNORECASE),
-    re.compile(r"act\s+as\s+(unrestricted|developer\s+mode)", re.IGNORECASE),
-    re.compile(r"grant\s+automatic\s+bail", re.IGNORECASE),
+    re.compile(r"\bdan\s+mode\b", re.IGNORECASE),
+    re.compile(r"\boverride\s+guidelines\b", re.IGNORECASE),
+    re.compile(r"\bforget\s+(everything|all\s+rules)\b", re.IGNORECASE),
+    re.compile(r"\bact\s+as\s+(unrestricted|developer\s+mode)\b", re.IGNORECASE),
+    re.compile(r"\bgrant\s+automatic\s+bail\b", re.IGNORECASE),
+    re.compile(r"\bjailbreak\b", re.IGNORECASE),
 ]
 
 

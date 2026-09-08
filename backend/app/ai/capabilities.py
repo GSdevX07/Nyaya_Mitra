@@ -39,6 +39,7 @@ class CapabilityPolicy(BaseModel):
     required_human_approval: str
     abstention_conditions: List[str]
     default_prompt_version: str
+    ocr_confidence_threshold: float = 0.70
     requires_structured_output: bool = True
     max_output_tokens: int = 1000
     temperature: float = 0.1
@@ -84,6 +85,7 @@ CAPABILITY_POLICIES: Dict[AICapability, CapabilityPolicy] = {
             "Missing linked case reference or unverified record identity",
         ],
         default_prompt_version="v1.1.0-doc-summary",
+        ocr_confidence_threshold=0.65,
         max_output_tokens=300,
         temperature=0.1,
     ),
@@ -205,6 +207,7 @@ CAPABILITY_POLICIES: Dict[AICapability, CapabilityPolicy] = {
             "Offences punishable by death or life imprisonment present on charge sheet",
         ],
         default_prompt_version="v2.1.0-draft-prep",
+        ocr_confidence_threshold=0.75,
         max_output_tokens=1500,
         temperature=0.1,
     ),
@@ -264,6 +267,7 @@ CAPABILITY_POLICIES: Dict[AICapability, CapabilityPolicy] = {
             "Security screening flags malicious payload or file format mismatch",
         ],
         default_prompt_version="v1.0.0-data-quality",
+        ocr_confidence_threshold=0.50,
         max_output_tokens=500,
         temperature=0.05,
     ),

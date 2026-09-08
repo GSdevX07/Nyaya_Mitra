@@ -19,6 +19,7 @@ from app.ai.schemas import (
 )
 from app.ai.policies import redact_sensitive_pii, detect_prompt_injection, build_secure_document_boundary
 from app.ai.gateway import AIGateway, get_ai_gateway
+from app.ai.pricing import calculate_token_cost, get_model_pricing, ModelPricingRule
 
 __all__ = [
     "AICapability",
@@ -42,4 +43,7 @@ __all__ = [
     "build_secure_document_boundary",
     "AIGateway",
     "get_ai_gateway",
+    "calculate_token_cost",
+    "get_model_pricing",
+    "ModelPricingRule",
 ]

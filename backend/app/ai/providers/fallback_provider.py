@@ -30,7 +30,7 @@ class DeterministicFallbackProvider(BaseProvider):
     ) -> ProviderResult:
         start_t = time.perf_counter()
         content = (
-            "APPLICATION FOR REGULAR BAIL UNDER SECTION 479 OF THE BHARATIYA NAGARIK SURAKSHA SANHITA, 2023.\n"
+            "STATUTORY LEGAL DOSSIER & PROCEDURAL SUMMARY\n"
             "Official case facts extracted deterministically from verified court and jail records. "
             "Automated neural generation is currently offline; a qualified legal aid officer must review this dossier."
         )
@@ -131,6 +131,22 @@ class DeterministicFallbackProvider(BaseProvider):
             }
 
         elif capability == AICapability.DRAFT_PREPARATION:
+            is_479 = "479" in str(sections) or "479" in untrusted_text or "479" in str(structured_context) or custody_days >= 180 or "bail" in untrusted_text.lower()
+            pet_title = (
+                "APPLICATION FOR REGULAR BAIL UNDER SECTION 479 OF THE BHARATIYA NAGARIK SURAKSHA SANHITA, 2023."
+                if is_479 else
+                "APPLICATION FOR STATUTORY RELIEF / REGULAR BAIL."
+            )
+            ground_2 = (
+                "2. That the applicant satisfies statutory detention fraction criteria under Section 479 BNSS.\n"
+                if is_479 else
+                "2. That the applicant has completed significant detention pending trial and is eligible for bail.\n"
+            )
+            retrieved_sources = ["src_bnss_2023_sec_479"] if is_479 else []
+            citations = [f"Dossier:{case_id}"]
+            if is_479:
+                citations.append("src_bnss_2023_sec_479")
+
             body = (
                 f"IN THE COURT OF {court.upper()}\n\n"
                 f"IN THE MATTER OF:\n"
@@ -140,17 +156,17 @@ class DeterministicFallbackProvider(BaseProvider):
                 f"FIR NO: {fir}\n"
                 f"POLICE STATION: {ps.upper()}\n"
                 f"U/S: {sec_str}\n\n"
-                f"APPLICATION FOR REGULAR BAIL UNDER SECTION 479 OF THE BHARATIYA NAGARIK SURAKSHA SANHITA, 2023.\n\n"
+                f"{pet_title}\n\n"
                 f"MOST RESPECTFULLY SHOWETH:\n"
                 f"1. That the applicant has completed {custody_days} calendar days in judicial detention.\n"
-                f"2. That the applicant satisfies statutory detention fraction criteria under Section 479 BNSS.\n"
+                f"{ground_2}"
                 f"3. That the applicant undertakes to abide by all conditions imposed by this Hon'ble Court.\n\n"
                 f"PRAYER:\n"
                 f"It is therefore prayed that this Hon'ble Court may be pleased to release the applicant on bail."
             )
             return {
                 "case_reference": case_id,
-                "petition_type": "Bail Application under Section 479 BNSS",
+                "petition_type": "Bail Application under Section 479 BNSS" if is_479 else "Statutory Bail Application",
                 "jurisdictional_court": court,
                 "designated_counsel": counsel,
                 "petition_body_text": body,
@@ -163,7 +179,8 @@ class DeterministicFallbackProvider(BaseProvider):
                 "requires_advocate_signature": True,
                 "counsel_signature_block": f"Advocate: {counsel}\nLegal Aid Panel Counsel\nDistrict Legal Services Authority",
                 "rationale": {
-                    "source_citations": [f"Dossier:{case_id}", "BNSS:479"],
+                    "source_citations": citations,
+                    "retrieved_legal_source_ids": retrieved_sources,
                     "extracted_facts": {"days": custody_days, "counsel": counsel},
                     "rule_results": ["Rule:Statutory_Bail_Draft_Template_Generated"],
                     "decision_explanation": "Draft prepared using verified statutory template for advocate review.",
@@ -171,27 +188,43 @@ class DeterministicFallbackProvider(BaseProvider):
             }
 
         elif capability == AICapability.RETRIEVAL_ASSISTED_LEGAL_SYNTHESIS:
-            grounds = (
-                f"Statutory grounds analysis under Section 479 of the Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023: "
-                f"Accused {name} has completed {custody_days} calendar days in judicial detention for alleged offenses under {sec_str}. "
-                f"Based on certified dockets pending before {court}, statutory detention threshold criteria are satisfied for regular bail consideration."
-            )
+            is_479 = "479" in str(sections) or "479" in untrusted_text or "479" in str(structured_context) or custody_days >= 180
+            retrieved_sources = ["src_bnss_2023_sec_479"] if is_479 else []
+            citations = [f"Dossier:{case_id}"]
+            if is_479:
+                citations.append("src_bnss_2023_sec_479")
+
+            if is_479:
+                grounds = (
+                    f"Statutory grounds analysis under Section 479 of the Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023: "
+                    f"Accused {name} has completed {custody_days} calendar days in judicial detention for alleged offenses under {sec_str}. "
+                    f"Based on certified dockets pending before {court}, statutory detention threshold criteria are satisfied for regular bail consideration."
+                )
+                precedents = [{"title": "Section 479 BNSS Mandatory Bail Guidelines", "citation": "BNSS 2023 s. 479"}]
+                trans_notes = "Statutory relief governed under Section 479 of the Bharatiya Nagarik Suraksha Sanhita, 2023."
+            else:
+                grounds = (
+                    f"Statutory grounds analysis for case {case_id}: "
+                    f"Accused {name} has completed {custody_days} calendar days in detention under {sec_str} pending before {court}."
+                )
+                precedents = []
+                trans_notes = None
+
             return {
                 "case_reference": case_id,
                 "reporting_period": "Current Review Period",
                 "applicable_statutory_sections": sections if isinstance(sections, list) else [str(sections)],
-                "binding_precedents": [
-                    {"title": "Section 479 BNSS Mandatory Bail Guidelines", "citation": "BNSS 2023 s. 479"}
-                ],
+                "binding_precedents": precedents,
                 "legal_grounds_summary": grounds,
                 "synthesis_summary": grounds,
-                "statutory_transition_notes": "Statutory relief governed under Section 479 of the Bharatiya Nagarik Suraksha Sanhita, 2023.",
+                "statutory_transition_notes": trans_notes,
                 "unresolved_legal_questions": [],
                 "rationale": {
-                    "source_citations": [f"Dossier:{case_id}", "BNSS_2023_Sec_479"],
+                    "source_citations": citations,
+                    "retrieved_legal_source_ids": retrieved_sources,
                     "extracted_facts": {"custody_days": custody_days, "sections": sec_str, "court": court},
-                    "rule_results": ["Rule:Section_479_Eligibility_Verified"],
-                    "decision_explanation": "Extracted factual detention duration and mapped statutory grounds under Section 479 BNSS.",
+                    "rule_results": ["Rule:Section_479_Eligibility_Verified"] if is_479 else ["Rule:Statutory_Grounds_Verified"],
+                    "decision_explanation": "Extracted factual detention duration and mapped statutory grounds.",
                 },
             }
 
@@ -214,6 +247,7 @@ class DeterministicFallbackProvider(BaseProvider):
                 "routing_destination": "DLSA_SUPERVISOR_QUEUE",
                 "rationale": {
                     "source_citations": [f"Dossier:{case_id}"],
+                    "retrieved_legal_source_ids": [],
                     "extracted_facts": {"custody_days": custody_days, "max_sentence": max_days},
                     "rule_results": ["Rule:Custody_Limit_Verification_Complete"],
                     "decision_explanation": "Deterministic bounds check evaluated across custody records.",
@@ -232,6 +266,7 @@ class DeterministicFallbackProvider(BaseProvider):
                 "requires_clerk_verification": ocr_conf < 0.70,
                 "rationale": {
                     "source_citations": ["OCR_Telemetry"],
+                    "retrieved_legal_source_ids": [],
                     "extracted_facts": {"ocr_confidence": ocr_conf},
                     "rule_results": ["Rule:OCR_Quality_Threshold_Check"],
                     "decision_explanation": "Evaluated document quality using standard confidence criteria.",
@@ -240,35 +275,35 @@ class DeterministicFallbackProvider(BaseProvider):
 
         elif capability == AICapability.ADMINISTRATIVE_SUMMARIZATION:
             return {
-                "reporting_period": "Current Operational Quarter",
-                "facility_or_district": structured_context.get("district", "Central District"),
-                "total_active_undertrials": 1,
-                "potentially_eligible_479_count": 1 if custody_days >= 180 else 0,
-                "backlog_summary": "Deterministic statistical rollup generated from database ledger.",
-                "compliance_percentage": 100.0,
-                "bottleneck_stages": ["Lawyer Review Queue"],
+                "reporting_period": structured_context.get("reporting_period", "Current Operational Quarter"),
+                "facility_or_district": structured_context.get("district") or structured_context.get("facility") or "NOT_SPECIFIED",
+                "total_active_undertrials": int(structured_context.get("total_active_undertrials", 0)),
+                "potentially_eligible_479_count": int(structured_context.get("potentially_eligible_479_count", 0)),
+                "backlog_summary": structured_context.get("backlog_summary") or "Deterministic statistical rollup generated from database ledger.",
+                "compliance_percentage": structured_context.get("compliance_percentage"),
+                "bottleneck_stages": structured_context.get("bottleneck_stages", []),
                 "rationale": {
                     "source_citations": ["Cases_Ledger"],
-                    "extracted_facts": {"undertrials": 1},
+                    "retrieved_legal_source_ids": [],
+                    "extracted_facts": {"undertrials": int(structured_context.get("total_active_undertrials", 0))},
                     "rule_results": ["Rule:Ledger_Rollup_Computed"],
-                    "decision_explanation": "Operational aggregates compiled deterministically.",
+                    "decision_explanation": "Operational aggregates compiled deterministically without fabrication.",
                 },
             }
 
         else:
             grounds = (
-                f"Statutory analysis: Section 479 BNSS (Bail) applicable for case {case_id} "
-                f"pending detailed court record review."
+                f"Statutory analysis for case {case_id} pending detailed court record review."
             )
             return {
                 "case_reference": case_id,
-                "reporting_period": "Current Operational Quarter",
-                "facility_or_district": structured_context.get("district", "Central District"),
-                "total_active_undertrials": 1,
-                "potentially_eligible_479_count": 1 if custody_days >= 180 else 0,
-                "backlog_summary": "Deterministic statistical rollup generated from database ledger.",
-                "compliance_percentage": 100.0,
-                "bottleneck_stages": ["Lawyer Review Queue"],
+                "reporting_period": structured_context.get("reporting_period", "Current Operational Quarter"),
+                "facility_or_district": structured_context.get("district") or structured_context.get("facility") or "NOT_SPECIFIED",
+                "total_active_undertrials": int(structured_context.get("total_active_undertrials", 0)),
+                "potentially_eligible_479_count": int(structured_context.get("potentially_eligible_479_count", 0)),
+                "backlog_summary": structured_context.get("backlog_summary") or "Deterministic statistical rollup generated from database ledger.",
+                "compliance_percentage": structured_context.get("compliance_percentage"),
+                "bottleneck_stages": structured_context.get("bottleneck_stages", []),
                 "applicable_statutory_sections": sections if isinstance(sections, list) else [str(sections)],
                 "binding_precedents": [],
                 "legal_grounds_summary": grounds,
@@ -276,7 +311,8 @@ class DeterministicFallbackProvider(BaseProvider):
                 "statutory_transition_notes": "Statutory analysis pending detailed court record review.",
                 "unresolved_legal_questions": [],
                 "rationale": {
-                    "source_citations": [f"Dossier:{case_id}"],
+                    "source_citations": [f"Dossier:{case_id}"] if case_id != "REF-PENDING" else [],
+                    "retrieved_legal_source_ids": [],
                     "extracted_facts": {"custody_days": custody_days},
                     "rule_results": ["Rule:Generic_Fallback_Generated"],
                     "decision_explanation": "Procedural fallback generated from database ledger.",

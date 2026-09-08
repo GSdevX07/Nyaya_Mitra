@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Type, Tuple
 
 from app.ai.capabilities import AICapability, TrustTier, get_capability_policy
+from app.ai.pricing import calculate_token_cost
 from app.ai.schemas import (
     GatewayStatus,
     GatewayRequest,
@@ -139,11 +140,13 @@ class AIGateway:
                 f"Input has been quarantined to protect system safety; manual legal review required."
             )
 
-        # 2. Low OCR Confidence Guardrail
-        if req.ocr_confidence < 0.70:
-            logger.info(f"Low OCR confidence ({req.ocr_confidence}) for doc {req.document_id}; flagging verification.")
+        # 2. Capability-Driven OCR Confidence Guardrail
+        policy = get_capability_policy(req.capability)
+        threshold = getattr(policy, "ocr_confidence_threshold", 0.70)
+        if req.ocr_confidence < threshold:
+            logger.info(f"Low OCR confidence ({req.ocr_confidence}) for doc {req.document_id}; capability threshold is {threshold}; flagging verification.")
             return True, "LOW_OCR_CONFIDENCE", (
-                f"Document text extraction confidence ({req.ocr_confidence:.2f}) is below standard threshold (0.70). "
+                f"Document text extraction confidence ({req.ocr_confidence:.2f}) is below capability threshold ({threshold:.2f}). "
                 f"Manual verification of certified court copy is required before relying on extracted facts."
             )
 
@@ -218,7 +221,7 @@ class AIGateway:
                 latency_ms=(time.perf_counter() - start_time) * 1000,
                 fallback_triggered=True,
                 fallback_reason="RATE_LIMIT_EXCEEDED",
-                needs_human_review=False,
+                needs_human_review=True,
             )
 
         # 2. Pre-flight Abstention Screening
@@ -266,32 +269,43 @@ class AIGateway:
         system_prompt = self._build_system_prompt(policy, schema_cls, req.target_language)
         user_prompt = f"{context_str}{clean_prompt}\n\n{document_boundary}".strip()
 
-        # 5. Provider Execution with Failover
+        # 5. Provider Execution with Exponential Backoff & Failover
         provider_result: Optional[ProviderResult] = None
         fallback_triggered = False
         fallback_reason: Optional[str] = None
+        MAX_RETRIES = 2
+        RETRY_BACKOFF_MS = 250
+        RETRY_JITTER_MS = 50
 
         for p_name in self._provider_order:
             provider = self.providers.get(p_name)
             if not provider or not provider.is_available():
                 continue
 
-            try:
-                provider_result = provider.generate(
-                    prompt=user_prompt,
-                    system=system_prompt,
-                    max_tokens=policy.max_output_tokens,
-                    temperature=policy.temperature,
-                )
-                if provider.trust_tier != TrustTier.CLOUD_GENAI:
-                    fallback_triggered = True
-                    fallback_reason = f"Downstream provider {p_name} activated"
+            for attempt in range(MAX_RETRIES + 1):
+                try:
+                    provider_result = provider.generate(
+                        prompt=user_prompt,
+                        system=system_prompt,
+                        max_tokens=policy.max_output_tokens,
+                        temperature=policy.temperature,
+                    )
+                    if provider.trust_tier != TrustTier.CLOUD_GENAI:
+                        fallback_triggered = True
+                        fallback_reason = f"Downstream provider {p_name} activated"
+                    break
+                except Exception as exc:
+                    if attempt < MAX_RETRIES:
+                        import random
+                        sleep_s = (RETRY_BACKOFF_MS * (2 ** attempt) + random.uniform(0, RETRY_JITTER_MS)) / 1000.0
+                        logger.warning(f"AI Provider '{p_name}' attempt {attempt + 1} failed: {exc}. Retrying in {sleep_s:.3f}s...")
+                        time.sleep(sleep_s)
+                    else:
+                        logger.warning(f"AI Provider '{p_name}' failed after {MAX_RETRIES + 1} attempts: {exc}. Trying next candidate.")
+                        fallback_triggered = True
+                        fallback_reason = f"Provider '{p_name}' error: {exc}"
+            if provider_result:
                 break
-            except Exception as exc:
-                logger.warning(f"AI Provider '{p_name}' failed: {exc}. Trying next candidate.")
-                fallback_triggered = True
-                fallback_reason = f"Provider '{p_name}' error: {exc}"
-                continue
 
         # If all neural providers failed, use deterministic fallback
         if not provider_result:
@@ -385,8 +399,13 @@ Output ONLY the JSON object. Do not include markdown code block fencing (e.g. no
         needs_human_review: bool = False,
         abstention_reason: Optional[str] = None,
     ) -> GatewayResponse[Any]:
-        # Estimate cost in INR (Groq GPT-OSS-120B ~ ₹0.05 per 1K tokens)
-        cost_inr = round(((provider_result.input_tokens + provider_result.output_tokens) / 1000.0) * 0.05, 4)
+        # Configurable pricing computation
+        cost_inr = calculate_token_cost(
+            provider_result.provider_name,
+            provider_result.model_name,
+            provider_result.input_tokens,
+            provider_result.output_tokens,
+        )
 
         # Extract concise rationale without CoT
         rationale_dict = {}
@@ -397,8 +416,15 @@ Output ONLY the JSON object. Do not include markdown code block fencing (e.g. no
             elif isinstance(r, dict):
                 rationale_dict = r
 
-        source_docs = [req.document_id] if req.document_id else []
-        legal_sources = rationale_dict.get("source_citations", [])
+        source_docs = list(req.source_document_identifiers or [])
+        if req.document_id and req.document_id not in source_docs:
+            source_docs.append(req.document_id)
+
+        legal_sources = (
+            rationale_dict.get("retrieved_legal_source_ids")
+            or rationale_dict.get("source_citations")
+            or []
+        )
 
         # Persist audit record asynchronously / via DB
         try:

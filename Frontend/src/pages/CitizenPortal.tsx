@@ -20,6 +20,7 @@ import type {
   CitizenEntitledDocument,
 } from "../lib/api";
 import { RoleEvidenceProvenanceModal } from "../components/RoleEvidenceProvenanceModal";
+import { getCitizenTranslation } from "../lib/citizenI18n";
 
 interface CitizenPortalProps {
   mode?: "accused" | "family";
@@ -67,6 +68,9 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
   const [previewDoc, setPreviewDoc] = useState<CitizenEntitledDocument | null>(null);
   const [previewDetails, setPreviewDetails] = useState<any>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+
+  // Localization Dictionary for current active language
+  const t = getCitizenTranslation(lang);
 
   const handleOpenTextSummary = async (doc: CitizenEntitledDocument) => {
     setPreviewDoc(doc);
@@ -118,29 +122,32 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
     try {
       const chain = await fetchEvidenceChain(doc.id);
       if (chain) {
-        setProvenanceData({
-          ...initialMetadata,
-          ...chain,
-          document_name: chain.document_name || doc.title,
-          case_reference: chain.case_reference || initialMetadata.case_reference,
-          verification_status: chain.verification_status || chain.simple_status || initialMetadata.verification_status,
-          source_authority: chain.source_authority || initialMetadata.source_authority,
-          uploaded_by: chain.uploaded_by || initialMetadata.uploaded_by,
-          uploaded_at: chain.uploaded_at || initialMetadata.uploaded_at,
-          version_history:
-            chain.version_history && chain.version_history.length > 0
-              ? chain.version_history
-              : initialMetadata.version_history,
-        });
+        setProvenanceData((prev: any) => ({
+          ...prev,
+          verification_status: chain.tamper_evident_valid ? "Certified Untampered" : "Integrity Flagged",
+          integrity_status: chain.tamper_evident_valid ? "Cryptographically Certified" : "Integrity Verification Pending",
+          version_history: chain.chain_events?.map((ev: any, idx: number) => ({
+            version_number: `V${idx + 1}`,
+            recorded_at: ev.timestamp,
+            uploader: ev.actor_name || "Official Clerk",
+            stage: ev.stage_action,
+            status: ev.status || "Verified",
+          })) || prev.version_history,
+        }));
       }
     } catch (err) {
-      console.warn("Evidence chain server fetch fallback:", err);
+      console.warn("Evidence chain not available for citizen view:", err);
     } finally {
       setProvenanceLoading(false);
     }
   };
 
-  // Monitor network connectivity
+  const toggleLowBandwidth = () => {
+    const nextVal = !isLowBandwidth;
+    setIsLowBandwidth(nextVal);
+    localStorage.setItem("nyaya_low_bandwidth", String(nextVal));
+  };
+
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
@@ -152,49 +159,40 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
     };
   }, []);
 
-  // Save low bandwidth toggle
-  const toggleLowBandwidth = () => {
-    const next = !isLowBandwidth;
-    setIsLowBandwidth(next);
-    localStorage.setItem("nyaya_low_bandwidth", next ? "true" : "false");
-  };
-
-  // Load Languages
   useEffect(() => {
-    fetchCitizenLanguages()
-      .then((langs) => {
-        if (langs && langs.length > 0) setLanguages(langs);
-      })
-      .catch(() => {});
+    async function loadLangs() {
+      try {
+        const list = await fetchCitizenLanguages();
+        setLanguages(list);
+      } catch (err) {
+        console.warn("Failed to load language list:", err);
+      }
+    }
+    loadLangs();
   }, []);
 
-  // Fetch Overview with Caching
-  const loadOverview = async (targetLang: string = lang) => {
+  const loadOverview = async (targetLang: string) => {
     setLoading(true);
     setErrorStatus(null);
     try {
       const res = await fetchCitizenOverview(targetLang);
       setData(res);
-      setNotifPhone(res.notification_preferences?.phone_number || "");
-      setNotifSms(res.notification_preferences?.channel_sms_enabled ?? true);
-      setNotifWhatsapp(res.notification_preferences?.channel_whatsapp_enabled ?? true);
-      setNotifInApp(res.notification_preferences?.channel_in_app_enabled ?? true);
-      const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      setLastSyncTime(timeStr);
+      setLastSyncTime(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       try {
-        localStorage.setItem(`nyaya_citizen_cache_${targetLang}`, JSON.stringify(res));
-      } catch {}
+        localStorage.setItem(`citizen_cache_${user?.role}`, JSON.stringify(res));
+      } catch (e) {
+        // Storage limit safely ignored
+      }
     } catch (err: any) {
-      console.warn("Failed to load live overview, checking cache:", err);
-      if (err?.message?.includes("404")) {
-        setErrorStatus(404);
-      } else {
-        const cached = localStorage.getItem(`nyaya_citizen_cache_${targetLang}`);
+      console.error("Failed to load citizen overview:", err);
+      setErrorStatus(err?.status || 500);
+      try {
+        const cached = localStorage.getItem(`citizen_cache_${user?.role}`);
         if (cached) {
-          try {
-            setData(JSON.parse(cached));
-          } catch {}
+          setData(JSON.parse(cached));
         }
+      } catch (e) {
+        // Ignore cache retrieval errors
       }
     } finally {
       setLoading(false);
@@ -225,7 +223,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         target_document_type: actionType === "REQUEST_DOCUMENT_COPY" ? actionDocType : undefined,
         discrepancy_field: actionType === "FLAG_INCORRECT_INFO" ? actionField : undefined,
       });
-      setActionSuccessMsg("Request submitted successfully to DLSA Legal Aid Desk.");
+      setActionSuccessMsg(t.actionModal.successMsg);
       setActionTrackingId(res.id || res.task_id || "REQ-SUBMITTED");
       setActionSubject("");
       setActionDetails("");
@@ -251,7 +249,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         consent_status: "OPTED_IN",
         consent_text: "I consent to receive case status updates and legal-aid notices under the Legal Services Authorities Act, 1987.",
       });
-      setNotifSavedMsg("Preferences & statutory consent updated successfully.");
+      setNotifSavedMsg(t.notifModal.savedMsg);
       setTimeout(() => setNotifSavedMsg(null), 3000);
       loadOverview(lang);
     } catch (err: any) {
@@ -263,28 +261,28 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
 
   const isFamily = mode === "family" || user?.role === "FAMILY_GUARDIAN";
 
-  // Status Badge Helper matching website palette
+  // Status Badge Helper matching website palette and dynamic translation
   const getStatusBadge = (statusCode: string) => {
     switch (statusCode) {
       case "UNDER_REVIEW":
-        return { label: "UNDER INITIAL REVIEW", color: "bg-muted text-foreground border-border" };
+        return { label: t.statusBadges.underReview, color: "bg-muted text-foreground border-border" };
       case "ELIGIBLE_FOR_REVIEW":
       case "ELIGIBLE":
-        return { label: "ELIGIBLE UNDER SEC 479", color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" };
+        return { label: t.statusBadges.eligible479, color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" };
       case "COUNSEL_ASSIGNED":
       case "ASSIGNED":
-        return { label: "COUNSEL ASSIGNED", color: "bg-muted text-foreground border-border" };
+        return { label: t.statusBadges.counselAssigned, color: "bg-muted text-foreground border-border" };
       case "READY_FOR_FILING":
       case "APPROVED_READY_FOR_FILING":
-        return { label: "DRAFT APPROVED • PENDING FILING", color: "bg-rose-500/10 text-rose-600 border-rose-500/20" };
+        return { label: t.statusBadges.readyForFiling, color: "bg-rose-500/10 text-rose-600 border-rose-500/20" };
       case "FILED_IN_COURT":
       case "FILED":
-        return { label: "FILED IN COURT", color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" };
+        return { label: t.statusBadges.filedInCourt, color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" };
       case "COURT_ORDER_RECEIVED":
-        return { label: "COURT BAIL ORDER ISSUED", color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" };
+        return { label: t.statusBadges.courtOrderReceived, color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" };
       case "RELEASE_EXECUTED":
       case "RELEASED":
-        return { label: "PRISON RELEASE EXECUTED", color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" };
+        return { label: t.statusBadges.releaseExecuted, color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" };
       default:
         return { label: statusCode, color: "bg-secondary text-foreground border-border" };
     }
@@ -295,7 +293,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
       <div className="p-8 max-w-4xl mx-auto flex flex-col items-center justify-center min-h-[50vh] gap-3 text-center">
         <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
         <p className="text-sm font-serif text-muted-foreground">
-          Loading authorized legal aid record...
+          {t.emptyStates.loadingRecord}
         </p>
       </div>
     );
@@ -307,10 +305,10 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         <div className="bg-card border-2 border-border rounded-xl text-center p-8 space-y-4 shadow-sm">
           <AlertCircle className="w-12 h-12 text-rose-600 mx-auto" />
           <h2 className="text-xl font-serif font-bold text-foreground">
-            No Active Case Linked to This Account
+            {t.emptyStates.noActiveCase}
           </h2>
           <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
-            No active legal aid case is currently linked to your credentials. If you or an undertrial family member requires legal representation, please contact the National Legal Services Helpline (15100) or visit your local District Legal Services Authority (DLSA) office.
+            {t.emptyStates.noCaseDesc}
           </p>
           <div className="pt-4 border-t border-border flex flex-col sm:flex-row items-center justify-center gap-3">
             <a
@@ -318,10 +316,10 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               className="px-5 py-2.5 bg-primary text-primary-foreground font-sans font-bold text-xs rounded-lg flex items-center gap-2 hover:bg-primary/90 transition-colors shadow-sm"
             >
               <Phone className="w-4 h-4" />
-              Call NALSA Helpline: 15100
+              {t.emptyStates.callNalsa}
             </a>
             <div className="text-xs text-muted-foreground font-mono">
-              24x7 Toll-Free Free Legal Aid
+              {t.emptyStates.tollFreeLabel}
             </div>
           </div>
         </div>
@@ -338,7 +336,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-secondary/50 border border-border px-4 py-2.5 rounded-xl shadow-xs">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Globe className="h-4 w-4 text-primary shrink-0" />
-          <span className="font-medium">Language (भाषा):</span>
+          <span className="font-medium">{t.topBar.languageLabel}</span>
           <div className="flex flex-wrap items-center gap-1">
             {languages.map((l) => (
               <button
@@ -360,12 +358,12 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
           {isOffline ? (
             <span className="inline-flex items-center gap-1 font-mono font-bold text-rose-600 text-[11px]">
               <WifiOff className="w-3.5 h-3.5" />
-              Offline
+              {t.topBar.offline}
             </span>
           ) : (
             <span className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
               <Wifi className="w-3.5 h-3.5 text-emerald-600" />
-              {lastSyncTime ? `Synced ${lastSyncTime}` : "Online"}
+              {lastSyncTime ? `${t.topBar.synced} ${lastSyncTime}` : t.topBar.online}
             </span>
           )}
 
@@ -378,13 +376,13 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
             }`}
             title="Toggle lightweight low-bandwidth mode"
           >
-            {isLowBandwidth ? "⚡ Low-Data: ON" : "Low-Data: OFF"}
+            {isLowBandwidth ? t.topBar.lowDataOn : t.topBar.lowDataOff}
           </button>
 
           <button
             onClick={() => setNotifModalOpen(true)}
             className="p-1.5 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground transition-colors"
-            title="Notification Preferences & Consent"
+            title={t.topBar.notifPrefsTitle}
           >
             <Bell className="w-4 h-4" />
           </button>
@@ -396,7 +394,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         <div className="bg-secondary/40 border border-border px-4 py-2.5 rounded-xl text-xs text-muted-foreground flex items-start gap-2.5">
           <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
           <p className="leading-relaxed">
-            <strong>Accessibility Notice:</strong> Translated text is a derived display provided for informational accessibility. The original English court docket remains the authoritative source of legal truth.
+            <strong>{t.derivedNotice.label}</strong> {t.derivedNotice.text}
           </p>
         </div>
       )}
@@ -405,19 +403,19 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
       <div className="bg-card border-2 border-border p-6 rounded-xl shadow-sm space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-[11px] font-mono font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
-            {isFamily ? "Family & Guardian Assistance Portal" : "Citizen Legal Aid Portal"}
+            {isFamily ? t.banner.familyPortal : t.banner.citizenPortal}
           </span>
           <span className="text-xs font-mono font-bold text-muted-foreground">
-            Ref: {data.case_reference}
+            {t.banner.refPrefix} {data.case_reference}
           </span>
         </div>
 
         <h1 className="text-2xl md:text-3xl font-serif font-black tracking-tight text-foreground">
-          {isFamily ? `Legal Status of ${data.accused_name}` : `Welcome, ${data.accused_name}`}
+          {isFamily ? `${t.banner.legalStatusOf} ${data.accused_name}` : `${t.banner.welcome} ${data.accused_name}`}
         </h1>
 
         <p className="text-xs md:text-sm text-muted-foreground leading-relaxed">
-          Under Article 39A of the Constitution of India and Section 479 of the Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023, you are entitled to free legal aid representation and periodic judicial custody review without fee.
+          {t.banner.statutoryRight}
         </p>
       </div>
 
@@ -428,7 +426,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Legal Aid Status
+                {t.cards.legalAidStatusTitle}
               </span>
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
             </div>
@@ -454,7 +452,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         <div className="bg-card border-2 border-border p-5 rounded-xl shadow-sm space-y-3 flex flex-col justify-between">
           <div className="space-y-2">
             <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
-              Assigned Defense Lawyer
+              {t.cards.assignedLawyerTitle}
             </span>
 
             {data.legal_aid_support.is_assigned ? (
@@ -470,7 +468,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               <div className="space-y-1">
                 <div className="text-sm font-semibold text-rose-600 flex items-center gap-1.5">
                   <Clock className="w-4 h-4" />
-                  Counsel Allocation in Progress
+                  {t.cards.counselInProgress}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {data.legal_aid_support.status_message || "DLSA Legal Aid Panel"}
@@ -485,7 +483,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               <span>{data.legal_aid_support.contact_phone || "15100"}</span>
             </div>
             <div className="text-[11px] text-muted-foreground">
-              Free DLSA Legal Assistance Desk
+              {t.cards.freeDlsaDesk}
             </div>
           </div>
         </div>
@@ -495,7 +493,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Next Court Hearing
+                {t.cards.nextHearingTitle}
               </span>
               <Calendar className="w-4 h-4 text-primary" />
             </div>
@@ -504,7 +502,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               <div className="text-lg font-serif font-bold text-foreground">
                 {data.upcoming_known_events && data.upcoming_known_events.length > 0
                   ? data.upcoming_known_events[0].event_date
-                  : "Awaiting Schedule"}
+                  : t.cards.awaitingSchedule}
               </div>
               <div className="text-xs text-muted-foreground truncate">{data.court_name}</div>
             </div>
@@ -512,7 +510,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
 
           <div className="pt-2 border-t border-border text-[11px] text-muted-foreground flex items-center gap-1.5">
             <Landmark className="w-3.5 h-3.5 text-primary" />
-            <span>Authoritative Court Record</span>
+            <span>{t.cards.courtRecordBadge}</span>
           </div>
         </div>
       </div>
@@ -523,22 +521,22 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
           <div className="flex items-center gap-2">
             <Send className="w-4 h-4 text-primary" />
             <h3 className="font-serif font-bold text-sm text-foreground">
-              Court Filing Status
+              {t.procedural.courtFilingTitle}
             </h3>
           </div>
           <div className="text-xs space-y-1 font-mono text-muted-foreground">
             <div className="flex justify-between">
-              <span>Filing Record:</span>
+              <span>{t.procedural.filingRecord}</span>
               <strong className="text-foreground">
-                {data.filing_details.is_filed ? "FORMALLY LODGED" : "AWAITING SUBMISSION"}
+                {data.filing_details.is_filed ? t.procedural.formallyLodged : t.procedural.awaitingSubmission}
               </strong>
             </div>
             <div className="flex justify-between">
-              <span>Reference:</span>
+              <span>{t.procedural.reference}</span>
               <span className="text-foreground">{data.filing_details.filing_reference}</span>
             </div>
             <div className="flex justify-between">
-              <span>Jurisdiction:</span>
+              <span>{t.procedural.jurisdiction}</span>
               <span className="text-foreground truncate">{data.court_name}</span>
             </div>
           </div>
@@ -548,26 +546,26 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
           <div className="flex items-center gap-2">
             <Shield className="w-4 h-4 text-emerald-600" />
             <h3 className="font-serif font-bold text-sm text-foreground">
-              Custody & Release Status
+              {t.procedural.custodyReleaseTitle}
             </h3>
           </div>
           <div className="text-xs space-y-1 font-mono text-muted-foreground">
             <div className="flex justify-between">
-              <span>Custody Status:</span>
+              <span>{t.procedural.custodyStatus}</span>
               <strong className="text-foreground">
                 {data.release_details.is_released
-                  ? "RELEASE EXECUTED"
+                  ? t.statusBadges.releaseExecuted
                   : (data.release_details.release_status === "BAIL_ORDER_ISSUED"
-                      ? "BAIL ORDER ISSUED"
-                      : "IN CUSTODY")}
+                      ? t.statusBadges.courtOrderReceived
+                      : t.procedural.inCustody)}
               </strong>
             </div>
             <div className="flex justify-between">
-              <span>Police Station:</span>
+              <span>{t.procedural.policeStation}</span>
               <span className="text-foreground truncate">{data.police_station}</span>
             </div>
             <div className="flex justify-between">
-              <span>Verification:</span>
+              <span>{t.procedural.verification}</span>
               <span className="text-foreground">{data.release_details.verification_source}</span>
             </div>
           </div>
@@ -586,7 +584,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               onClick={() => setShowAuthoritativeEnglish(!showAuthoritativeEnglish)}
               className="text-xs font-mono font-bold text-primary hover:underline"
             >
-              {showAuthoritativeEnglish ? "Show Derived Translation" : "Inspect Authoritative English"}
+              {showAuthoritativeEnglish ? t.aiSection.showDerived : t.aiSection.inspectAuthoritative}
             </button>
           )}
         </div>
@@ -612,7 +610,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               className="inline-block px-2.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider border border-red-600"
               style={{ color: "#DC2626", borderColor: "#DC2626", backgroundColor: "#FFFFFF" }}
             >
-              Statutory Caution
+              {t.aiSection.statutoryCautionTitle}
             </span>
             <p
               className="text-xs font-semibold leading-relaxed"
@@ -630,14 +628,14 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
           <div className="flex items-center justify-between">
             <h3 className="text-base font-serif font-bold text-foreground flex items-center gap-2">
               <AlertCircle className="w-5 h-5 text-rose-600" />
-              Documents Needed From Your Side
+              {t.missingDocs.title}
             </h3>
             <span className="text-xs font-mono font-bold text-rose-600">
-              Action Required
+              {t.missingDocs.actionRequired}
             </span>
           </div>
           <p className="text-xs text-muted-foreground">
-            To assist the legal-aid counsel in proceeding with court bail representations, please prepare the following documents:
+            {t.missingDocs.subtitle}
           </p>
 
           <div className="space-y-3">
@@ -646,14 +644,14 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-serif font-bold text-foreground text-sm">{doc.title}</span>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-rose-500/10 text-rose-600 border border-rose-500/20 shrink-0">
-                    {doc.urgency === "REQUIRED_BEFORE_HEARING" ? "URGENT" : "SUPPORTING"}
+                    {doc.urgency === "REQUIRED_BEFORE_HEARING" ? t.missingDocs.urgent : t.missingDocs.supporting}
                   </span>
                 </div>
                 <p className="text-muted-foreground leading-relaxed">
-                  <strong>Why needed:</strong> {doc.why_needed}
+                  <strong>{t.missingDocs.whyNeeded}</strong> {doc.why_needed}
                 </p>
                 <p className="text-muted-foreground leading-relaxed pt-0.5">
-                  <strong>How to submit:</strong> {doc.how_to_submit}
+                  <strong>{t.missingDocs.howToSubmit}</strong> {doc.how_to_submit}
                 </p>
               </div>
             ))}
@@ -666,14 +664,14 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         <div className="flex items-center justify-between">
           <h3 className="text-base font-serif font-bold text-foreground flex items-center gap-2">
             <FileText className="w-5 h-5 text-primary" />
-            Verified Case Records Entitled To You
+            {t.entitledDocs.title}
           </h3>
           <span className="text-xs font-mono text-muted-foreground">
-            {data.approved_entitled_documents.length} Authorized
+            {data.approved_entitled_documents.length} {t.entitledDocs.authorizedSuffix}
           </span>
         </div>
         <p className="text-xs text-muted-foreground">
-          Authorized case records verified by the Legal Services Authority. Text summaries allow instant reading on low bandwidth:
+          {t.entitledDocs.subtitle}
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
@@ -689,7 +687,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                     <span className="font-serif font-bold text-foreground truncate">{doc.title}</span>
                   </div>
                   <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 shrink-0">
-                    VERIFIED
+                    {t.entitledDocs.verified}
                   </span>
                 </div>
                 <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2">
@@ -699,7 +697,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
 
               <div className="flex items-center justify-between pt-2 border-t border-border/50">
                 <span className="text-[10px] font-mono text-muted-foreground">
-                  Size: {doc.file_size_formatted}
+                  {t.entitledDocs.size} {doc.file_size_formatted}
                 </span>
                 <div className="flex items-center gap-1.5">
                   <button
@@ -707,14 +705,14 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                     className="px-2.5 py-1 rounded text-[11px] font-sans font-bold bg-card border border-border hover:bg-secondary text-foreground flex items-center gap-1 transition-colors"
                   >
                     <Eye className="w-3 h-3" />
-                    Text Summary
+                    {t.entitledDocs.textSummaryBtn}
                   </button>
                   <button
                     onClick={() => handleOpenProvenance(doc)}
                     className="px-2.5 py-1 rounded text-[11px] font-sans font-bold bg-primary/10 border border-primary/20 hover:bg-primary/20 text-primary flex items-center gap-1 transition-colors"
                   >
                     <Shield className="w-3 h-3" />
-                    Provenance
+                    {t.entitledDocs.provenanceBtn}
                   </button>
                 </div>
               </div>
@@ -728,14 +726,14 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         <div className="flex items-center justify-between">
           <h3 className="text-base font-serif font-bold text-foreground flex items-center gap-2">
             <Send className="w-5 h-5 text-primary" />
-            Citizen Action Center
+            {t.actionCenter.title}
           </h3>
           <span className="text-xs font-mono text-muted-foreground">
-            Auditable DLSA Desk
+            {t.actionCenter.auditableDesk}
           </span>
         </div>
         <p className="text-xs text-muted-foreground">
-          Submit official requests directly to the DLSA Secretary and Jail Welfare Officer:
+          {t.actionCenter.subtitle}
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -750,8 +748,8 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
           >
             <Phone className="w-5 h-5 text-primary shrink-0 mt-0.5" />
             <div>
-              <div className="font-serif font-bold text-sm text-foreground">Contact DLSA Counsel</div>
-              <div className="text-xs text-muted-foreground">Request panel advocate consultation</div>
+              <div className="font-serif font-bold text-sm text-foreground">{t.actionCenter.contactCounselTitle}</div>
+              <div className="text-xs text-muted-foreground">{t.actionCenter.contactCounselSub}</div>
             </div>
           </button>
 
@@ -766,8 +764,8 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
           >
             <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
             <div>
-              <div className="font-serif font-bold text-sm text-foreground">Flag Discrepancy</div>
-              <div className="text-xs text-muted-foreground">Report incorrect dates or details</div>
+              <div className="font-serif font-bold text-sm text-foreground">{t.actionCenter.flagDiscrepancyTitle}</div>
+              <div className="text-xs text-muted-foreground">{t.actionCenter.flagDiscrepancySub}</div>
             </div>
           </button>
 
@@ -782,8 +780,8 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
           >
             <FileQuestion className="w-5 h-5 text-primary shrink-0 mt-0.5" />
             <div>
-              <div className="font-serif font-bold text-sm text-foreground">Request Document Copy</div>
-              <div className="text-xs text-muted-foreground">Request certified order or report copy</div>
+              <div className="font-serif font-bold text-sm text-foreground">{t.actionCenter.requestDocTitle}</div>
+              <div className="text-xs text-muted-foreground">{t.actionCenter.requestDocSub}</div>
             </div>
           </button>
 
@@ -798,8 +796,8 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
           >
             <HelpCircle className="w-5 h-5 text-primary shrink-0 mt-0.5" />
             <div>
-              <div className="font-serif font-bold text-sm text-foreground">Ask For Legal Aid Help</div>
-              <div className="text-xs text-muted-foreground">Urgent welfare / medical consultation</div>
+              <div className="font-serif font-bold text-sm text-foreground">{t.actionCenter.askHelpTitle}</div>
+              <div className="text-xs text-muted-foreground">{t.actionCenter.askHelpSub}</div>
             </div>
           </button>
         </div>
@@ -808,14 +806,14 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
         {data.recent_citizen_requests && data.recent_citizen_requests.length > 0 && (
           <div className="pt-3 border-t border-border space-y-2">
             <span className="text-xs font-serif font-bold uppercase tracking-wider text-muted-foreground block">
-              Your Past Submissions
+              {t.actionCenter.pastSubmissionsTitle}
             </span>
             <div className="space-y-2">
               {data.recent_citizen_requests.map((req) => (
                 <div key={req.id} className="p-3 bg-secondary/20 border border-border rounded-lg text-xs flex items-center justify-between">
                   <div className="truncate pr-2">
                     <div className="font-serif font-bold text-foreground truncate">{req.subject}</div>
-                    <div className="text-[11px] font-mono text-muted-foreground">Tracking ID: {req.id}</div>
+                    <div className="text-[11px] font-mono text-muted-foreground">{t.actionCenter.trackingId} {req.id}</div>
                   </div>
                   <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">
                     {req.status}
@@ -833,10 +831,10 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
           <div className="space-y-1">
             <h4 className="text-base font-serif font-bold text-foreground flex items-center gap-2">
               <Phone className="h-5 w-5 text-primary" />
-              National Legal Services Helpline (NALSA 24x7)
+              {t.nalsaBanner.title}
             </h4>
             <p className="text-xs text-muted-foreground">
-              Toll-free government assistance for undertrials and family members under the Legal Services Authorities Act.
+              {t.nalsaBanner.desc}
             </p>
           </div>
 
@@ -845,7 +843,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
             className="px-5 py-2.5 bg-primary text-primary-foreground font-sans font-bold text-sm rounded-lg flex items-center gap-2 hover:bg-primary/90 transition-colors shadow-sm shrink-0"
           >
             <Phone className="h-4 w-4" />
-            15100 (Toll-Free)
+            {t.nalsaBanner.phoneBtn}
           </a>
         </div>
       </div>
@@ -857,7 +855,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
             <div className="flex items-center justify-between pb-3 border-b border-border">
               <h3 className="font-serif font-bold text-base text-foreground flex items-center gap-2">
                 <Send className="w-4 h-4 text-primary" />
-                Submit Citizen Request
+                {t.actionModal.title}
               </h3>
               <button
                 onClick={() => {
@@ -874,7 +872,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs text-center space-y-2">
                 <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
                 <p className="font-bold text-foreground">{actionSuccessMsg}</p>
-                <p className="font-mono text-muted-foreground">Tracking ID: {actionTrackingId}</p>
+                <p className="font-mono text-muted-foreground">{t.actionCenter.trackingId} {actionTrackingId}</p>
                 <button
                   onClick={() => {
                     setActionModalOpen(false);
@@ -882,78 +880,78 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                   }}
                   className="mt-2 px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-lg"
                 >
-                  Done
+                  {t.actionModal.doneBtn}
                 </button>
               </div>
             ) : (
               <form onSubmit={handleActionSubmit} className="space-y-4 text-xs">
                 <div>
-                  <label className="block font-bold text-foreground mb-1">Request Type</label>
+                  <label className="block font-bold text-foreground mb-1">{t.actionModal.requestType}</label>
                   <select
                     value={actionType}
                     onChange={(e: any) => setActionType(e.target.value)}
                     className="w-full p-2.5 rounded-lg bg-input border border-border text-foreground font-mono"
                   >
-                    <option value="REQUEST_DLSA_CONTACT">Request DLSA Panel Counsel Contact</option>
-                    <option value="FLAG_INCORRECT_INFO">Report Discrepancy / Flag Error</option>
-                    <option value="REQUEST_DOCUMENT_COPY">Request Certified Document Copy</option>
-                    <option value="REQUEST_HELP">Ask for Urgent Legal Aid Help</option>
+                    <option value="REQUEST_DLSA_CONTACT">{t.actionModal.optContact}</option>
+                    <option value="FLAG_INCORRECT_INFO">{t.actionModal.optDiscrepancy}</option>
+                    <option value="REQUEST_DOCUMENT_COPY">{t.actionModal.optDoc}</option>
+                    <option value="REQUEST_HELP">{t.actionModal.optHelp}</option>
                   </select>
                 </div>
 
                 {actionType === "FLAG_INCORRECT_INFO" && (
                   <div>
-                    <label className="block font-bold text-foreground mb-1">Field with Discrepancy</label>
+                    <label className="block font-bold text-foreground mb-1">{t.actionModal.fieldLabel}</label>
                     <select
                       value={actionField}
                       onChange={(e) => setActionField(e.target.value)}
                       className="w-full p-2.5 rounded-lg bg-input border border-border text-foreground font-mono"
                     >
-                      <option value="custody_days">Custody Period / Admission Date</option>
-                      <option value="father_name">Parent / Guardian Name</option>
-                      <option value="permanent_address">Permanent Address</option>
-                      <option value="offense_sections">Recorded Offence Sections</option>
+                      <option value="custody_days">{t.actionModal.fieldCustody}</option>
+                      <option value="father_name">{t.actionModal.fieldParent}</option>
+                      <option value="permanent_address">{t.actionModal.fieldAddress}</option>
+                      <option value="offense_sections">{t.actionModal.fieldOffense}</option>
                     </select>
                   </div>
                 )}
 
                 {actionType === "REQUEST_DOCUMENT_COPY" && (
                   <div>
-                    <label className="block font-bold text-foreground mb-1">Document Requested</label>
+                    <label className="block font-bold text-foreground mb-1">{t.actionModal.docLabel}</label>
                     <select
                       value={actionDocType}
                       onChange={(e) => setActionDocType(e.target.value)}
                       className="w-full p-2.5 rounded-lg bg-input border border-border text-foreground font-mono"
                     >
-                      <option value="charge_sheet">Police Charge Sheet</option>
-                      <option value="remand_order">Judicial Remand Order</option>
-                      <option value="fir">First Information Report (FIR)</option>
-                      <option value="custody_certificate">Prison Custody Certificate</option>
+                      <option value="charge_sheet">{t.actionModal.docChargeSheet}</option>
+                      <option value="remand_order">{t.actionModal.docRemand}</option>
+                      <option value="fir">{t.actionModal.docFir}</option>
+                      <option value="custody_certificate">{t.actionModal.docCustodyCert}</option>
                     </select>
                   </div>
                 )}
 
                 <div>
-                  <label className="block font-bold text-foreground mb-1">Subject</label>
+                  <label className="block font-bold text-foreground mb-1">{t.actionModal.subjectLabel}</label>
                   <input
                     type="text"
                     required
                     value={actionSubject}
                     onChange={(e) => setActionSubject(e.target.value)}
                     className="w-full p-2.5 rounded-lg bg-input border border-border text-foreground"
-                    placeholder="Brief summary of what you require..."
+                    placeholder={t.actionModal.subjectPlaceholder}
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-foreground mb-1">Details</label>
+                  <label className="block font-bold text-foreground mb-1">{t.actionModal.detailsLabel}</label>
                   <textarea
                     required
                     rows={3}
                     value={actionDetails}
                     onChange={(e) => setActionDetails(e.target.value)}
                     className="w-full p-2.5 rounded-lg bg-input border border-border text-foreground leading-relaxed"
-                    placeholder="Provide specific details for the DLSA desk..."
+                    placeholder={t.actionModal.detailsPlaceholder}
                   />
                 </div>
 
@@ -963,14 +961,14 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                     onClick={() => setActionModalOpen(false)}
                     className="px-4 py-2 border border-border rounded-lg text-muted-foreground hover:text-foreground"
                   >
-                    Cancel
+                    {t.actionModal.cancelBtn}
                   </button>
                   <button
                     type="submit"
                     disabled={submittingAction}
                     className="px-5 py-2 bg-primary text-primary-foreground font-bold rounded-lg transition-colors"
                   >
-                    {submittingAction ? "Submitting..." : "Submit to DLSA"}
+                    {submittingAction ? t.actionModal.submitting : t.actionModal.submitBtn}
                   </button>
                 </div>
               </form>
@@ -986,7 +984,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
             <div className="flex items-center justify-between pb-3 border-b border-border">
               <h3 className="font-serif font-bold text-base text-foreground flex items-center gap-2">
                 <Bell className="w-4 h-4 text-primary" />
-                Notification Preferences & Consent
+                {t.notifModal.title}
               </h3>
               <button onClick={() => setNotifModalOpen(false)} className="text-muted-foreground hover:text-foreground">
                 <X className="w-5 h-5" />
@@ -995,7 +993,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
 
             <form onSubmit={handleSaveNotifPrefs} className="space-y-4 text-xs">
               <div>
-                <label className="block font-bold text-foreground mb-1">Registered Mobile Phone</label>
+                <label className="block font-bold text-foreground mb-1">{t.notifModal.phoneLabel}</label>
                 <input
                   type="tel"
                   value={notifPhone}
@@ -1013,7 +1011,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                     onChange={(e) => setNotifSms(e.target.checked)}
                     className="rounded border-border h-4 w-4 text-primary"
                   />
-                  <span>SMS Statutory Hearing & Status Notices</span>
+                  <span>{t.notifModal.smsLabel}</span>
                 </label>
                 <label className="flex items-center gap-2.5 cursor-pointer">
                   <input
@@ -1022,7 +1020,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                     onChange={(e) => setNotifWhatsapp(e.target.checked)}
                     className="rounded border-border h-4 w-4 text-primary"
                   />
-                  <span>WhatsApp Legal Aid Assistance Notices</span>
+                  <span>{t.notifModal.whatsappLabel}</span>
                 </label>
                 <label className="flex items-center gap-2.5 cursor-pointer">
                   <input
@@ -1031,12 +1029,12 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                     onChange={(e) => setNotifInApp(e.target.checked)}
                     className="rounded border-border h-4 w-4 text-primary"
                   />
-                  <span>In-App Status Alerts</span>
+                  <span>{t.notifModal.inAppLabel}</span>
                 </label>
               </div>
 
               <div className="p-3 bg-secondary/40 border border-border rounded-lg text-[11px] text-muted-foreground leading-relaxed">
-                <strong>Statutory Notice:</strong> Notification delivery is recorded under the Legal Services Authorities Act, 1987. No commercial carrier charges are applied.
+                <strong>{t.notifModal.statutoryNoticeLabel}</strong> {t.notifModal.statutoryNoticeText}
               </div>
 
               {notifSavedMsg && (
@@ -1051,14 +1049,14 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                   onClick={() => setNotifModalOpen(false)}
                   className="px-4 py-2 border border-border rounded-lg text-muted-foreground hover:text-foreground"
                 >
-                  Close
+                  {t.notifModal.closeBtn}
                 </button>
                 <button
                   type="submit"
                   disabled={savingNotif}
                   className="px-5 py-2 bg-primary text-primary-foreground font-bold rounded-lg transition-colors"
                 >
-                  {savingNotif ? "Saving..." : "Save Preferences"}
+                  {savingNotif ? t.notifModal.saving : t.notifModal.saveBtn}
                 </button>
               </div>
             </form>
@@ -1087,14 +1085,14 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
 
             <div className="space-y-3 text-xs">
               <div className="flex items-center justify-between font-mono text-[11px] text-muted-foreground">
-                <span>Record Type: {previewDoc.document_type}</span>
-                <span>Size: {previewDoc.file_size_formatted}</span>
+                <span>{t.textSummaryModal.recordType} {previewDoc.document_type}</span>
+                <span>{t.textSummaryModal.size} {previewDoc.file_size_formatted}</span>
               </div>
               <div className="p-4 bg-secondary/30 border border-border rounded-lg text-foreground leading-relaxed">
                 <div className="flex items-center justify-between mb-1">
-                  <strong className="block font-serif text-sm text-primary">Plain-Language Summary:</strong>
+                  <strong className="block font-serif text-sm text-primary">{t.textSummaryModal.summaryLabel}</strong>
                   {loadingPreview && (
-                    <span className="text-[10px] font-mono text-muted-foreground animate-pulse">Syncing...</span>
+                    <span className="text-[10px] font-mono text-muted-foreground animate-pulse">{t.textSummaryModal.syncing}</span>
                   )}
                 </div>
                 <p className="text-xs text-foreground leading-relaxed">
@@ -1105,7 +1103,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
               {previewDetails?.text_preview &&
                 previewDetails.text_preview !== (previewDetails.text_summary || previewDoc.text_summary) && (
                   <div className="space-y-1">
-                    <span className="text-[11px] font-bold text-muted-foreground">Document Extract / Record Snippet:</span>
+                    <span className="text-[11px] font-bold text-muted-foreground">{t.textSummaryModal.extractLabel}</span>
                     <div className="p-3 bg-secondary/20 border border-border/70 rounded-lg text-xs font-mono text-foreground max-h-36 overflow-y-auto whitespace-pre-wrap leading-relaxed">
                       {previewDetails.text_preview}
                     </div>
@@ -1113,7 +1111,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                 )}
 
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                This document is certified by the Legal Services Authority. Certified paper copies may also be inspected at the DLSA Front Office during court working hours.
+                {t.textSummaryModal.certNotice}
               </p>
             </div>
 
@@ -1125,7 +1123,7 @@ export function CitizenPortal({ mode = "accused" }: CitizenPortalProps) {
                 }}
                 className="px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-lg"
               >
-                Close Preview
+                {t.textSummaryModal.closeBtn}
               </button>
             </div>
           </div>

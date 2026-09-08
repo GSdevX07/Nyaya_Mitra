@@ -31,7 +31,8 @@ class AuditableRationale(BaseModel):
     Concise, auditable justifications for generation decisions.
     Strictly forbids chain-of-thought, raw scratchpads, or internal persona prompts.
     """
-    source_citations: List[str] = Field(default_factory=list, description="Explicit statutory or document source identifiers cited.")
+    source_citations: List[str] = Field(default_factory=list, description="Explicit statutory or document source citations.")
+    retrieved_legal_source_ids: List[str] = Field(default_factory=list, description="Canonical legal repository source identifiers (e.g. src_bnss_2023_sec_479).")
     extracted_facts: Dict[str, Any] = Field(default_factory=dict, description="Key factual attributes relied upon.")
     rule_results: List[str] = Field(default_factory=list, description="Deterministic rule checks verified before or during synthesis.")
     decision_explanation: str = Field(..., description="High-level factual reason for the resulting output.")
@@ -99,7 +100,7 @@ class LegalSynthesisOutput(BaseModel):
     applicable_statutory_sections: List[str] = Field(default_factory=list)
     binding_precedents: List[Dict[str, str]] = Field(default_factory=list)
     legal_grounds_summary: Optional[str] = Field(
-        default="Statutory grounds analysis: Section 479 BNSS (Bail) applicable pending detailed court record review.",
+        default="Statutory grounds analysis pending detailed court record review.",
         description="Summary of applicable legal grounds and statutes",
     )
     synthesis_summary: Optional[str] = Field(
@@ -108,9 +109,11 @@ class LegalSynthesisOutput(BaseModel):
     )
     statutory_transition_notes: Optional[str] = None
     unresolved_legal_questions: List[str] = Field(default_factory=list)
+    data_status: str = Field(default="VALID", description="VALID, MISSING_FACTS, or MANUAL_REVIEW_REQUIRED")
     rationale: AuditableRationale = Field(
         default_factory=lambda: AuditableRationale(
-            source_citations=["Section 479 BNSS"],
+            source_citations=[],
+            retrieved_legal_source_ids=[],
             decision_explanation="Procedural legal synthesis generated from official docket.",
         )
     )
@@ -119,8 +122,12 @@ class LegalSynthesisOutput(BaseModel):
     @classmethod
     def populate_legal_synthesis_fields(cls, data: Any) -> Any:
         if isinstance(data, dict):
+            has_case = bool(data.get("case_reference") or data.get("case_id"))
             if not data.get("case_reference"):
                 data["case_reference"] = data.get("case_id") or "Case reference pending legal review"
+            if not has_case and not data.get("data_status"):
+                data["data_status"] = "MISSING_FACTS"
+
             lgs = data.get("legal_grounds_summary")
             syn = data.get("synthesis_summary")
             if not lgs and syn:
@@ -128,11 +135,20 @@ class LegalSynthesisOutput(BaseModel):
             elif not syn and lgs:
                 data["synthesis_summary"] = lgs
             elif not lgs and not syn:
-                data["legal_grounds_summary"] = "Statutory grounds analysis: Section 479 BNSS (Bail) applicable pending detailed court record review."
+                data["legal_grounds_summary"] = "Statutory grounds analysis pending detailed court record review."
                 data["synthesis_summary"] = data["legal_grounds_summary"]
+                if not data.get("data_status"):
+                    data["data_status"] = "MISSING_FACTS"
+
             if not data.get("rationale"):
+                sections = data.get("applicable_statutory_sections") or []
+                cites = [str(s) for s in sections] if sections else []
+                case_ref = data.get("case_reference")
+                if case_ref and case_ref != "Case reference pending legal review":
+                    cites.append(f"Dossier:{case_ref}")
                 data["rationale"] = {
-                    "source_citations": ["Section 479 BNSS", f"Dossier:{data.get('case_reference')}"],
+                    "source_citations": cites,
+                    "retrieved_legal_source_ids": data.get("retrieved_legal_source_ids") or [],
                     "extracted_facts": {},
                     "rule_results": ["Rule:Statutory_Grounds_Extracted"],
                     "decision_explanation": "Procedural legal synthesis generated from official docket.",
@@ -145,18 +161,20 @@ class DraftPreparationOutput(BaseModel):
         default="Case reference pending legal review",
         description="Case citation or reference number",
     )
-    petition_type: str = "Bail Application under Section 479 BNSS"
+    petition_type: str = "Statutory Bail Application"
     jurisdictional_court: str = "Court of Competent Jurisdiction"
-    designated_counsel: str = "DLSA Legal Aid Panel Counsel"
+    designated_counsel: str = "Legal Aid Panel Counsel"
     petition_body_text: str = Field(default="")
     draft_text: Optional[str] = None
     mandatory_document_checklist: Dict[str, bool] = Field(default_factory=dict)
     missing_document_warnings: List[str] = Field(default_factory=list)
     requires_advocate_signature: bool = True
-    counsel_signature_block: str = "Advocate on Record\nDLSA Legal Aid Panel Counsel"
+    counsel_signature_block: str = "Advocate on Record\nLegal Aid Panel Counsel"
+    data_status: str = Field(default="VALID", description="VALID, MISSING_FACTS, or MANUAL_REVIEW_REQUIRED")
     rationale: AuditableRationale = Field(
         default_factory=lambda: AuditableRationale(
-            source_citations=["Section 479 BNSS"],
+            source_citations=[],
+            retrieved_legal_source_ids=[],
             decision_explanation="Bail petition drafted for defense counsel review.",
         )
     )
@@ -165,8 +183,12 @@ class DraftPreparationOutput(BaseModel):
     @classmethod
     def normalize_draft_preparation(cls, data: Any) -> Any:
         if isinstance(data, dict):
+            has_case = bool(data.get("case_reference") or data.get("case_id"))
             if not data.get("case_reference"):
                 data["case_reference"] = data.get("case_id") or "Case reference pending legal review"
+            if not has_case and not data.get("data_status"):
+                data["data_status"] = "MISSING_FACTS"
+
             pbt = data.get("petition_body_text")
             dt = data.get("draft_text")
             if not pbt and dt:
@@ -175,15 +197,21 @@ class DraftPreparationOutput(BaseModel):
                 data["draft_text"] = pbt
             elif not pbt and not dt:
                 default_text = (
-                    "APPLICATION FOR REGULAR BAIL UNDER SECTION 479 OF THE BHARATIYA NAGARIK SURAKSHA SANHITA, 2023.\n"
+                    "APPLICATION FOR REGULAR BAIL / STATUTORY RELIEF.\n"
                     "Official case facts extracted deterministically from verified court and jail records. "
                     "Automated neural generation is currently offline; a qualified legal aid officer must review this dossier."
                 )
                 data["petition_body_text"] = default_text
                 data["draft_text"] = default_text
+                if not data.get("data_status"):
+                    data["data_status"] = "MISSING_FACTS"
+
             if not data.get("rationale"):
+                case_ref = data.get("case_reference")
+                cites = [f"Dossier:{case_ref}"] if (case_ref and case_ref != "Case reference pending legal review") else []
                 data["rationale"] = {
-                    "source_citations": ["Section 479 BNSS"],
+                    "source_citations": cites,
+                    "retrieved_legal_source_ids": data.get("retrieved_legal_source_ids") or [],
                     "extracted_facts": {},
                     "rule_results": ["Rule:Draft_Preparation_Generated"],
                     "decision_explanation": "Draft petition synthesized from verified court facts.",
@@ -214,12 +242,12 @@ class DataQualityAssistanceOutput(BaseModel):
 
 
 class AdministrativeSummarizationOutput(BaseModel):
-    reporting_period: str
-    facility_or_district: str
+    reporting_period: str = "Current Review Period"
+    facility_or_district: Optional[str] = None
     total_active_undertrials: int = 0
     potentially_eligible_479_count: int = 0
-    backlog_summary: str
-    compliance_percentage: float = 100.0
+    backlog_summary: str = "Administrative metrics summary pending aggregation."
+    compliance_percentage: Optional[float] = None
     bottleneck_stages: List[str] = Field(default_factory=list)
     rationale: AuditableRationale
 
@@ -230,6 +258,7 @@ class GatewayRequest(BaseModel):
     capability: AICapability
     case_id: Optional[str] = None
     document_id: Optional[str] = None
+    source_document_identifiers: List[str] = Field(default_factory=list)
     prompt_input: str = ""
     prompt: Optional[str] = None
     untrusted_document_context: Optional[str] = None
@@ -254,6 +283,20 @@ class GatewayRequest(BaseModel):
                 data["structured_context"] = data["context_data"]
             elif "structured_context" in data and not data.get("context_data"):
                 data["context_data"] = data["structured_context"]
+
+            # Multi-source document tracking
+            src_docs = data.get("source_document_identifiers") or data.get("source_doc_ids") or []
+            if isinstance(src_docs, str):
+                try:
+                    import json
+                    src_docs = json.loads(src_docs)
+                except Exception:
+                    src_docs = [src_docs]
+            src_docs = list(src_docs)
+            doc_id = data.get("document_id")
+            if doc_id and doc_id not in src_docs:
+                src_docs.append(doc_id)
+            data["source_document_identifiers"] = src_docs
         return data
 
 

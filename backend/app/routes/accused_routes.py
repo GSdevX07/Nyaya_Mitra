@@ -273,3 +273,102 @@ async def update_notification_preferences(
     client_ip = request.client.host if request.client else "127.0.0.1"
     return update_notification_preferences_service(user=current_user, payload=body, ip_address=client_ip)
 
+
+# ── Privacy Notice & Consent Workflows ──────────────────────────────────────
+
+class ConsentSubmissionRequest(BaseModel):
+    consent_type: str = "DATA_PROCESSING"
+    version: str = "2026.1"
+
+
+class ConsentRevocationRequest(BaseModel):
+    consent_type: str = "DATA_PROCESSING"
+    reason: str = "USER_REQUEST"
+
+
+@citizen_router.get("/privacy-notice")
+async def fetch_privacy_notice(lang: str = Query("en")):
+    """
+    Plain-language multi-lingual legal privacy notice explaining purpose,
+    categories of data processed, who has access, and statutory rights.
+    """
+    from app.security.consent import get_privacy_notice
+    return get_privacy_notice(language=lang)
+
+
+@citizen_router.post("/consent")
+async def grant_privacy_consent(
+    body: ConsentSubmissionRequest,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(Role.ACCUSED_USER, Role.FAMILY_GUARDIAN)),
+):
+    """
+    Record affirmative, informed consent from an accused person or family member.
+    """
+    from app.security.consent import record_consent
+    from app.database import get_db_connection
+
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    user_agent = request.headers.get("user-agent", "")
+    conn = get_db_connection()
+    try:
+        res = record_consent(
+            conn=conn,
+            citizen_id=current_user.id,
+            consent_type=body.consent_type,
+            version=body.version,
+            ip_address=client_ip,
+            user_agent=user_agent,
+        )
+        return res
+    finally:
+        conn.close()
+
+
+@citizen_router.post("/consent/revoke")
+async def revoke_privacy_consent(
+    body: ConsentRevocationRequest,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(Role.ACCUSED_USER, Role.FAMILY_GUARDIAN)),
+):
+    """
+    Revoke previously granted consent.
+    """
+    from app.security.consent import revoke_consent
+    from app.database import get_db_connection
+
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    user_agent = request.headers.get("user-agent", "")
+    conn = get_db_connection()
+    try:
+        res = revoke_consent(
+            conn=conn,
+            citizen_id=current_user.id,
+            consent_type=body.consent_type,
+            reason=body.reason,
+            ip_address=client_ip,
+            user_agent=user_agent,
+        )
+        return res
+    finally:
+        conn.close()
+
+
+@citizen_router.get("/consent/status")
+async def check_consent_status(
+    consent_type: str = Query("DATA_PROCESSING"),
+    current_user: AuthUser = Depends(require_role(Role.ACCUSED_USER, Role.FAMILY_GUARDIAN)),
+):
+    """
+    Check active consent status for authenticated citizen.
+    """
+    from app.security.consent import get_consent_status
+    from app.database import get_db_connection
+
+    conn = get_db_connection()
+    try:
+        return get_consent_status(conn=conn, citizen_id=current_user.id, consent_type=consent_type)
+    finally:
+        conn.close()
+
+

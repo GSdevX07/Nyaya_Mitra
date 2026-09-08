@@ -1931,6 +1931,27 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_sched_exec_schedule ON scheduled_report_executions(schedule_id)")
 
+    # ── Automated Legal Actions & Institutional Dispatch Ledger ──────────────
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dispatched_actions (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL,
+            action_type TEXT NOT NULL,
+            priority TEXT DEFAULT 'MEDIUM',
+            status TEXT NOT NULL DEFAULT 'DISPATCHED',
+            description TEXT,
+            dispatched_by_id TEXT NOT NULL,
+            dispatched_by_name TEXT,
+            dispatched_by_role TEXT NOT NULL,
+            target_role TEXT,
+            result_message TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dispatched_actions_case ON dispatched_actions(case_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dispatched_actions_status ON dispatched_actions(status)")
+
     # Canonical Custodial Facilities Seeding (Sanctioned Capacities according to Prison Statistics)
     cursor.execute("""
         INSERT OR IGNORE INTO facilities (id, organization_id, name, facility_type, state, district, capacity, current_occupancy, is_active)
@@ -5583,6 +5604,308 @@ def complete_police_action(action_id: str, document_id: str, user_id: str, notes
     conn.commit()
     conn.close()
     return cnt > 0
+
+
+# ── Dispatched Actions Ledger & Institutional Requisition Helpers ───────────
+
+def record_dispatched_action(
+    action_id: str,
+    case_id: str,
+    action_type: str,
+    priority: str = "MEDIUM",
+    description: str = "",
+    user_id: str = "",
+    user_name: str = "",
+    user_role: str = "",
+    target_role: str = "",
+    result_message: str = "",
+) -> dict:
+    """Persist a dispatched action into SQLite dispatched_actions ledger and Supabase."""
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dispatched_actions (
+                id TEXT PRIMARY KEY,
+                case_id TEXT,
+                action_type TEXT,
+                priority TEXT DEFAULT 'MEDIUM',
+                status TEXT DEFAULT 'DISPATCHED',
+                description TEXT,
+                dispatched_by_id TEXT,
+                dispatched_by_name TEXT,
+                dispatched_by_role TEXT,
+                target_role TEXT,
+                result_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            INSERT INTO dispatched_actions
+                (id, case_id, action_type, priority, status, description,
+                 dispatched_by_id, dispatched_by_name, dispatched_by_role,
+                 target_role, result_message, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'DISPATCHED', ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                status = 'DISPATCHED',
+                updated_at = excluded.updated_at,
+                result_message = excluded.result_message
+            """,
+            (
+                action_id, case_id, action_type, priority, description,
+                user_id, user_name, user_role, target_role, result_message,
+                now_iso, now_iso
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"record_dispatched_action SQLite error: {e}")
+
+    # Dual-write to Supabase if active
+    try:
+        from app.supabase_adapter import get_supabase_client, is_supabase_active
+        if is_supabase_active():
+            client = get_supabase_client()
+            if client:
+                disp_desc = description or ""
+                if user_name or user_role:
+                    disp_str = f" [Dispatched by {user_name} ({user_role})]"
+                    if disp_str not in disp_desc:
+                        disp_desc = f"{disp_desc}{disp_str}".strip()
+
+                payload = {
+                    "id": action_id,
+                    "action_type": action_type or "Legal Aid Procedural Action",
+                    "priority": priority or "MEDIUM",
+                    "status": "DISPATCHED",
+                    "description": disp_desc,
+                    "created_at": now_iso,
+                }
+                # Target the authoritative Supabase 'automated_actions' table
+                try:
+                    client.table("automated_actions").upsert({
+                        **payload,
+                        "case_id": case_id if case_id else None,
+                    }).execute()
+                except Exception as sb_err:
+                    sb_msg = str(sb_err)
+                    if "23503" in sb_msg or "foreign key" in sb_msg.lower():
+                        # Case ID not registered in cloud undertrial_cases: persist without foreign key constraint
+                        client.table("automated_actions").upsert({
+                            **payload,
+                            "case_id": None,
+                        }).execute()
+                    else:
+                        logger.warning(f"record_dispatched_action Supabase automated_actions error: {sb_err}")
+    except Exception as e:
+        logger.warning(f"record_dispatched_action Supabase error: {e}")
+
+    return {
+        "id": action_id,
+        "case_id": case_id,
+        "action_type": action_type,
+        "status": "DISPATCHED",
+        "created_at": now_iso,
+    }
+
+
+def get_dispatched_actions() -> list:
+    """Retrieve all dispatched action records ordered by most recent dispatch."""
+    rows = []
+    try:
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dispatched_actions (
+                id TEXT PRIMARY KEY,
+                case_id TEXT,
+                action_type TEXT,
+                priority TEXT DEFAULT 'MEDIUM',
+                status TEXT DEFAULT 'DISPATCHED',
+                description TEXT,
+                dispatched_by_id TEXT,
+                dispatched_by_name TEXT,
+                dispatched_by_role TEXT,
+                target_role TEXT,
+                result_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute("SELECT * FROM dispatched_actions ORDER BY created_at DESC")
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+    except Exception as e:
+        logger.warning(f"get_dispatched_actions SQLite error: {e}")
+
+    # Synchronize / enrich with Supabase automated_actions if active
+    try:
+        from app.supabase_adapter import get_supabase_client, is_supabase_active
+        if is_supabase_active():
+            client = get_supabase_client()
+            if client:
+                res = client.table("automated_actions").select("*").eq("status", "DISPATCHED").execute()
+                if res and res.data:
+                    existing_ids = {r.get("id") for r in rows if r.get("id")}
+                    for item in res.data:
+                        act_id = item.get("id")
+                        if act_id and act_id not in existing_ids:
+                            rows.append({
+                                "id": act_id,
+                                "case_id": item.get("case_id"),
+                                "action_type": item.get("action_type"),
+                                "priority": item.get("priority", "MEDIUM"),
+                                "status": "DISPATCHED",
+                                "description": item.get("description", ""),
+                                "dispatched_by_name": "Institutional Officer",
+                                "dispatched_by_role": "DLSA_OFFICER",
+                                "created_at": item.get("created_at"),
+                                "updated_at": item.get("created_at"),
+                            })
+                            existing_ids.add(act_id)
+    except Exception as e:
+        logger.warning(f"get_dispatched_actions Supabase sync error: {e}")
+
+    return rows
+
+
+def get_dispatched_actions_map() -> dict:
+    """Retrieve mapping of action_id -> dispatched record for O(1) status enrichment."""
+    actions = get_dispatched_actions()
+    return {a["id"]: a for a in actions if "id" in a}
+
+
+def add_police_action_from_requisition(
+    action_id: str,
+    case_id: str,
+    police_station_id: str,
+    title: str,
+    description: str,
+    requested_by: str = "DLSA_OFFICER",
+) -> bool:
+    """Insert a police requisition into police_actions table so station desk receives it."""
+    pol_id = f"POL-{action_id}" if not action_id.startswith("POL-") else action_id
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cnt = 0
+    try:
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO police_actions
+                (id, case_id, police_station_id, action_type, title, description, requested_by, status, created_at)
+            VALUES (?, ?, ?, 'DOCUMENT_REQUISITION', ?, ?, ?, 'PENDING', ?)
+            """,
+            (pol_id, case_id, police_station_id or "ps_civil_lines", title, description, requested_by, now_iso),
+        )
+        conn.commit()
+        cnt = cursor.rowcount
+    except Exception as e:
+        logger.warning(f"add_police_action_from_requisition error: {e}")
+    finally:
+        conn.close()
+
+    # Dual-write to Supabase if active
+    try:
+        from app.supabase_adapter import get_supabase_client, is_supabase_active
+        if is_supabase_active():
+            client = get_supabase_client()
+            if client:
+                client.table("police_actions").upsert({
+                    "id": pol_id,
+                    "case_id": case_id,
+                    "police_station_id": police_station_id or "ps_civil_lines",
+                    "action_type": "DOCUMENT_REQUISITION",
+                    "title": title,
+                    "description": description,
+                    "requested_by": requested_by,
+                    "status": "PENDING",
+                    "created_at": now_iso,
+                }).execute()
+    except Exception:
+        pass
+    return cnt > 0
+
+
+def record_bail_action_initiated(
+    case_id: str,
+    user_id: str,
+    user_name: str,
+    user_role: str,
+    draft_text: str = "",
+) -> dict:
+    """Initialize or update bail petition application upon action dispatch."""
+    app_id = f"bail_{uuid.uuid4().hex[:12]}"
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    generated_text = draft_text or (
+        f"IN THE COURT OF CHIEF METROPOLITAN MAGISTRATE\n"
+        f"APPLICATION UNDER SECTION 479 OF BHARATIYA NAGARIK SURAKSHA SANHITA, 2023\n\n"
+        f"IN THE MATTER OF: Case {case_id}\n"
+        f"Applicant/Undertrial Prisoner through DLSA Legal Aid Services.\n\n"
+        f"PRAYER: That the Applicant has served requisite statutory custody under Section 479 BNSS "
+        f"and is entitled to release on bail on personal bond.\n"
+        f"Date: {now_iso[:10]}\nDispatched by: {user_name} ({user_role})"
+    )
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM bail_applications WHERE case_id = ?", (case_id,))
+        row = cursor.fetchone()
+        if row:
+            app_id = row[0]
+            cursor.execute(
+                """
+                UPDATE bail_applications
+                SET petition_draft_text = COALESCE(?, petition_draft_text),
+                    status = CASE WHEN status = 'COUNSEL_SIGNED_OFF' THEN status ELSE 'DRAFT_GENERATED' END,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (generated_text, now_iso, app_id),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO bail_applications
+                    (id, case_id, statutory_section, petition_draft_text, advocate_signed_off,
+                     status, created_at, updated_at)
+                VALUES (?, ?, 'Section 479 BNSS, 2023', ?, 0, 'DRAFT_GENERATED', ?, ?)
+                """,
+                (app_id, case_id, generated_text, now_iso, now_iso),
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"record_bail_action_initiated SQLite error: {e}")
+
+    # Dual-write to Supabase if active
+    try:
+        from app.supabase_adapter import get_supabase_client, is_supabase_active
+        if is_supabase_active():
+            client = get_supabase_client()
+            if client:
+                client.table("bail_applications").upsert({
+                    "id": app_id,
+                    "case_id": case_id,
+                    "statutory_section": "Section 479 BNSS, 2023",
+                    "petition_draft_text": generated_text,
+                    "status": "DRAFT_GENERATED",
+                    "updated_at": now_iso,
+                }).execute()
+    except Exception:
+        pass
+
+    return {"id": app_id, "case_id": case_id, "status": "DRAFT_GENERATED"}
 
 
 

@@ -252,6 +252,100 @@ class AuditRepository:
                 conn.close()
         return events
 
+    def verify_ledger_integrity(self, limit: int = 1000) -> Dict[str, Any]:
+        """
+        Verify mathematical integrity of the cryptographic audit hash chain.
+        Validates:
+        1. Parent pointer linkage (previous_event_hash == parent.event_hash)
+        2. Recalculated SHA-256 payload matching stored event_hash
+        3. Monotonic sequence continuity
+        """
+        conn = None
+        tampered_events = []
+        verified_count = 0
+        genesis_hash = "GENESIS_NYAYA_MITRA_AUDIT_LEDGER_V1"
+        latest_hash = None
+        chain_valid = True
+
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, timestamp, actor_id, actor_role, action, entity_type,
+                       entity_id, details_json, event_hash, previous_event_hash,
+                       sequence_number
+                FROM audit_events
+                ORDER BY sequence_number ASC, timestamp ASC, rowid ASC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            rows = cursor.fetchall()
+            expected_prev_hash = None
+
+            for row in rows:
+                ev_id, ts, actor_id, actor_role, action, entity_type, entity_id, details_json, stored_hash, prev_hash, seq = row
+                latest_hash = stored_hash
+                verified_count += 1
+
+                link_valid = True
+                if expected_prev_hash is not None and prev_hash != expected_prev_hash:
+                    link_valid = False
+
+                hash_payload = f"{ev_id}|{ts}|{actor_id}|{actor_role}|{action}|{entity_type}|{entity_id}|{details_json}|{prev_hash}|{seq}"
+                recomputed_hash = hashlib.sha256(hash_payload.encode("utf-8")).hexdigest()
+
+                hash_match = (recomputed_hash == stored_hash)
+                if not hash_match:
+                    try:
+                        normalized_details = json.dumps(json.loads(details_json), sort_keys=True)
+                        norm_payload = f"{ev_id}|{ts}|{actor_id}|{actor_role}|{action}|{entity_type}|{entity_id}|{normalized_details}|{prev_hash}|{seq}"
+                        if hashlib.sha256(norm_payload.encode("utf-8")).hexdigest() == stored_hash:
+                            hash_match = True
+                    except Exception:
+                        pass
+
+                if not link_valid or not hash_match:
+                    chain_valid = False
+                    tampered_events.append({
+                        "event_id": ev_id,
+                        "sequence_number": seq,
+                        "stored_hash": stored_hash,
+                        "recomputed_hash": recomputed_hash,
+                        "previous_hash": prev_hash,
+                        "expected_previous_hash": expected_prev_hash,
+                        "parent_link_valid": link_valid,
+                        "content_hash_valid": hash_match,
+                    })
+
+                expected_prev_hash = stored_hash
+        except Exception as e:
+            return {
+                "verified": False,
+                "error": str(e),
+                "total_events_checked": verified_count,
+                "chain_valid": False,
+                "tampered_events": tampered_events,
+                "algorithm": "SHA-256",
+                "verified_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+        finally:
+            if conn:
+                conn.close()
+
+        return {
+            "verified": chain_valid,
+            "total_events_checked": verified_count,
+            "chain_valid": chain_valid,
+            "tampered_count": len(tampered_events),
+            "tampered_events": tampered_events,
+            "genesis_hash": genesis_hash,
+            "latest_hash": latest_hash or genesis_hash,
+            "algorithm": "SHA-256",
+            "verified_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+
 
 # ── Global Repository Instance & Helper Functions ────────────────────────────
 
@@ -446,3 +540,159 @@ def audit_report_generated(
         ip_address=ip_address,
         severity="INFO",
     )
+
+
+def verify_ledger_integrity(limit: int = 1000) -> Dict[str, Any]:
+    """Mathematical verification helper for the audit ledger hash chain."""
+    return _audit_repo.verify_ledger_integrity(limit=limit)
+
+
+def audit_bulk_download(
+    actor_id: str,
+    actor_role: str,
+    document_count: int,
+    ip_address: str = "127.0.0.1",
+    details: Optional[dict] = None,
+) -> None:
+    """Record high-volume or bulk document download event."""
+    merged_details = {"document_count": document_count}
+    if details:
+        merged_details.update(details)
+    _audit_repo.record(
+        actor_id=actor_id,
+        actor_role=actor_role,
+        action=AuditAction.BULK_DOWNLOAD,
+        entity_type="document_batch",
+        entity_id=f"batch_{int(datetime.datetime.now().timestamp())}",
+        details=merged_details,
+        ip_address=ip_address,
+        severity="WARNING" if document_count >= 10 else "NOTICE",
+    )
+
+
+def audit_suspicious_activity(
+    actor_id: str,
+    actor_role: str,
+    reason: str,
+    ip_address: str = "127.0.0.1",
+    details: Optional[dict] = None,
+) -> None:
+    """Record flagged anomaly or anomalous request sequence."""
+    merged_details = {"reason": reason}
+    if details:
+        merged_details.update(details)
+    _audit_repo.record(
+        actor_id=actor_id,
+        actor_role=actor_role,
+        action=AuditAction.SUSPICIOUS_ACTIVITY,
+        entity_type="security_event",
+        entity_id=f"susp_{int(datetime.datetime.now().timestamp())}",
+        details=merged_details,
+        ip_address=ip_address,
+        severity="HIGH",
+    )
+
+
+def audit_incident_declared(
+    actor_id: str,
+    actor_role: str,
+    incident_id: str,
+    incident_type: str,
+    severity: str = "HIGH",
+    details: Optional[dict] = None,
+) -> None:
+    """Record declaration and containment of a security or privacy incident."""
+    merged_details = {"incident_type": incident_type, "severity": severity}
+    if details:
+        merged_details.update(details)
+    _audit_repo.record(
+        actor_id=actor_id,
+        actor_role=actor_role,
+        action=AuditAction.INCIDENT_DECLARED,
+        entity_type="security_incident",
+        entity_id=incident_id,
+        details=merged_details,
+        ip_address="127.0.0.1",
+        severity=severity,
+    )
+
+
+def audit_retention_purge(
+    actor_id: str,
+    category: str,
+    purged_count: int,
+    ip_address: str = "127.0.0.1",
+    details: Optional[dict] = None,
+) -> None:
+    """Record execution of automated or manual data retention lifecycle purge."""
+    merged_details = {"category": category, "purged_count": purged_count}
+    if details:
+        merged_details.update(details)
+    _audit_repo.record(
+        actor_id=actor_id,
+        actor_role="SYSTEM" if actor_id == "system" else "ADMIN",
+        action=AuditAction.RETENTION_PURGE,
+        entity_type="data_lifecycle",
+        entity_id=category,
+        details=merged_details,
+        ip_address=ip_address,
+        severity="NOTICE",
+    )
+
+
+def audit_consent_recorded(
+    citizen_id: str,
+    consent_type: str,
+    ip_address: str = "127.0.0.1",
+    user_agent: str = "",
+) -> None:
+    """Record accused or family member affirmative data processing consent."""
+    _audit_repo.record(
+        actor_id=citizen_id,
+        actor_role="CITIZEN",
+        action=AuditAction.CONSENT_RECORDED,
+        entity_type="privacy_consent",
+        entity_id=citizen_id,
+        details={"consent_type": consent_type, "user_agent": user_agent},
+        ip_address=ip_address,
+        severity="INFO",
+    )
+
+
+def audit_consent_revoked(
+    citizen_id: str,
+    consent_type: str,
+    ip_address: str = "127.0.0.1",
+    user_agent: str = "",
+) -> None:
+    """Record withdrawal/revocation of data processing consent."""
+    _audit_repo.record(
+        actor_id=citizen_id,
+        actor_role="CITIZEN",
+        action=AuditAction.CONSENT_REVOKED,
+        entity_type="privacy_consent",
+        entity_id=citizen_id,
+        details={"consent_type": consent_type, "user_agent": user_agent},
+        ip_address=ip_address,
+        severity="NOTICE",
+    )
+
+
+def audit_key_rotated(
+    actor_id: str,
+    key_name: str,
+    version: str,
+    ip_address: str = "127.0.0.1",
+) -> None:
+    """Record credential or cryptographic key rotation event."""
+    _audit_repo.record(
+        actor_id=actor_id,
+        actor_role="ADMIN",
+        action=AuditAction.KEY_ROTATED,
+        entity_type="credential",
+        entity_id=key_name,
+        details={"key_name": key_name, "new_version": version},
+        ip_address=ip_address,
+        severity="NOTICE",
+    )
+

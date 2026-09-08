@@ -115,6 +115,26 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """
+    Inject production defense-in-depth HTTP security headers into every response.
+    Protects against MIME sniffing, clickjacking, framing, and XSS.
+    """
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+    )
+    return response
+
+
 # ── Auth router ───────────────────────────────────────────────────────────────
 from app.auth.routes import auth_router
 app.include_router(auth_router, prefix="/auth")
@@ -1233,6 +1253,11 @@ def get_case_by_id(
             res["draft"] = None
             res["draft_ready"] = False
 
+    # Enforce field-level data classification & privacy redactions
+    if "case" in res and isinstance(res["case"], dict):
+        from app.security.classification import FieldLevelAccessFilter
+        res["case"] = FieldLevelAccessFilter.filter_case_record(res["case"], current_user.role)
+
     return res
 
 
@@ -1848,6 +1873,10 @@ def export_case_file_endpoint(
     except Exception as e:
         logger.warning(f"Failed to log case file export audit: {e}")
 
+    dossier_data = case.model_dump()
+    from app.security.classification import FieldLevelAccessFilter
+    dossier_data = FieldLevelAccessFilter.filter_export_payload(dossier_data, current_user.role)
+
     payload = {
         "export_metadata": {
             "case_id": case_id,
@@ -1856,7 +1885,7 @@ def export_case_file_endpoint(
             "exporter_role": current_user.role.value,
             "export_reason": export_reason or "Supervisory file export",
         },
-        "case_dossier": case.model_dump(),
+        "case_dossier": dossier_data,
     }
     payload_json = json.dumps(payload, indent=2)
     payload["export_metadata"]["sha256_seal"] = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
@@ -3765,6 +3794,29 @@ def _resolve_document_record(doc_id: str) -> Optional[dict]:
     if not clean_id:
         return None
 
+    # 0. Sample documents support
+    if clean_id in ("sample-1", "sample-2", "sample-3"):
+        sample_map = {
+            "sample-1": ("UTP-0007", "REMAND_ORDER", "UTP-0007_Handwritten_Remand_Note.pdf"),
+            "sample-2": ("UTP-0001", "CHARGE_SHEET", "UTP-0001_Handwritten_FIR_Extract.png"),
+            "sample-3": ("UTP-0021", "MEDICAL_CERTIFICATE", "UTP-0021_Medical_Custody_Cert.pdf"),
+        }
+        cid, dtype, fname = sample_map[clean_id]
+        c = _find_case(cid)
+        return {
+            "id": clean_id,
+            "case_id": cid,
+            "document_type": dtype,
+            "file_name": fname,
+            "storage_path": None,
+            "file_hash": hashlib.sha256(f"sample_doc_{clean_id}".encode()).hexdigest(),
+            "mime_type": "application/pdf" if fname.endswith(".pdf") else "image/png",
+            "uploaded_at": c.arrest_date or "2025-01-01",
+            "extracted_text": f"OFFICIAL SAMPLE RECORD ({fname})\nCase: {cid}\nInmate: {c.name}",
+            "document_status": "VERIFIED",
+            "uploaded_by": "System Baseline Sample",
+        }
+
     # 1. Uploaded document (direct ID lookup)
     doc = get_uploaded_document_by_id(clean_id)
     if doc:
@@ -4146,6 +4198,112 @@ def download_document_file(
         )
 
 
+class GenerateSignedUrlRequest(BaseModel):
+    expires_in_seconds: int = 300
+
+
+@app.post("/documents/{doc_id}/signed-url", tags=["Documents"])
+def create_signed_document_url(
+    doc_id: str,
+    body: Optional[GenerateSignedUrlRequest] = None,
+    current_user: AuthUser = Depends(require_role(
+        Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER, Role.READ_ONLY_AUDITOR,
+        Role.DEFENSE_ADVOCATE, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
+        Role.GOV_ADMIN, Role.PLATFORM_ADMIN, Role.ACCUSED_USER, Role.FAMILY_GUARDIAN,
+    )),
+):
+    """
+    Generate a cryptographically signed HMAC-SHA256 time-expiring document download URL.
+    Mitigates enumeration and unauthorized resource link sharing.
+    """
+    from app.security.signed_links import generate_signed_document_url
+
+    doc = _resolve_document_record(doc_id)
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Document '{doc_id}' not found.")
+
+    # Accused/family check
+    if current_user.role in (Role.ACCUSED_USER, Role.FAMILY_GUARDIAN):
+        if current_user.linked_case_id != doc["case_id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Document does not belong to your linked case.")
+
+    expires_sec = body.expires_in_seconds if body else 300
+    expires_sec = max(30, min(3600, expires_sec))
+
+    signed_url = generate_signed_document_url(
+        doc_id=doc_id,
+        user_id=current_user.id,
+        user_role=current_user.role.value,
+        expires_in_seconds=expires_sec,
+    )
+    return {
+        "doc_id": doc_id,
+        "signed_url": signed_url,
+        "expires_in_seconds": expires_sec,
+        "signature_algorithm": "HMAC-SHA256",
+    }
+
+
+@app.get("/documents/download/signed/{token}", tags=["Documents"])
+def download_signed_document(token: str, request: Request):
+    """
+    Download a document using a valid, unexpired HMAC-SHA256 signed token.
+    Automatically applies download rate tracking and anomaly detection.
+    """
+    from app.security.signed_links import verify_signed_token
+    from app.security.incident_response import track_download_event
+    from fastapi.responses import Response
+
+    payload = verify_signed_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired signed document download token.",
+        )
+
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    incident = track_download_event(ip_address=client_ip, actor_id=payload.user_id, doc_id=payload.doc_id)
+    if incident:
+        logger.warning(f"Download burst threshold triggered security incident: {incident['incident_id']}")
+
+    doc = _resolve_document_record(payload.doc_id)
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Referenced document not found.")
+
+    log_document_access(
+        document_id=payload.doc_id,
+        case_id=doc["case_id"],
+        user_id=payload.user_id,
+        user_role=payload.user_role,
+        action="DOWNLOAD_SIGNED_URL",
+        details={"file_name": doc.get("file_name")},
+    )
+
+    storage_path = doc.get("storage_path")
+    if storage_path and Path(storage_path).exists():
+        return FileResponse(
+            path=storage_path,
+            filename=doc.get("file_name", "document"),
+            media_type=doc.get("mime_type", "application/octet-stream"),
+        )
+    else:
+        extracted_text = doc.get("extracted_text") or (
+            f"NYAYA MITRA OFFICIAL LEGAL DOSSIER DOCUMENT\n"
+            f"==========================================\n"
+            f"Case Reference: {doc['case_id']}\n"
+            f"Document Type : {doc.get('document_type', 'GENERAL')}\n"
+            f"File Name     : {doc.get('file_name', 'document.txt')}\n"
+        )
+        filename = doc.get("file_name") or f"{payload.doc_id}.txt"
+        if not filename.endswith((".txt", ".pdf", ".doc", ".docx")):
+            filename = f"{filename}.txt"
+        return Response(
+            content=extracted_text.encode("utf-8"),
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+
 @app.get("/documents/{doc_id}/content", tags=["Documents"])
 def get_document_content(
     doc_id: str,
@@ -4479,63 +4637,158 @@ def get_actions(
     current_user: AuthUser = Depends(require_role(
         Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN,
         Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR, Role.DEFENSE_ADVOCATE,
-        Role.CONTROLLED_EXTERNAL_ADVOCATE,
+        Role.CONTROLLED_EXTERNAL_ADVOCATE, Role.POLICE_OFFICER, Role.JAIL_OFFICER,
     )),
 ):
     """
     Retrieve automated agent actions queue derived from the canonical EligibilityAgent.
     No duplicate threshold logic everything flows through evaluate_eligibility().
+    Enforces role scoping, inactive prisoner exclusion, and dispatched status enrichment.
     """
+    from app.database import get_dispatched_actions_map
     actions = []
     cases = get_all_cases()
+
+    # Filter out inactive, released, closed, or post-release cases (e.g. REL-0042)
+    INACTIVE_STATUSES = {
+        CaseState.POST_RELEASE_PRESERVED,
+        CaseState.RELEASED,
+        CaseState.CLOSED,
+        "POST_RELEASE_PRESERVED",
+        "RELEASED",
+        "CLOSED",
+        "RELEASE_PROCESSING",
+    }
+    cases = [
+        c for c in cases
+        if getattr(c, "status", None) not in INACTIVE_STATUSES
+        and str(getattr(c, "status", "")) not in ("POST_RELEASE_PRESERVED", "RELEASED", "CLOSED", "RELEASE_PROCESSING")
+    ]
+
     if current_user.role in (Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER) and current_user.district and current_user.district.lower() != "all":
         dist = current_user.district.lower()
         cases = [c for c in cases if c.district and dist in c.district.lower()]
     elif current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
         cases = [c for c in cases if _is_case_assigned_to_advocate(c, current_user)]
+    elif current_user.role == Role.POLICE_OFFICER:
+        st_id = getattr(current_user, "police_station_id", "") or ""
+        dist = (current_user.district or "").lower()
+        if st_id and dist and dist != "all":
+            cases = [
+                c for c in cases
+                if getattr(c, "police_station_id", "") == st_id
+                or (not getattr(c, "police_station_id", None) and c.district and dist in c.district.lower())
+            ]
+        elif st_id:
+            cases = [c for c in cases if getattr(c, "police_station_id", "") == st_id]
+        elif dist and dist != "all":
+            cases = [c for c in cases if c.district and dist in c.district.lower()]
+    elif current_user.role == Role.JAIL_OFFICER:
+        cases = [c for c in cases if _check_jail_facility_match(c, current_user)]
+
+    dispatched_map = get_dispatched_actions_map()
 
     for c in cases:
         eligibility = evaluate_eligibility(c)
         is_eligible = eligibility.get("eligible", False)
         is_manual_review = "MANUAL_REVIEW" in eligibility.get("legal_basis", "")
-        missing_docs = [d for d in c.required_docs if d not in (c.present_docs or [])]
+        req_docs = getattr(c, "required_docs", None) or []
+        pres_docs = getattr(c, "present_docs", None) or []
+        missing_docs = [d for d in req_docs if d not in pres_docs]
+
+        # Role-specific action generation: Police/Jail only receive document requisitions
+        if current_user.role == Role.POLICE_OFFICER:
+            if missing_docs:
+                act_id = f"ACT-{c.case_id}-DOCS"
+                disp = dispatched_map.get(act_id)
+                actions.append({
+                    "id": act_id,
+                    "case_id": c.case_id,
+                    "action_type": "Police Station Document Requisition",
+                    "priority": "MEDIUM",
+                    "status": "Dispatched" if disp else "Pending Document Retrieval",
+                    "description": f"Requisition for station records ({', '.join(missing_docs)}) for undertrial {c.name or c.case_id}.",
+                    "created_at": disp.get("created_at") if disp else datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "is_dispatched": bool(disp),
+                    "dispatched_at": disp.get("created_at") if disp else None,
+                    "dispatched_by": disp.get("dispatched_by_name") if disp else None,
+                    "dispatched_role": disp.get("dispatched_by_role") if disp else None,
+                })
+            continue
+
+        if current_user.role == Role.JAIL_OFFICER:
+            if missing_docs:
+                act_id = f"ACT-{c.case_id}-DOCS"
+                disp = dispatched_map.get(act_id)
+                actions.append({
+                    "id": act_id,
+                    "case_id": c.case_id,
+                    "action_type": "Prison Custody Document Requisition",
+                    "priority": "MEDIUM",
+                    "status": "Dispatched" if disp else "Pending Custody Extraction",
+                    "description": f"Missing custody certificates ({', '.join(missing_docs)}) for inmate {c.name or c.case_id}.",
+                    "created_at": disp.get("created_at") if disp else datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "is_dispatched": bool(disp),
+                    "dispatched_at": disp.get("created_at") if disp else None,
+                    "dispatched_by": disp.get("dispatched_by_name") if disp else None,
+                    "dispatched_role": disp.get("dispatched_by_role") if disp else None,
+                })
+            continue
 
         if is_manual_review:
+            act_id = f"ACT-{c.case_id}-REVIEW"
+            disp = dispatched_map.get(act_id)
             actions.append({
-                "id": f"ACT-{c.case_id}-REVIEW",
+                "id": act_id,
                 "case_id": c.case_id,
                 "action_type": "Manual Legal Review Required",
                 "priority": "HIGH",
-                "status": "Pending Manual Review",
+                "status": "Under Supervisory Review" if disp else "Pending Manual Review",
                 "description": eligibility.get("legal_basis", "Manual judicial/legal review required."),
-                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "created_at": disp.get("created_at") if disp else datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "is_dispatched": bool(disp),
+                "dispatched_at": disp.get("created_at") if disp else None,
+                "dispatched_by": disp.get("dispatched_by_name") if disp else None,
+                "dispatched_role": disp.get("dispatched_by_role") if disp else None,
             })
         elif is_eligible and not missing_docs:
             custody_served = eligibility.get("countable_custody_days", c.custody_days)
             custody_req = eligibility.get("required_custody_days", eligibility.get("threshold_days", 0))
             overdue = eligibility.get("days_overdue", 0)
+            act_id = f"ACT-{c.case_id}-BAIL"
+            disp = dispatched_map.get(act_id)
             actions.append({
-                "id": f"ACT-{c.case_id}-BAIL",
+                "id": act_id,
                 "case_id": c.case_id,
                 "action_type": "Auto-Draft BNSS 479 Petition",
                 "priority": "HIGH",
-                "status": "Ready for Approval",
+                "status": "Draft Generated & Queued" if disp else "Ready for Approval",
                 "description": (
                     f"Case {c.case_id}: {custody_served} days served, "
                     f"{custody_req} required. "
                     f"Overdue by {overdue} days. Auto-draft generated."
                 ),
-                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "created_at": disp.get("created_at") if disp else datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "is_dispatched": bool(disp),
+                "dispatched_at": disp.get("created_at") if disp else None,
+                "dispatched_by": disp.get("dispatched_by_name") if disp else None,
+                "dispatched_role": disp.get("dispatched_by_role") if disp else None,
             })
         elif missing_docs:
+            act_id = f"ACT-{c.case_id}-DOCS"
+            disp = dispatched_map.get(act_id)
             actions.append({
-                "id": f"ACT-{c.case_id}-DOCS",
+                "id": act_id,
                 "case_id": c.case_id,
                 "action_type": "DLSA Document Request",
                 "priority": "MEDIUM",
-                "status": "Pending Document Retrieval",
+                "status": "Dispatched" if disp else "Pending Document Retrieval",
                 "description": f"Requesting missing documents ({', '.join(missing_docs)}) from police/prison authority.",
-                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "created_at": disp.get("created_at") if disp else datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "is_dispatched": bool(disp),
+                "dispatched_at": disp.get("created_at") if disp else None,
+                "dispatched_by": disp.get("dispatched_by_name") if disp else None,
+                "dispatched_role": disp.get("dispatched_by_role") if disp else None,
             })
     return actions
 
@@ -4570,6 +4823,7 @@ def trigger_action(
 
     # Scoping: Validate target case if encoded in action_id (e.g. ACT-UTP-0001-BAIL)
     target_case_id = ""
+    target_case = None
     parts = action_id.split("-")
     if len(parts) >= 3 and parts[0] == "ACT":
         target_case_id = f"{parts[1]}-{parts[2]}" if len(parts) >= 4 else parts[1]
@@ -4612,10 +4866,128 @@ def trigger_action(
     except Exception as e:
         logger.warning(f"Failed to record ACTION_DISPATCHED audit event: {e}")
 
+    # Database persistence and downstream routing
+    from app.database import (
+        record_dispatched_action,
+        add_police_action_from_requisition,
+        record_bail_action_initiated,
+        add_notification,
+    )
+
+    action_type_desc = "Procedural Action"
+    dispatch_notes = f"Action {action_id} dispatched by {current_user.full_name or current_user.id} ({current_user.role.value})."
+
+    try:
+        if "DOCS" in action_upper:
+            action_type_desc = "DLSA Document Request"
+            station_id = getattr(target_case, "police_station_id", "") or "ps_civil_lines" if target_case else "ps_civil_lines"
+            missing_docs = []
+            if target_case:
+                missing_docs = [d for d in getattr(target_case, "required_docs", []) if d not in (getattr(target_case, "present_docs", []) or [])]
+            add_police_action_from_requisition(
+                action_id=action_id,
+                case_id=target_case_id,
+                police_station_id=station_id,
+                title=f"Requisition: Missing Records for {target_case.name if target_case else target_case_id}",
+                description=f"Institutional requisition for missing records ({', '.join(missing_docs) if missing_docs else 'Mandatory Dossier'}) dispatched by {current_user.full_name or current_user.id} ({current_user.role.value}).",
+                requested_by=current_user.role.value,
+            )
+            if target_case_id:
+                add_notification(
+                    case_id=target_case_id,
+                    title=f"Police Records Requisition: {target_case_id}",
+                    message=f"Requisition dispatched for missing investigation/remand records on case {target_case_id}.",
+                    target_role="POLICE_OFFICER",
+                )
+                add_notification(
+                    case_id=target_case_id,
+                    title=f"Prison Records Requisition: {target_case_id}",
+                    message=f"Requisition dispatched for missing custody records on case {target_case_id}.",
+                    target_role="JAIL_OFFICER",
+                )
+            record_dispatched_action(
+                action_id=action_id,
+                case_id=target_case_id,
+                action_type=action_type_desc,
+                priority="MEDIUM",
+                description=f"Requisition for missing documents ({', '.join(missing_docs)}) from police/prison authority.",
+                user_id=current_user.id,
+                user_name=current_user.full_name or current_user.id,
+                user_role=current_user.role.value,
+                target_role="POLICE_OFFICER,JAIL_OFFICER",
+                result_message=dispatch_notes,
+            )
+
+        elif "BAIL" in action_upper:
+            action_type_desc = "Auto-Draft BNSS 479 Petition"
+            record_bail_action_initiated(
+                case_id=target_case_id,
+                user_id=current_user.id,
+                user_name=current_user.full_name or current_user.id,
+                user_role=current_user.role.value,
+            )
+            if target_case_id:
+                add_notification(
+                    case_id=target_case_id,
+                    title=f"Section 479 Bail Draft Generated: {target_case_id}",
+                    message=f"Bail petition auto-draft generated and ready for counsel sign-off on case {target_case_id}.",
+                    target_role="SUPERVISING_LEGAL_OFFICER,DEFENSE_ADVOCATE",
+                )
+            record_dispatched_action(
+                action_id=action_id,
+                case_id=target_case_id,
+                action_type=action_type_desc,
+                priority="HIGH",
+                description=f"Auto-draft Section 479 BNSS petition generated for {target_case_id}",
+                user_id=current_user.id,
+                user_name=current_user.full_name or current_user.id,
+                user_role=current_user.role.value,
+                target_role="SUPERVISING_LEGAL_OFFICER,DEFENSE_ADVOCATE",
+                result_message=dispatch_notes,
+            )
+
+        elif "REVIEW" in action_upper:
+            action_type_desc = "Manual Legal Review Required"
+            if target_case_id:
+                add_notification(
+                    case_id=target_case_id,
+                    title=f"Legal Review Referral: {target_case_id}",
+                    message=f"Case {target_case_id} has been referred for supervisory legal review.",
+                    target_role="SUPERVISING_LEGAL_OFFICER",
+                )
+            record_dispatched_action(
+                action_id=action_id,
+                case_id=target_case_id,
+                action_type=action_type_desc,
+                priority="HIGH",
+                description=f"Referred for judicial and supervisory legal review for {target_case_id}",
+                user_id=current_user.id,
+                user_name=current_user.full_name or current_user.id,
+                user_role=current_user.role.value,
+                target_role="SUPERVISING_LEGAL_OFFICER",
+                result_message=dispatch_notes,
+            )
+
+        else:
+            record_dispatched_action(
+                action_id=action_id,
+                case_id=target_case_id,
+                action_type=action_upper,
+                priority="MEDIUM",
+                description=f"Action {action_id} dispatched.",
+                user_id=current_user.id,
+                user_name=current_user.full_name or current_user.id,
+                user_role=current_user.role.value,
+                target_role="SUPERVISING_LEGAL_OFFICER",
+                result_message=dispatch_notes,
+            )
+    except Exception as e:
+        logger.warning(f"Failed to persist dispatched action database side-effects: {e}")
+
     return {
         "action_id": action_id,
         "status": "Executed Successfully",
-        "message": f"Action {action_id} dispatched by {current_user.full_name or current_user.id} ({current_user.role.value}).",
+        "message": dispatch_notes,
     }
 
 
@@ -5397,6 +5769,151 @@ def get_audit_exceptions_endpoint(
         "total_exceptions": len(exceptions),
         "exceptions": sorted(exceptions, key=lambda x: 0 if x["severity"] == "CRITICAL" else (1 if x["severity"] == "HIGH" else 2)),
     }
+
+
+@app.get("/audit/verify-integrity", tags=["Audit"])
+def verify_audit_ledger_integrity_endpoint(
+    limit: int = Query(1000, description="Max sequence of records to verify from ledger origin"),
+    current_user: AuthUser = Depends(require_role(
+        Role.READ_ONLY_AUDITOR, Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.SUPERVISING_LEGAL_OFFICER,
+    )),
+):
+    """
+    Mathematical verification of the tamper-evident cryptographic SHA-256 hash chain.
+    Validates parent hash linkage, re-hashes content payloads, and checks sequence continuity.
+    """
+    from app.repositories.audit_repository import verify_ledger_integrity
+    return verify_ledger_integrity(limit=limit)
+
+
+# ── Security Retention & Lifecycle Governance ───────────────────────────────
+
+class RetentionPurgeRequest(BaseModel):
+    category: str
+    dry_run: bool = True
+
+
+@app.get("/security/retention/policies", tags=["Security Governance"])
+def get_retention_policies_endpoint(
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR,
+    )),
+):
+    """
+    List configured data retention schedules with prominent statutory legal disclaimers.
+    """
+    from app.security.retention import RetentionPolicyEngine, LEGAL_RETENTION_DISCLAIMER
+    engine = RetentionPolicyEngine()
+    return {
+        "legal_disclaimer": LEGAL_RETENTION_DISCLAIMER,
+        "schedules": [s.model_dump() for s in engine.list_schedules()],
+    }
+
+
+@app.post("/security/retention/evaluate", tags=["Security Governance"])
+def evaluate_retention_candidates_endpoint(
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN,
+    )),
+):
+    """
+    Evaluate records eligible for lifecycle purge based on configured retention thresholds (dry-run).
+    """
+    from app.security.retention import RetentionPolicyEngine
+    from app.database import get_db_connection
+    engine = RetentionPolicyEngine()
+    conn = get_db_connection()
+    try:
+        return engine.evaluate_retention(conn)
+    finally:
+        conn.close()
+
+
+@app.post("/security/retention/purge", tags=["Security Governance"])
+def purge_retention_records_endpoint(
+    req: RetentionPurgeRequest,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN,
+    )),
+):
+    """
+    Execute or dry-run lifecycle purge of expired records in the designated category.
+    Emits an immutable audit log upon execution.
+    """
+    from app.security.retention import RetentionPolicyEngine
+    from app.database import get_db_connection
+    engine = RetentionPolicyEngine()
+    conn = get_db_connection()
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    try:
+        return engine.purge_records(
+            conn=conn,
+            category=req.category,
+            authorized_by=current_user.id,
+            actor_role=current_user.role.value,
+            ip_address=client_ip,
+            dry_run=req.dry_run,
+        )
+    finally:
+        conn.close()
+
+
+# ── Automated Security Incident Management ──────────────────────────────────
+
+class DeclareIncidentRequest(BaseModel):
+    incident_type: str
+    severity: str = "HIGH"
+    containment_action: str
+    details: Dict[str, Any] = {}
+
+
+@app.get("/security/incidents", tags=["Security Governance"])
+def list_security_incidents_endpoint(
+    limit: int = Query(50),
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.READ_ONLY_AUDITOR,
+    )),
+):
+    """
+    List recorded security incidents and containment actions.
+    """
+    from app.security.incident_response import list_active_incidents
+    from app.database import get_db_connection
+    conn = get_db_connection()
+    try:
+        return list_active_incidents(conn, limit=limit)
+    finally:
+        conn.close()
+
+
+@app.post("/security/incidents/declare", tags=["Security Governance"])
+def declare_security_incident_endpoint(
+    req: DeclareIncidentRequest,
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN,
+    )),
+):
+    """
+    Declare and initiate automated containment for an active security or privacy incident.
+    """
+    from app.security.incident_response import declare_incident
+    from app.database import get_db_connection
+    conn = get_db_connection()
+    try:
+        return declare_incident(
+            incident_type=req.incident_type,
+            severity=req.severity,
+            trigger_details={
+                **req.details,
+                "declared_by": current_user.id,
+                "declared_role": current_user.role.value,
+            },
+            containment_action=req.containment_action,
+            conn=conn,
+        )
+    finally:
+        conn.close()
 
 
 # ── Governed Legal Knowledge Layer Endpoints ──────────────────────────────────

@@ -369,6 +369,12 @@ function App() {
                       "DLSA_OFFICER",
                       "SUPERVISING_LEGAL_OFFICER",
                       "DEFENSE_ADVOCATE",
+                      "CONTROLLED_EXTERNAL_ADVOCATE",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "READ_ONLY_AUDITOR",
+                      "POLICE_OFFICER",
+                      "JAIL_OFFICER",
                     ]}
                   >
                     <ActionsPage />

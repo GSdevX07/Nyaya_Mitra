@@ -28,6 +28,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/legal-sources", label: "Legal Knowledge Audit" },
         { path: "/reports", label: "Reports" },
         { path: "/evidence", label: "Evidence Integrity" },
+        { path: "/actions", label: "Actions Ledger" },
       ];
 
     case "DEFENSE_ADVOCATE":
@@ -45,6 +46,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/advocate", label: "My Assigned Cases" },
         { path: "/documents", label: "Authorized Documents" },
         { path: "/legal-sources", label: "Legal Knowledge Base" },
+        { path: "/actions", label: "Counsel Actions" },
         { path: "/hearings", label: "Hearings" },
       ];
 
@@ -53,6 +55,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/jail", label: "Custody Desk" },
         { path: "/cases", label: "Inmate Roll" },
         { path: "/documents", label: "Intake Documents" },
+        { path: "/actions", label: "Custody Actions" },
         { path: "/hearings", label: "Hearings" },
         { path: "/reports", label: "Custody Reports" },
       ];
@@ -60,12 +63,14 @@ function getNavItemsForRole(role?: Role): NavItem[] {
     case "POLICE_OFFICER":
       return [
         { path: "/police", label: "Police Records Desk" },
+        { path: "/actions", label: "Requisition Actions" },
         { path: "/hearings", label: "Court Production Schedule" },
       ];
 
     case "PLATFORM_ADMIN":
       return [
         { path: "/admin", label: "Admin Console" },
+        { path: "/actions", label: "Action Dispatch Desk" },
         { path: "/reports", label: "Analytics & Reports" },
         { path: "/ingestion", label: "Data Ingestion" },
         { path: "/audit", label: "Audit Logs" },
@@ -77,6 +82,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/gov", label: "State Overview" },
         { path: "/dashboard", label: "Command Center" },
         { path: "/cases", label: "Cases" },
+        { path: "/actions", label: "Actions Desk" },
         { path: "/ingestion", label: "Institutional Feeds" },
         { path: "/identity-review", label: "Identity Review" },
         { path: "/legal-sources", label: "Legal Knowledge Governance" },

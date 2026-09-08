@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Play, Clock, ArrowRight, CheckCircle2, ShieldCheck } from "lucide-react";
+import { Play, Clock, ArrowRight, CheckCircle2, ShieldCheck, FileText } from "lucide-react";
 import { Link } from "react-router-dom";
 import { fetchActions, triggerAction } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -12,6 +12,10 @@ interface ActionItem {
   status: string;
   description: string;
   created_at: string;
+  is_dispatched?: boolean;
+  dispatched_at?: string | null;
+  dispatched_by?: string | null;
+  dispatched_role?: string | null;
 }
 
 export function ActionsPage() {
@@ -27,74 +31,38 @@ export function ActionsPage() {
   const isDlsa = user?.role === "DLSA_OFFICER";
   const isSupervisor = user?.role === "SUPERVISING_LEGAL_OFFICER";
   const isAdvocate = user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE";
-
-  // DLSA officers may dispatch institutional and procedural notices only.
-  const DLSA_PERMITTED_ACTION_TYPES = [
-    "MISSING_DOCUMENT",
-    "DOCUMENT_REQUEST",
-    "LEGAL_AID",
-    "DLSA",
-    "SECTION_479",
-    "REMAND",
-    "PANEL",
-    "FOLLOWUP",
-    "INSTITUTIONAL",
-    "ADVOCATE_ASSIGN",
-    "NOTIFY",
-  ];
-
-  // Supervising Legal Officers execute supervisory escalation, compliance review,
-  // approval queue, and institutional follow-up actions.
-  const SUPERVISOR_PERMITTED_ACTION_TYPES = [
-    "ESCALATION",
-    "REVIEW",
-    "COMPLIANCE",
-    "CORRECTION",
-    "APPROVAL",
-    "SECTION_479",
-    "LEGAL_AID",
-    "MISSING_DOCUMENT",
-    "DOCUMENT_REQUEST",
-    "PANEL",
-    "NOTIFY",
-    "FOLLOWUP",
-    "INSTITUTIONAL",
-  ];
-
-  // Defense advocates may dispatch counsel actions related to their assigned cases
-  const ADVOCATE_PERMITTED_ACTION_TYPES = [
-    "BAIL",
-    "DOCS",
-    "REVIEW",
-    "CORRECTION",
-    "LEGAL_NOTE",
-    "PETITION",
-  ];
+  const isPolice = user?.role === "POLICE_OFFICER";
+  const isJail = user?.role === "JAIL_OFFICER";
+  const isAdmin = user?.role === "PLATFORM_ADMIN";
+  const isGov = user?.role === "GOV_ADMIN";
+  const isAuditor = user?.role === "READ_ONLY_AUDITOR";
 
   const canExecute = can("ACTION_QUEUE") || can("ACTION_EXECUTE");
 
-  // Allow dispatch for permitted action types per role
+  // Determine if current user can execute the action
   const canDispatchAction = (act: ActionItem): boolean => {
     if (!canExecute) return false;
+    const upperId = (act.id || "").toUpperCase();
+    const upperType = (act.action_type || "").toUpperCase();
+    const upperDesc = (act.description || "").toUpperCase();
+
+    const isBail = upperId.includes("-BAIL") || upperType.includes("BAIL") || upperType.includes("479") || upperType.includes("PETITION");
+    const isDocs = upperId.includes("-DOCS") || upperType.includes("DOC") || upperDesc.includes("DOCUMENT") || upperType.includes("REQUISITION");
+    const isReview = upperId.includes("-REVIEW") || upperType.includes("REVIEW");
+
     if (isDlsa) {
-      return DLSA_PERMITTED_ACTION_TYPES.some((allowed) =>
-        act.action_type.toUpperCase().includes(allowed) ||
-        act.description.toUpperCase().includes(allowed)
-      );
+      // DLSA officers have authority over Document Requisitions, Section 479 Petitions, and Review Referrals
+      return isBail || isDocs || isReview;
     }
     if (isSupervisor) {
-      return SUPERVISOR_PERMITTED_ACTION_TYPES.some((allowed) =>
-        act.action_type.toUpperCase().includes(allowed) ||
-        act.description.toUpperCase().includes(allowed)
-      );
+      // Supervising legal officers have supervisory authority over Review, Bail Approval, and Directives
+      return isBail || isDocs || isReview;
     }
     if (isAdvocate) {
-      return ADVOCATE_PERMITTED_ACTION_TYPES.some((allowed) =>
-        act.action_type.toUpperCase().includes(allowed) ||
-        act.description.toUpperCase().includes(allowed)
-      );
+      // Advocates can prepare bail petitions, request documents, and submit clarifications for assigned cases
+      return isBail || isDocs || isReview;
     }
-    return false; // Platform Admins and other non-legal roles cannot dispatch legal actions
+    return false;
   };
 
   const loadActions = async () => {
@@ -121,6 +89,11 @@ export function ActionsPage() {
     try {
       const res = await triggerAction(id);
       setExecutedIds(prev => new Set(prev).add(id));
+      setActions(prev =>
+        prev.map(act =>
+          act.id === id ? { ...act, is_dispatched: true, status: "Dispatched" } : act
+        )
+      );
       setFeedbackMsg({
         type: "success",
         text: res?.message || `Action ${id} successfully dispatched and recorded in the audit trail.`,
@@ -133,6 +106,27 @@ export function ActionsPage() {
     } finally {
       setTriggeringId(null);
     }
+  };
+
+  const getButtonText = (act: ActionItem) => {
+    if (triggeringId === act.id) return "Processing...";
+    const upperId = (act.id || "").toUpperCase();
+    if (upperId.includes("-BAIL")) {
+      if (isDlsa) return "Generate Section 479 Draft";
+      if (isSupervisor) return "Authorize Petition Filing";
+      if (isAdvocate) return "Submit Counsel Motion";
+    }
+    if (upperId.includes("-DOCS")) {
+      if (isDlsa) return "Queue Notice / Request";
+      if (isSupervisor) return "Issue Supervisory Directive";
+      if (isAdvocate) return "Requisition Case Records";
+    }
+    if (upperId.includes("-REVIEW")) {
+      if (isSupervisor) return "Conduct Supervisory Review";
+      if (isDlsa) return "Refer for Legal Review";
+      if (isAdvocate) return "Request Legal Clarification";
+    }
+    return isDlsa ? "Queue Notice / Request" : isAdvocate ? "Submit Counsel Action" : "Execute Institutional Action";
   };
 
   const filteredActions = actions.filter((act) => {
@@ -170,12 +164,12 @@ export function ActionsPage() {
         <div
           className={`p-4 rounded-xl text-xs flex items-center justify-between font-mono shadow-sm ${
             feedbackMsg.type === "success"
-              ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-600"
+              ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
               : "bg-destructive/10 border border-destructive/30 text-destructive"
           }`}
         >
           <span className="flex items-center gap-2">
-            {feedbackMsg.type === "success" ? <CheckCircle2 className="w-4 h-4" /> : null}
+            {feedbackMsg.type === "success" ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : null}
             {feedbackMsg.text}
           </span>
           <button
@@ -225,83 +219,97 @@ export function ActionsPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredActions.map(act => (
-            <div
-              key={act.id}
-              className="p-6 rounded bg-card shadow-sm border border-border hover:border-accent/40 transition-all backdrop-blur-md flex flex-col md:flex-row md:items-center justify-between gap-4"
-            >
-              <div className="space-y-1.5 flex-1">
-                <div className="flex items-center gap-3">
-                  <span className="font-mono text-xs font-semibold text-accent">{act.id}</span>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-accent/10 text-accent border border-accent/20">
-                    {act.priority} PRIORITY
-                  </span>
-                  <span className="text-xs text-muted-foreground font-mono">Case: {act.case_id}</span>
-                </div>
-                <h3 className="text-base font-semibold text-primary">{act.action_type}</h3>
-                <p className="text-xs text-muted-foreground">{act.description}</p>
-              </div>
+          {filteredActions.map((act) => {
+            const isAlreadyDispatched =
+              act.is_dispatched ||
+              executedIds.has(act.id) ||
+              act.status === "Dispatched" ||
+              act.status.includes("Draft Generated") ||
+              act.status.includes("Supervisory Review");
 
-              <div className="flex items-center gap-4 shrink-0 border-t md:border-t-0 border-border pt-4 md:pt-0">
-                <Link
-                  to={`/case/${act.case_id}`}
-                  className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-                >
-                  View Case <ArrowRight className="w-3 h-3" />
-                </Link>
-
-                {canDispatchAction(act) ? (
-                  <button
-                    onClick={() => handleTrigger(act.id)}
-                    disabled={triggeringId === act.id || executedIds.has(act.id)}
-                    className={`px-4 py-2 font-semibold rounded text-xs flex items-center gap-2 shadow-md transition-all ${
-                      executedIds.has(act.id)
-                        ? "bg-secondary text-primary cursor-not-allowed opacity-80"
-                        : "bg-primary text-primary-foreground hover:opacity-90 shadow-primary/20"
-                    }`}
-                  >
-                    {executedIds.has(act.id) ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                    ) : triggeringId === act.id ? (
-                      <Clock className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Play className="w-4 h-4" />
+            return (
+              <div
+                key={act.id}
+                className="p-6 rounded bg-card shadow-sm border border-border hover:border-accent/40 transition-all backdrop-blur-md flex flex-col md:flex-row md:items-center justify-between gap-4"
+              >
+                <div className="space-y-1.5 flex-1">
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-xs font-semibold text-accent">{act.id}</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-accent/10 text-accent border border-accent/20">
+                      {act.priority} PRIORITY
+                    </span>
+                    <span className="text-xs text-muted-foreground font-mono">Case: {act.case_id}</span>
+                    {act.dispatched_by && (
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                        Dispatched by {act.dispatched_by}
+                      </span>
                     )}
-                    {executedIds.has(act.id)
-                      ? (isDlsa ? "Request Queued" : isAdvocate ? "Motion Submitted" : "Action Executed")
-                      : triggeringId === act.id
-                      ? "Processing..."
-                      : (isDlsa ? "Queue Notice / Request" : isAdvocate ? "Submit Counsel Action" : "Execute Institutional Action")}
-                  </button>
-                ) : isAdvocate ? (
-                  <span
-                    className="px-3 py-1.5 bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-mono font-bold rounded border border-red-500/30 flex items-center gap-1.5"
-                    title="This action requires institutional or supervisory authority"
+                  </div>
+                  <h3 className="text-base font-semibold text-primary">{act.action_type}</h3>
+                  <p className="text-xs text-muted-foreground">{act.description}</p>
+                </div>
+
+                <div className="flex items-center gap-4 shrink-0 border-t md:border-t-0 border-border pt-4 md:pt-0">
+                  <Link
+                    to={`/case/${act.case_id}`}
+                    className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
                   >
-                    <ShieldCheck className="w-3.5 h-3.5" /> Institutional Action Only
-                  </span>
-                ) : isSupervisor ? (
-                  <span
-                    className="px-3 py-1.5 bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-mono font-bold rounded border border-red-500/30 flex items-center gap-1.5"
-                    title="This action type requires Court or Originating Institutional authority"
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5" /> Judicial/Originating Auth Required
-                  </span>
-                ) : isDlsa ? (
-                  <span
-                    className="px-3 py-1.5 bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-mono font-bold rounded border border-red-500/30 flex items-center gap-1.5"
-                    title="This action type requires Supervisory Legal Officer or Court authorization"
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5" /> Supervisor Auth Required
-                  </span>
-                ) : (
-                  <span className="px-3 py-1.5 bg-muted text-muted-foreground text-xs font-mono font-bold rounded border border-border flex items-center gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5" /> Read-Only View
-                  </span>
-                )}
+                    View Case <ArrowRight className="w-3 h-3" />
+                  </Link>
+
+                  {isAlreadyDispatched ? (
+                    <div className="flex items-center gap-1.5 px-3.5 py-2 rounded text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                      <span>{act.status}</span>
+                    </div>
+                  ) : canDispatchAction(act) ? (
+                    <button
+                      onClick={() => handleTrigger(act.id)}
+                      disabled={triggeringId === act.id}
+                      className="px-4 py-2 font-semibold rounded text-xs flex items-center gap-2 shadow-md transition-all bg-primary text-primary-foreground hover:opacity-90 shadow-primary/20"
+                    >
+                      {triggeringId === act.id ? (
+                        <Clock className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Play className="w-4 h-4" />
+                      )}
+                      {getButtonText(act)}
+                    </button>
+                  ) : isPolice ? (
+                    <Link
+                      to="/police"
+                      className="px-3.5 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 text-xs font-semibold rounded border border-blue-500/30 flex items-center gap-1.5 transition-colors"
+                    >
+                      <FileText className="w-3.5 h-3.5" /> Fulfill at Police Desk
+                    </Link>
+                  ) : isJail ? (
+                    <Link
+                      to="/jail"
+                      className="px-3.5 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-semibold rounded border border-amber-500/30 flex items-center gap-1.5 transition-colors"
+                    >
+                      <FileText className="w-3.5 h-3.5" /> Fulfill at Custody Desk
+                    </Link>
+                  ) : isAdmin ? (
+                    <span className="px-3 py-1.5 bg-secondary text-foreground text-xs font-mono font-medium rounded border border-border flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-primary" /> Technical System Oversight
+                    </span>
+                  ) : isGov ? (
+                    <span className="px-3 py-1.5 bg-secondary text-foreground text-xs font-mono font-medium rounded border border-border flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" /> State Legal Authority Oversight
+                    </span>
+                  ) : isAuditor ? (
+                    <span className="px-3 py-1.5 bg-muted text-muted-foreground text-xs font-mono font-bold rounded border border-border flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5" /> Auditor Read-Only Ledger
+                    </span>
+                  ) : (
+                    <span className="px-3 py-1.5 bg-muted text-muted-foreground text-xs font-mono font-bold rounded border border-border flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5" /> Read-Only View
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

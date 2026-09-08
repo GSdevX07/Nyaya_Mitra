@@ -246,6 +246,7 @@ export function checkPermission(
       return (
         role === "DLSA_OFFICER" ||
         role === "DEFENSE_ADVOCATE" ||
+        role === "CONTROLLED_EXTERNAL_ADVOCATE" ||
         role === "SUPERVISING_LEGAL_OFFICER"
       );
 
@@ -254,6 +255,7 @@ export function checkPermission(
         role === "SUPERVISING_LEGAL_OFFICER" ||
         role === "DLSA_OFFICER" ||
         role === "DEFENSE_ADVOCATE" ||
+        role === "CONTROLLED_EXTERNAL_ADVOCATE" ||
         role === "JAIL_OFFICER" ||
         role === "POLICE_OFFICER"
       );

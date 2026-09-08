@@ -732,6 +732,32 @@ export async function dismissNotificationApi(notificationId: string) {
   }
 }
 
+export async function markNotificationReadApi(notificationId: string) {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/api/notifications/${encodeURIComponent(notificationId)}/read`, {
+      method: "PATCH",
+    });
+    if (!res.ok) throw new Error("Failed to mark notification read");
+    return await res.json();
+  } catch (err) {
+    console.warn("Mark notification read error:", err);
+    return { status: "read_locally", id: notificationId };
+  }
+}
+
+export async function markAllNotificationsReadApi() {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/api/notifications/mark-all-read`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error("Failed to mark all notifications read");
+    return await res.json();
+  } catch (err) {
+    console.warn("Mark all notifications read error:", err);
+    return { status: "read_all_locally", marked_read_count: 0 };
+  }
+}
+
 export async function fetchNotificationPreferences() {
   const cached = localStorage.getItem("nyaya_notification_preferences");
   let defaultPrefs = {

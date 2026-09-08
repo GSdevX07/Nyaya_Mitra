@@ -115,12 +115,29 @@ class EscalationManager:
         key = f"{org_id}:{event_type.value}"
         if key in _ESCALATION_POLICIES:
             return _ESCALATION_POLICIES[key]
-        return get_default_escalation_policy(org_id, event_type)
+
+        try:
+            from app.notifications.repository import NotificationRepository
+            db_policy = NotificationRepository.get_escalation_policy(org_id, event_type)
+            if db_policy:
+                _ESCALATION_POLICIES[key] = db_policy
+                return db_policy
+        except Exception as e:
+            logger.debug(f"Escalation policy lookup note: {e}")
+
+        default_policy = get_default_escalation_policy(org_id, event_type)
+        _ESCALATION_POLICIES[key] = default_policy
+        return default_policy
 
     @classmethod
     def save_policy(cls, policy: EscalationPolicy):
         key = f"{policy.org_id}:{policy.event_type.value}"
         _ESCALATION_POLICIES[key] = policy
+        try:
+            from app.notifications.repository import NotificationRepository
+            NotificationRepository.save_escalation_policy(policy)
+        except Exception as e:
+            logger.warning(f"Error persisting escalation policy: {e}")
         logger.info(f"Updated escalation policy for org={policy.org_id}, event={policy.event_type.value}")
 
     @classmethod

@@ -1202,11 +1202,18 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
         ("acknowledged_by", "TEXT"),
         ("is_dismissed", "INTEGER DEFAULT 0"),
         ("dismissed_at", "TIMESTAMP"),
+        ("read_at", "TIMESTAMP"),
         ("retry_history_json", "TEXT"),
         ("payload_json", "TEXT"),
     ]:
         if col_name not in notif_cols:
             cursor.execute(f"ALTER TABLE notifications ADD COLUMN {col_name} {col_type}")
+
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_idempotency_key 
+        ON notifications (idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+    """)
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_notification_preferences (

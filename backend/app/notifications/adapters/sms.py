@@ -73,7 +73,15 @@ class SmsAdapter(BaseChannelAdapter):
 
         clean_phone = self._normalize_phone(phone)
         if not clean_phone:
-            clean_phone = "+919876543210"  # DLSA Default emergency duty cell
+            logger.warning(
+                f"[SMS] Cannot deliver notification {record.id}: recipient phone number missing or unresolvable."
+            )
+            return ChannelDeliveryResult(
+                success=False,
+                channel=NotificationChannel.SMS,
+                error="Recipient phone number missing or unresolvable in directory/docket",
+                retryable=False,
+            )
 
 
         # Format concise SMS text

@@ -50,8 +50,8 @@ class NotificationRepository:
                     delivery_status, idempotency_key, organization_id,
                     escalation_tier, is_acknowledged, acknowledged_at,
                     acknowledged_by, is_dismissed, dismissed_at,
-                    retry_history_json, payload_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    read_at, retry_history_json, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.id,
@@ -75,11 +75,14 @@ class NotificationRepository:
                     record.acknowledged_by,
                     1 if record.is_dismissed else 0,
                     record.dismissed_at,
+                    record.read_at,
                     json.dumps([r.model_dump() for r in record.retry_history]),
                     json.dumps(record.payload),
                 ),
             )
             conn.commit()
+        except sqlite3.IntegrityError as ie:
+            logger.info(f"Notification idempotency conflict suppressed (DB unique constraint): {ie}")
         except Exception as e:
             logger.warning(f"Error saving notification to SQLite: {e}")
         finally:
@@ -145,7 +148,7 @@ class NotificationRepository:
                        delivery_status, idempotency_key, organization_id,
                        escalation_tier, is_acknowledged, acknowledged_at,
                        acknowledged_by, is_dismissed, dismissed_at,
-                       retry_history_json, payload_json
+                       retry_history_json, payload_json, read_at
                 FROM notifications WHERE id = ?
                 """,
                 (notif_id,),
@@ -168,7 +171,9 @@ class NotificationRepository:
             delivery_val, idempotency_key, org_id, escalation_tier,
             is_ack, ack_at, ack_by, is_dism, dism_at,
             retry_json, payload_json
-        ) = row
+        ) = row[:23]
+
+        read_at_val = row[23] if len(row) > 23 else None
 
         retries = []
         if retry_json:
@@ -200,7 +205,7 @@ class NotificationRepository:
             organization_id=org_id or "DEFAULT",
             escalation_tier=escalation_tier or 1,
             is_read=bool(is_read),
-            read_at=None,
+            read_at=read_at_val,
             is_acknowledged=bool(is_ack),
             acknowledged_at=ack_at,
             acknowledged_by=ack_by,
@@ -223,6 +228,7 @@ class NotificationRepository:
         """
         Retrieves notifications filtered by user authorizations and query parameters.
         Preserves soft dismissal unless include_dismissed=True.
+        Supports date_from and date_to range filtering.
         """
         flt = filters or NotificationFilter()
         results: List[NotificationRecord] = []
@@ -241,7 +247,7 @@ class NotificationRepository:
                        delivery_status, idempotency_key, organization_id,
                        escalation_tier, is_acknowledged, acknowledged_at,
                        acknowledged_by, is_dismissed, dismissed_at,
-                       retry_history_json, payload_json
+                       retry_history_json, payload_json, read_at
                 FROM notifications
                 ORDER BY timestamp DESC
                 LIMIT 200
@@ -309,6 +315,11 @@ class NotificationRepository:
                 continue
             if flt.case_id and rec.case_id != flt.case_id:
                 continue
+            # Date range filtering (Issue 10)
+            if flt.date_from and rec.created_at < flt.date_from:
+                continue
+            if flt.date_to and rec.created_at > flt.date_to:
+                continue
 
             results.append(rec)
 
@@ -316,16 +327,82 @@ class NotificationRepository:
         return results
 
     @classmethod
-    def acknowledge_notification(cls, notif_id: str, user_id: str) -> bool:
-        """Records acknowledgement without deleting the record."""
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    def check_authorization(
+        cls,
+        notif_id: str,
+        user_id: str,
+        role: Optional[str] = None,
+    ) -> Tuple[Optional[NotificationRecord], bool]:
+        """
+        Validates whether the given user_id and role have permission to acknowledge,
+        dismiss, or mark as read the notification record.
+        Returns (record, is_authorized). If record is None, notification does not exist.
+        """
         rec = cls.get_by_id(notif_id)
-        if rec:
-            rec.is_acknowledged = True
-            rec.acknowledged_at = now_iso
-            rec.acknowledged_by = user_id
-            rec.is_read = True
-            _MEMORY_NOTIFS[rec.id] = rec
+        if not rec:
+            return None, False
+
+        clean_role = (role or "").strip().upper()
+        if not clean_role and user_id:
+            try:
+                from app.auth.user_store import get_user_by_id
+                u = get_user_by_id(user_id)
+                if u and hasattr(u, "role"):
+                    clean_role = (u.role.value if hasattr(u.role, "value") else str(u.role)).strip().upper()
+            except Exception:
+                pass
+
+        if not clean_role:
+            uid_lower = user_id.lower()
+            if "admin" in uid_lower:
+                clean_role = "PLATFORM_ADMIN"
+            elif "dlsa" in uid_lower:
+                clean_role = "DLSA_OFFICER"
+            elif "supervis" in uid_lower:
+                clean_role = "SUPERVISING_LEGAL_OFFICER"
+            elif "adv" in uid_lower or "lawyer" in uid_lower:
+                clean_role = "DEFENSE_ADVOCATE"
+            elif "jail" in uid_lower:
+                clean_role = "JAIL_OFFICER"
+            elif "police" in uid_lower:
+                clean_role = "POLICE_OFFICER"
+
+        if clean_role in ("PLATFORM_ADMIN", "GOV_ADMIN", "SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER"):
+            return rec, True
+        if rec.user_id and rec.user_id == user_id:
+            return rec, True
+        if rec.recipient and rec.recipient == user_id:
+            return rec, True
+        if rec.target_role:
+            roles = [r.strip().upper() for r in rec.target_role.split(",")]
+            if "ALL" in roles or clean_role in roles:
+                return rec, True
+        return rec, False
+
+    @classmethod
+    def acknowledge_notification(
+        cls,
+        notif_id: str,
+        user_id: str,
+        role: Optional[str] = None,
+    ) -> Tuple[bool, str]:
+        """
+        Records acknowledgement with authorization check and populates read_at.
+        Returns (success, message).
+        """
+        rec, is_auth = cls.check_authorization(notif_id, user_id, role)
+        if not rec:
+            return False, "NOT_FOUND"
+        if not is_auth:
+            return False, "FORBIDDEN"
+
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        rec.is_acknowledged = True
+        rec.acknowledged_at = now_iso
+        rec.acknowledged_by = user_id
+        rec.is_read = True
+        rec.read_at = now_iso
+        _MEMORY_NOTIFS[rec.id] = rec
 
         conn = None
         try:
@@ -334,29 +411,41 @@ class NotificationRepository:
             cursor.execute(
                 """
                 UPDATE notifications 
-                SET is_acknowledged = 1, acknowledged_at = ?, acknowledged_by = ?, is_read = 1
+                SET is_acknowledged = 1, acknowledged_at = ?, acknowledged_by = ?, is_read = 1, read_at = ?
                 WHERE id = ?
                 """,
-                (now_iso, user_id, notif_id),
+                (now_iso, user_id, now_iso, notif_id),
             )
             conn.commit()
-            return True
+            return True, "SUCCESS"
         except Exception as e:
             logger.warning(f"Error acknowledging notification {notif_id}: {e}")
-            return False
+            return False, str(e)
         finally:
             if conn:
                 conn.close()
 
     @classmethod
-    def soft_dismiss_notification(cls, notif_id: str, user_id: str) -> bool:
-        """Marks notification as dismissed without destroying audit history."""
+    def soft_dismiss_notification(
+        cls,
+        notif_id: str,
+        user_id: str,
+        role: Optional[str] = None,
+    ) -> Tuple[bool, str]:
+        """
+        Marks notification as dismissed with authorization check.
+        Returns (success, message).
+        """
+        rec, is_auth = cls.check_authorization(notif_id, user_id, role)
+        if not rec:
+            return False, "NOT_FOUND"
+        if not is_auth:
+            return False, "FORBIDDEN"
+
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        rec = cls.get_by_id(notif_id)
-        if rec:
-            rec.is_dismissed = True
-            rec.dismissed_at = now_iso
-            _MEMORY_NOTIFS[rec.id] = rec
+        rec.is_dismissed = True
+        rec.dismissed_at = now_iso
+        _MEMORY_NOTIFS[rec.id] = rec
 
         conn = None
         try:
@@ -371,13 +460,95 @@ class NotificationRepository:
                 (now_iso, notif_id),
             )
             conn.commit()
-            return True
+            return True, "SUCCESS"
         except Exception as e:
             logger.warning(f"Error dismissing notification {notif_id}: {e}")
-            return False
+            return False, str(e)
         finally:
             if conn:
                 conn.close()
+
+    @classmethod
+    def mark_notification_read(
+        cls,
+        notif_id: str,
+        user_id: str,
+        role: Optional[str] = None,
+    ) -> Tuple[bool, str]:
+        """
+        Marks a single notification as read and records read_at timestamp.
+        """
+        rec, is_auth = cls.check_authorization(notif_id, user_id, role)
+        if not rec:
+            return False, "NOT_FOUND"
+        if not is_auth:
+            return False, "FORBIDDEN"
+
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        rec.is_read = True
+        rec.read_at = now_iso
+        _MEMORY_NOTIFS[rec.id] = rec
+
+        conn = None
+        try:
+            conn = cls._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE notifications 
+                SET is_read = 1, read_at = ?
+                WHERE id = ?
+                """,
+                (now_iso, notif_id),
+            )
+            conn.commit()
+            return True, "SUCCESS"
+        except Exception as e:
+            logger.warning(f"Error marking notification {notif_id} read: {e}")
+            return False, str(e)
+        finally:
+            if conn:
+                conn.close()
+
+    @classmethod
+    def mark_all_notifications_read(
+        cls,
+        user_id: str,
+        role: str,
+    ) -> int:
+        """
+        Marks all active unread notifications visible to the user as read.
+        Returns the count of marked notifications.
+        """
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        flt = NotificationFilter(is_read=False)
+        unread_records = cls.get_notifications_filtered(user_id=user_id, role=role, filters=flt)
+        count = 0
+        ids_to_update = []
+        for rec in unread_records:
+            rec.is_read = True
+            rec.read_at = now_iso
+            _MEMORY_NOTIFS[rec.id] = rec
+            ids_to_update.append(rec.id)
+            count += 1
+
+        if ids_to_update:
+            conn = None
+            try:
+                conn = cls._get_connection()
+                cursor = conn.cursor()
+                placeholders = ",".join(["?"] * len(ids_to_update))
+                cursor.execute(
+                    f"UPDATE notifications SET is_read = 1, read_at = ? WHERE id IN ({placeholders})",
+                    [now_iso] + ids_to_update,
+                )
+                conn.commit()
+            except Exception as e:
+                logger.warning(f"Error batch marking notifications read: {e}")
+            finally:
+                if conn:
+                    conn.close()
+        return count
 
     @classmethod
     def get_user_preferences(cls, user_id: str) -> UserNotificationPreferences:
@@ -557,3 +728,183 @@ class NotificationRepository:
             if conn:
                 conn.close()
         return entries
+
+    @classmethod
+    def update_dlq_status(
+        cls,
+        dlq_id: str,
+        status: str = "RESOLVED",
+        failure_reason: Optional[str] = None,
+    ) -> bool:
+        """
+        Updates DLQ entry status, timestamp, and retry count persistently in SQLite and memory.
+        """
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        for item in _MEMORY_DLQ:
+            if item["id"] == dlq_id:
+                item["status"] = status
+                item["last_retry_at"] = now_iso
+                item["retry_attempts"] = item.get("retry_attempts", 0) + 1
+                if failure_reason:
+                    item["failure_reason"] = failure_reason
+                break
+
+        conn = None
+        try:
+            conn = cls._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE notification_dlq
+                SET status = ?, last_retry_at = ?, retry_attempts = retry_attempts + 1,
+                    failure_reason = COALESCE(?, failure_reason)
+                WHERE id = ?
+                """,
+                (status, now_iso, failure_reason, dlq_id),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.warning(f"Error updating DLQ entry {dlq_id}: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    @classmethod
+    def save_escalation_policy(cls, policy: Any) -> None:
+        """Saves an organization-configured escalation policy into SQLite."""
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        policy_dict = policy.model_dump() if hasattr(policy, "model_dump") else dict(policy)
+        tiers = policy_dict.get("tiers", [])
+
+        conn = None
+        try:
+            conn = cls._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO notification_escalation_policies (
+                    id, org_id, event_type, tiers_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    policy_dict["id"],
+                    policy_dict["org_id"],
+                    policy_dict["event_type"] if isinstance(policy_dict["event_type"], str) else policy_dict["event_type"].value,
+                    json.dumps(tiers),
+                    now_iso,
+                ),
+            )
+            conn.commit()
+            logger.info(f"Persisted escalation policy {policy_dict['id']} to SQLite.")
+        except Exception as e:
+            logger.warning(f"Error persisting escalation policy: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+    @classmethod
+    def get_escalation_policy(
+        cls,
+        org_id: str,
+        event_type: NotificationEventType,
+    ) -> Optional[Any]:
+        """Loads an organization escalation policy from SQLite."""
+        conn = None
+        try:
+            conn = cls._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, org_id, event_type, tiers_json, updated_at
+                FROM notification_escalation_policies
+                WHERE org_id = ? AND event_type = ?
+                """,
+                (org_id, event_type.value),
+            )
+            row = cursor.fetchone()
+            if row:
+                from app.notifications.schemas import EscalationPolicy, EscalationTierConfig
+                tiers_data = json.loads(row[3]) if row[3] else []
+                tiers = [EscalationTierConfig(**td) for td in tiers_data]
+                return EscalationPolicy(
+                    id=row[0],
+                    org_id=row[1],
+                    event_type=NotificationEventType(row[2]),
+                    tiers=tiers,
+                    updated_at=row[4],
+                )
+        except Exception as e:
+            logger.debug(f"Escalation policy SQLite lookup note: {e}")
+        finally:
+            if conn:
+                conn.close()
+        return None
+
+    @classmethod
+    def update_delivery_status_by_external_id(
+        cls,
+        channel: NotificationChannel,
+        external_message_id: str,
+        new_status: DeliveryStatus,
+        error_message: Optional[str] = None,
+    ) -> Optional[NotificationRecord]:
+        """
+        Locates a notification by channel and external_message_id (or ID) and updates its delivery status.
+        """
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        target: Optional[NotificationRecord] = None
+
+        # Check memory store
+        for rec in _MEMORY_NOTIFS.values():
+            if rec.id == external_message_id:
+                target = rec
+                break
+            for att in rec.retry_history:
+                if att.channel == channel:
+                    target = rec
+                    break
+            if target:
+                break
+
+        # Check SQLite if not found in memory
+        if not target:
+            conn = None
+            try:
+                conn = cls._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT id FROM notifications 
+                    WHERE id = ? OR channel = ? 
+                    ORDER BY timestamp DESC LIMIT 50
+                    """,
+                    (external_message_id, channel.value),
+                )
+                for row in cursor.fetchall():
+                    c_rec = cls.get_by_id(row[0])
+                    if c_rec:
+                        target = c_rec
+                        break
+            except Exception as e:
+                logger.debug(f"External id query note: {e}")
+            finally:
+                if conn:
+                    conn.close()
+
+        if target:
+            target.delivery_status = new_status
+            target.retry_history.append(
+                RetryAttempt(
+                    attempt_number=len(target.retry_history) + 1,
+                    timestamp=now_iso,
+                    channel=channel,
+                    error_message=error_message,
+                    success=(new_status == DeliveryStatus.DELIVERED),
+                )
+            )
+            cls.save_notification(target)
+            logger.info(f"Updated notification {target.id} status to {new_status.value} via webhook callback.")
+            return target
+        return None

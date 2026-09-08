@@ -90,13 +90,37 @@ def compute_idempotency_key(
     entity_id: str,
     recipient: str,
     fingerprint: str = "",
+    payload: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Computes deterministic SHA-256 idempotency key to prevent duplicate notifications
-    when the same event is reprocessed within the same calendar day or batch run.
+    when the same event is reprocessed across time, re-scans, or batch runs.
+    Uses immutable event fingerprint instead of daily date bucket.
     """
-    today_bucket = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
-    raw_str = f"{event_type.value}:{str(entity_id).strip()}:{str(recipient).strip()}:{fingerprint or today_bucket}"
+    effective_fingerprint = str(fingerprint).strip() if fingerprint else ""
+    if not effective_fingerprint:
+        p = payload or {}
+        parts = [
+            str(p.get("event_id") or ""),
+            str(p.get("action_id") or ""),
+            str(p.get("document_id") or ""),
+            str(p.get("order_id") or ""),
+            str(p.get("hearing_id") or ""),
+            str(p.get("milestone") or ""),
+            str(p.get("threshold_days") or ""),
+            str(p.get("action_title") or ""),
+            str(p.get("hearing_date") or ""),
+            str(p.get("document_type") or ""),
+            str(p.get("threat_type") or ""),
+            str(p.get("external_system") or ""),
+        ]
+        non_empty = [part.strip() for part in parts if part.strip()]
+        if non_empty:
+            effective_fingerprint = ":".join(non_empty)
+        else:
+            effective_fingerprint = f"{event_type.value}_{str(entity_id).strip()}"
+
+    raw_str = f"{event_type.value}:{str(entity_id).strip()}:{str(recipient).strip()}:{effective_fingerprint}"
     return hashlib.sha256(raw_str.encode("utf-8")).hexdigest()
 
 
@@ -106,6 +130,7 @@ def format_event_content(
 ) -> Tuple[str, str, NotificationPriority, str]:
     """
     Resolves default title, formatted message, priority, and default target roles for an event.
+    Replaces fake default values with transparent audit indicators when critical fields are missing.
     """
     rule = EVENT_RULE_REGISTRY.get(event_type, {
         "title": event_type.value.replace("_", " ").title(),
@@ -121,27 +146,27 @@ def format_event_content(
 
     default_roles = rule.get("default_roles", "ALL")
 
-    # Interpolate template safely
+    # Safe interpolation with transparent audit placeholders
     tpl = rule.get("template", "{message}")
     format_kwargs = {
         "event_type": event_type.value,
-        "name": payload.get("accused_name") or payload.get("name", "Accused Person"),
-        "case_id": payload.get("case_id", "General"),
-        "custody_days": payload.get("custody_days", "N/A"),
-        "threshold_days": payload.get("threshold_days", "N/A"),
-        "action_title": payload.get("action_title", "Operational Task"),
-        "overdue_hours": payload.get("overdue_hours", "24"),
-        "document_type": payload.get("document_type", "Document"),
-        "hearing_date": payload.get("hearing_date", "Upcoming"),
-        "court_name": payload.get("court_name", "Court of Competent Jurisdiction"),
-        "order_outcome": payload.get("order_outcome", "Recorded"),
-        "jail_location": payload.get("jail_location", "Detention Facility"),
-        "external_system": payload.get("external_system", "Integrated Portal"),
-        "endpoint": payload.get("endpoint", "/sync"),
-        "error_snippet": payload.get("error_snippet", "Connection Timeout"),
-        "threat_type": payload.get("threat_type", "Security Policy Violation"),
-        "entity_id": payload.get("entity_id", payload.get("case_id", "System")),
-        "security_policy": payload.get("security_policy", "Default AI Guardrails"),
+        "name": payload.get("accused_name") or payload.get("name") or "[Name unavailable - docket review required]",
+        "case_id": payload.get("case_id") or "[Case ID unspecified]",
+        "custody_days": str(payload.get("custody_days")) if payload.get("custody_days") is not None else "[Custody duration pending computation]",
+        "threshold_days": str(payload.get("threshold_days")) if payload.get("threshold_days") is not None else "[Threshold pending computation]",
+        "action_title": payload.get("action_title") or "[Pending legal workflow task]",
+        "overdue_hours": str(payload.get("overdue_hours")) if payload.get("overdue_hours") is not None else "[Overdue duration unspecified]",
+        "document_type": payload.get("document_type") or "[Required legal document]",
+        "hearing_date": payload.get("hearing_date") or "[Hearing date pending scheduling]",
+        "court_name": payload.get("court_name") or "[Court pending assignment]",
+        "order_outcome": payload.get("order_outcome") or "[Order outcome pending review]",
+        "jail_location": payload.get("jail_location") or "[Detention facility unspecified]",
+        "external_system": payload.get("external_system") or "[External integration endpoint]",
+        "endpoint": payload.get("endpoint") or "[Endpoint unspecified]",
+        "error_snippet": payload.get("error_snippet") or "[Error details unavailable]",
+        "threat_type": payload.get("threat_type") or "[Security event unspecified]",
+        "entity_id": payload.get("entity_id") or payload.get("case_id") or "[Entity unspecified]",
+        "security_policy": payload.get("security_policy") or "[System security baseline]",
         "message": payload.get("message", rule.get("description", "")),
     }
 

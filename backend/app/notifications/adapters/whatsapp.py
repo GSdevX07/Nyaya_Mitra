@@ -83,7 +83,15 @@ class WhatsAppAdapter(BaseChannelAdapter):
 
         clean_phone = self._normalize_phone(phone)
         if not clean_phone:
-            clean_phone = "+919876543210"
+            logger.warning(
+                f"[WHATSAPP] Cannot deliver notification {record.id}: recipient phone number missing or unresolvable."
+            )
+            return ChannelDeliveryResult(
+                success=False,
+                channel=NotificationChannel.WHATSAPP,
+                error="Recipient phone number missing or unresolvable in directory/docket",
+                retryable=False,
+            )
 
 
         template_name = "nyayamitra_urgent_alert" if record.priority.value in ("HIGH", "EMERGENCY") else "nyayamitra_standard_update"

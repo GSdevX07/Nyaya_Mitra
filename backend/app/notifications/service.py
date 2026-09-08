@@ -70,6 +70,7 @@ class NotificationService:
             entity_id=str(entity_ref),
             recipient=str(effective_recipient),
             fingerprint=fingerprint,
+            payload=raw_payload,
         )
 
         existing_record = NotificationRepository.get_by_idempotency_key(idempotency_key)
@@ -87,16 +88,13 @@ class NotificationService:
             else UserNotificationPreferences(user_id="default")
         )
 
-        if channels:
-            # Explicit channel request
-            active_channels = channels
-        else:
-            # Resolved via quiet hours & emergency override
-            active_channels, is_override = filter_channels_for_delivery(
-                priority=effective_priority,
-                event_type=event_type,
-                prefs=user_prefs,
-            )
+        # Quiet hours evaluated always, even when requested_channels supplied
+        active_channels, is_override = filter_channels_for_delivery(
+            priority=effective_priority,
+            event_type=event_type,
+            prefs=user_prefs,
+            requested_channels=channels,
+        )
 
         # 4. Construct Notification Record
         notif_id = f"NOTIF-{effective_case_id or 'SYS'}-{event_type.value[:6]}-{uuid.uuid4().hex[:8].upper()}"
@@ -247,19 +245,48 @@ class NotificationService:
         return task_id
 
     @classmethod
-    def acknowledge(cls, notification_id: str, user_id: str) -> bool:
-        """Acknowledges a notification without deleting audit trail."""
-        return NotificationRepository.acknowledge_notification(notification_id, user_id)
+    def acknowledge(cls, notification_id: str, user_id: str, role: Optional[str] = None) -> bool:
+        """Acknowledges a notification with authorized user/role checks."""
+        success, _ = NotificationRepository.acknowledge_notification(notification_id, user_id, role)
+        return success
 
     @classmethod
-    def dismiss(cls, notification_id: str, user_id: str) -> bool:
-        """Soft-dismisses a notification preserving full database and audit history."""
-        return NotificationRepository.soft_dismiss_notification(notification_id, user_id)
+    def acknowledge_with_status(cls, notification_id: str, user_id: str, role: Optional[str] = None) -> Tuple[bool, str]:
+        """Acknowledges a notification and returns (success, reason_code)."""
+        return NotificationRepository.acknowledge_notification(notification_id, user_id, role)
+
+    @classmethod
+    def dismiss(cls, notification_id: str, user_id: str, role: Optional[str] = None) -> bool:
+        """Soft-dismisses a notification with authorized user/role checks."""
+        success, _ = NotificationRepository.soft_dismiss_notification(notification_id, user_id, role)
+        return success
+
+    @classmethod
+    def dismiss_with_status(cls, notification_id: str, user_id: str, role: Optional[str] = None) -> Tuple[bool, str]:
+        """Soft-dismisses a notification and returns (success, reason_code)."""
+        return NotificationRepository.soft_dismiss_notification(notification_id, user_id, role)
+
+    @classmethod
+    def mark_read(cls, notification_id: str, user_id: str, role: Optional[str] = None) -> bool:
+        """Marks a notification as read and records read_at timestamp."""
+        success, _ = NotificationRepository.mark_notification_read(notification_id, user_id, role)
+        return success
+
+    @classmethod
+    def mark_read_with_status(cls, notification_id: str, user_id: str, role: Optional[str] = None) -> Tuple[bool, str]:
+        """Marks a notification as read and returns (success, reason_code)."""
+        return NotificationRepository.mark_notification_read(notification_id, user_id, role)
+
+    @classmethod
+    def mark_all_read(cls, user_id: str, role: str) -> int:
+        """Batch marks all unread notifications visible to this user as read."""
+        return NotificationRepository.mark_all_notifications_read(user_id, role)
 
     @classmethod
     def escalate(cls, notification_id: str) -> Optional[NotificationRecord]:
         """
         Escalates an unresolved notification to the next tier based on the organization policy.
+        Marks the prior tier notification superseded to prevent redundant auto-escalations.
         """
         record = NotificationRepository.get_by_id(notification_id)
         if not record:
@@ -288,6 +315,15 @@ class NotificationService:
             org_id=record.organization_id,
             escalation_tier=next_tier.tier,
         )
+
+        # Mark prior tier notification superseded
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        record.is_acknowledged = True
+        record.acknowledged_at = now_iso
+        record.acknowledged_by = f"SYSTEM_ESCALATION_TIER_{next_tier.tier}"
+        record.payload["escalated_to_id"] = escalated_record.id
+        NotificationRepository.save_notification(record)
+
         logger.info(
             f"Escalated notification {record.id} (Tier {record.escalation_tier}) -> "
             f"{escalated_record.id} (Tier {next_tier.tier}, Role {next_tier.target_role})"
@@ -297,7 +333,7 @@ class NotificationService:
     @classmethod
     def retry_dlq(cls, dlq_id: str) -> bool:
         """
-        Manually retries a dead-letter queue notification.
+        Manually retries a dead-letter queue notification and updates SQLite/memory status.
         """
         dlq_entries = NotificationRepository.get_dlq_entries()
         target = next((e for e in dlq_entries if e["id"] == dlq_id), None)
@@ -317,7 +353,38 @@ class NotificationService:
             if res.success:
                 notif.delivery_status = DeliveryStatus.DELIVERED
                 NotificationRepository.save_notification(notif)
-                target["status"] = "RESOLVED"
-                logger.info(f"DLQ entry {dlq_id} successfully retried and resolved.")
+                NotificationRepository.update_dlq_status(dlq_id, status="RESOLVED")
+                logger.info(f"DLQ entry {dlq_id} successfully retried and resolved in database.")
                 return True
+            else:
+                NotificationRepository.update_dlq_status(dlq_id, status="DEAD_LETTER", failure_reason=res.error)
+                logger.warning(f"DLQ entry {dlq_id} retry failed: {res.error}")
         return False
+
+    @classmethod
+    def handle_delivery_webhook(
+        cls,
+        channel: NotificationChannel,
+        external_message_id: str,
+        event_status: str,
+        error_message: Optional[str] = None,
+    ) -> bool:
+        """
+        Processes external delivery callback/receipt from SMS/Email/WhatsApp providers.
+        Transitions delivery state from SENT to DELIVERED or FAILED.
+        """
+        s = (event_status or "").lower()
+        if s in ("delivered", "sent", "success"):
+            new_status = DeliveryStatus.DELIVERED
+        elif s in ("failed", "undelivered", "rejected", "bounced"):
+            new_status = DeliveryStatus.FAILED
+        else:
+            new_status = DeliveryStatus.DELIVERED
+
+        updated = NotificationRepository.update_delivery_status_by_external_id(
+            channel=channel,
+            external_message_id=external_message_id,
+            new_status=new_status,
+            error_message=error_message,
+        )
+        return bool(updated)

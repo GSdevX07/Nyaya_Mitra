@@ -73,32 +73,39 @@ def filter_channels_for_delivery(
     priority: NotificationPriority,
     event_type: NotificationEventType,
     prefs: UserNotificationPreferences,
+    requested_channels: Optional[list[NotificationChannel]] = None,
     now: Optional[datetime.datetime] = None,
 ) -> Tuple[list[NotificationChannel], bool]:
     """
     Determines active delivery channels considering quiet hours and emergency overrides.
+    Even if explicit requested_channels are supplied, quiet hours are strictly evaluated,
+    and disruptive channels (SMS, WhatsApp) are filtered out unless the event qualifies
+    for statutory or safety emergency bypass.
     Returns (allowed_channels, is_emergency_override).
     """
     in_quiet = is_in_quiet_hours(now, prefs)
     emergency_override = can_bypass_quiet_hours(priority, event_type)
 
+    base_channels = list(requested_channels) if requested_channels else list(prefs.enabled_channels)
+    if not base_channels:
+        base_channels = [NotificationChannel.IN_APP]
+
     if in_quiet and not emergency_override:
-        # During quiet hours, suppress disruptive channels (SMS, WhatsApp)
+        # Suppress disruptive channels (SMS, WhatsApp)
         # Allow IN_APP silently for user inbox
         suppressed_channels = [
-            ch for ch in prefs.enabled_channels if ch == NotificationChannel.IN_APP
+            ch for ch in base_channels if ch == NotificationChannel.IN_APP
         ]
         if not suppressed_channels:
             suppressed_channels = [NotificationChannel.IN_APP]
-        logger.info(f"Quiet hours active: suppressed external alerts for user {prefs.user_id}")
+        logger.info(
+            f"Quiet hours active: suppressed external alerts for user {prefs.user_id} "
+            f"(channels filtered from {[c.value for c in base_channels]} to {[c.value for c in suppressed_channels]})"
+        )
         return suppressed_channels, False
 
-    # Normal delivery or emergency override: use user's enabled channels
-    active_channels = list(prefs.enabled_channels)
-    if not active_channels:
-        active_channels = [NotificationChannel.IN_APP]
-
-    # For emergency events, ensure high-priority channels are included
+    # Normal delivery or emergency override:
+    active_channels = list(base_channels)
     if emergency_override and NotificationChannel.SMS not in active_channels:
         active_channels.append(NotificationChannel.SMS)
 

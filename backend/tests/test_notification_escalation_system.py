@@ -231,6 +231,7 @@ def test_delivery_failure_routes_to_dlq_and_triggers_task():
     fail_payload = {
         "case_id": "UTP-FAIL-01",
         "name": "Failed Delivery Inmate",
+        "phone": "+919876543211",
         "fingerprint": "fail-test-dlq",
         "force_failure": True,
     }
@@ -241,7 +242,7 @@ def test_delivery_failure_routes_to_dlq_and_triggers_task():
         payload=fail_payload,
         channels=[NotificationChannel.SMS],
         max_retries=2,
-        recipient_meta={"force_failure": True},
+        recipient_meta={"force_failure": True, "phone": "+919876543211"},
     )
 
     # Must transition to DEAD_LETTER

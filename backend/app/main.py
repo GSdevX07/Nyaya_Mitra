@@ -89,7 +89,10 @@ from contextlib import asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.database import init_db
     init_db()
+    from app.notifications.scheduler import AutomaticEscalationWorker
+    AutomaticEscalationWorker.start(poll_interval_seconds=60)
     yield
+    AutomaticEscalationWorker.stop()
 
 app = FastAPI(
     title="Nyaya Mitra Backend API",

@@ -50,6 +50,12 @@ class UpdatePreferencesRequest(BaseModel):
     email: Optional[str] = None
 
 
+class DeliveryWebhookPayload(BaseModel):
+    external_message_id: str
+    status: str
+    error: Optional[str] = None
+
+
 @router.get("", response_model=List[NotificationRecord])
 def list_notifications_endpoint(
     is_read: Optional[bool] = None,
@@ -58,12 +64,15 @@ def list_notifications_endpoint(
     event_type: Optional[NotificationEventType] = None,
     channel: Optional[NotificationChannel] = None,
     case_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     include_dismissed: bool = False,
     current_user: AuthUser = Depends(get_current_user),
 ):
     """
     Retrieve filterable notifications matching user role and jurisdiction.
     Soft-dismissed notifications are excluded by default unless include_dismissed=True.
+    Supports date range filtering (date_from, date_to).
     """
     filters = NotificationFilter(
         is_read=is_read,
@@ -72,6 +81,8 @@ def list_notifications_endpoint(
         event_type=event_type,
         channel=channel,
         case_id=case_id,
+        date_from=date_from,
+        date_to=date_to,
         include_dismissed=include_dismissed,
     )
     role_val = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
@@ -89,14 +100,20 @@ def acknowledge_notification_endpoint(
     current_user: AuthUser = Depends(get_current_user),
 ):
     """
-    Acknowledge a notification.
-    Preserves full audit trail and marks record acknowledged by user.
+    Acknowledge a notification with strict recipient/role authorization check.
+    Preserves full audit trail and marks record acknowledged by user with read_at timestamp.
     """
-    success = NotificationService.acknowledge(notif_id, current_user.id)
+    role_val = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    success, reason = NotificationService.acknowledge_with_status(notif_id, current_user.id, role=role_val)
     if not success:
+        if reason == "FORBIDDEN":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You are not authorized to acknowledge this notification.",
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Notification {notif_id} not found or could not be acknowledged.",
+            detail=f"Notification {notif_id} not found.",
         )
     return {"status": "success", "id": notif_id, "acknowledged_by": current_user.id}
 
@@ -107,11 +124,17 @@ def dismiss_notification_endpoint(
     current_user: AuthUser = Depends(get_current_user),
 ):
     """
-    Soft-dismiss a notification from user view.
+    Soft-dismiss a notification from user view with authorization check.
     Does NOT delete the record from database or audit ledger.
     """
-    success = NotificationService.dismiss(notif_id, current_user.id)
+    role_val = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    success, reason = NotificationService.dismiss_with_status(notif_id, current_user.id, role=role_val)
     if not success:
+        if reason == "FORBIDDEN":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You are not authorized to dismiss this notification.",
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Notification {notif_id} not found.",
@@ -121,6 +144,76 @@ def dismiss_notification_endpoint(
         "id": notif_id,
         "message": "Notification dismissed from view. Audit record preserved.",
     }
+
+
+@router.patch("/{notif_id}/read")
+def mark_notification_read_endpoint(
+    notif_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """
+    Mark a single notification as read and record read_at timestamp.
+    """
+    role_val = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    success, reason = NotificationService.mark_read_with_status(notif_id, current_user.id, role=role_val)
+    if not success:
+        if reason == "FORBIDDEN":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You are not authorized to mark this notification as read.",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Notification {notif_id} not found.",
+        )
+    return {"status": "success", "id": notif_id, "is_read": True}
+
+
+@router.post("/mark-all-read")
+def mark_all_read_endpoint(
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """
+    Mark all unread notifications visible to the current user as read.
+    """
+    role_val = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    count = NotificationService.mark_all_read(current_user.id, role=role_val)
+    return {"status": "success", "marked_read_count": count}
+
+
+@router.post("/escalations/process")
+def trigger_escalations_endpoint(
+    current_user: AuthUser = Depends(require_role(
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER
+    )),
+):
+    """
+    Trigger immediate scan and execution of pending automatic escalations.
+    """
+    from app.notifications.scheduler import process_pending_escalations
+    escalated = process_pending_escalations()
+    return {
+        "status": "success",
+        "escalated_count": len(escalated),
+        "escalated_ids": [r.id for r in escalated],
+    }
+
+
+@router.post("/webhook/{channel}")
+def delivery_webhook_endpoint(
+    channel: NotificationChannel,
+    payload: DeliveryWebhookPayload,
+):
+    """
+    Public webhook receiver for SMS/Email/WhatsApp delivery status updates (SENT -> DELIVERED / FAILED).
+    """
+    updated = NotificationService.handle_delivery_webhook(
+        channel=channel,
+        external_message_id=payload.external_message_id,
+        event_status=payload.status,
+        error_message=payload.error,
+    )
+    return {"status": "success", "updated": updated}
 
 
 @router.post("/dispatch", response_model=NotificationRecord)

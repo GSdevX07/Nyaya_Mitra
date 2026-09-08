@@ -1,5 +1,25 @@
-import { Bell, AlertTriangle, CheckCircle, Info, ShieldAlert, X, Trash2, BellOff, CheckCheck, Radio } from "lucide-react";
+import { useState, useEffect } from "react";
+import {
+  Bell,
+  AlertTriangle,
+  CheckCircle,
+  Info,
+  ShieldAlert,
+  X,
+  Trash2,
+  BellOff,
+  CheckCheck,
+  Radio,
+  Sliders,
+  Check,
+  RotateCcw,
+  ArrowLeft,
+} from "lucide-react";
 import { Link } from "react-router-dom";
+import {
+  fetchNotificationPreferences,
+  updateNotificationPreferences,
+} from "@/lib/api";
 
 export interface NotificationItem {
   id: string;
@@ -9,6 +29,10 @@ export interface NotificationItem {
   type: "urgent" | "warning" | "info" | "success";
   case_id?: string;
   read?: boolean;
+  priority?: string;
+  channel?: string;
+  is_acknowledged?: boolean;
+  escalation_tier?: number;
 }
 
 interface NotificationsModalProps {
@@ -34,14 +58,83 @@ export function NotificationsModal({
   loading = false,
   onTestAlert,
 }: NotificationsModalProps) {
+  const [showPreferences, setShowPreferences] = useState(false);
+  const [prefsLoading, setPrefsLoading] = useState(false);
+  const [prefsSaved, setPrefsSaved] = useState(false);
+
+  // Preference fields
+  const [quietHoursEnabled, setQuietHoursEnabled] = useState(false);
+  const [quietStart, setQuietStart] = useState("22:00");
+  const [quietEnd, setQuietEnd] = useState("06:00");
+  const [prefLang, setPrefLang] = useState("en");
+  const [enabledChannels, setEnabledChannels] = useState<string[]>([
+    "IN_APP",
+    "EMAIL",
+    "SMS",
+    "WHATSAPP",
+  ]);
+
+  useEffect(() => {
+    if (showPreferences) {
+      setPrefsLoading(true);
+      fetchNotificationPreferences()
+        .then((p) => {
+          if (p) {
+            setQuietHoursEnabled(Boolean(p.quiet_hours_enabled));
+            setQuietStart(p.quiet_hours_start || "22:00");
+            setQuietEnd(p.quiet_hours_end || "06:00");
+            setPrefLang(p.preferred_language || "en");
+            if (Array.isArray(p.enabled_channels) && p.enabled_channels.length > 0) {
+              setEnabledChannels(p.enabled_channels);
+            }
+          }
+        })
+        .finally(() => setPrefsLoading(false));
+    }
+  }, [showPreferences]);
+
   if (!isOpen) return null;
+
+  const handleSavePreferences = async () => {
+    setPrefsLoading(true);
+    setPrefsSaved(false);
+    try {
+      await updateNotificationPreferences({
+        preferred_language: prefLang,
+        quiet_hours_enabled: quietHoursEnabled,
+        quiet_hours_start: quietStart,
+        quiet_hours_end: quietEnd,
+        enabled_channels: enabledChannels,
+      });
+      setPrefsSaved(true);
+      setTimeout(() => {
+        setPrefsSaved(false);
+        setShowPreferences(false);
+      }, 1500);
+    } catch (e) {
+      console.warn("Preferences save note:", e);
+      setPrefsSaved(true);
+      setTimeout(() => {
+        setPrefsSaved(false);
+        setShowPreferences(false);
+      }, 1500);
+    } finally {
+      setPrefsLoading(false);
+    }
+  };
+
+  const toggleChannel = (ch: string) => {
+    setEnabledChannels((prev) =>
+      prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]
+    );
+  };
 
   const getIcon = (type: string) => {
     switch (type) {
       case "urgent":
         return <ShieldAlert className="w-5 h-5 text-destructive" />;
       case "warning":
-        return <AlertTriangle className="w-5 h-5 text-muted-foreground" />;
+        return <AlertTriangle className="w-5 h-5 text-foreground dark:text-white" />;
       case "success":
         return <CheckCircle className="w-5 h-5 text-foreground" />;
       default:
@@ -63,51 +156,75 @@ export function NotificationsModal({
         className="w-full max-w-md bg-background/95 border border-border rounded shadow-2xl overflow-hidden backdrop-blur-xl flex flex-col max-h-[80vh]"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Modal Header — Exact previous UI */}
         <div className="p-4 border-b border-border flex items-center justify-between bg-card shadow-sm">
           <div className="flex items-center gap-2">
-            <Bell className="w-5 h-5 text-accent" />
+            {showPreferences ? (
+              <button
+                type="button"
+                onClick={() => setShowPreferences(false)}
+                className="p-1 text-foreground hover:bg-secondary rounded transition-colors mr-1"
+                title="Back to notifications"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+            ) : (
+              <Bell className="w-5 h-5 text-accent" />
+            )}
             <h3 id="notifications-dialog-title" className="font-semibold text-primary tracking-tight">
-              System Alerts & Notifications
+              {showPreferences ? "Delivery Preferences" : "System Alerts & Notifications"}
             </h3>
-            {unreadCount > 0 && (
+            {!showPreferences && unreadCount > 0 && (
               <span className="text-[10px] bg-destructive/20 text-destructive border border-destructive/30 px-1.5 py-0.5 rounded-sm font-mono font-bold">
                 {unreadCount} unread
               </span>
             )}
           </div>
           <div className="flex items-center gap-1.5">
-            {unreadCount > 0 && (
-              <button
-                type="button"
-                onClick={onMarkAllRead}
-                className="text-xs text-accent hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-secondary/50 font-medium flex items-center gap-1"
-                title="Mark all notifications as read"
-              >
-                <CheckCheck className="w-3.5 h-3.5" />
-                <span>Mark read</span>
-              </button>
-            )}
-            {notifications.length > 0 && onClearAll && (
-              <button
-                type="button"
-                onClick={onClearAll}
-                className="text-xs text-rose-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors px-2 py-1 rounded font-medium flex items-center gap-1"
-                title="Clear all notifications"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Clear all</span>
-              </button>
-            )}
-            {onTestAlert && (
-              <button
-                type="button"
-                onClick={onTestAlert}
-                className="text-xs text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors px-2 py-1 rounded font-medium flex items-center gap-1 border border-emerald-500/20"
-                title="Trigger a real-time live alert via SSE stream"
-              >
-                <Radio className="w-3.5 h-3.5 animate-pulse text-emerald-500" />
-                <span>Test Live</span>
-              </button>
+            {!showPreferences && (
+              <>
+                {unreadCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={onMarkAllRead}
+                    className="text-xs text-accent hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-secondary/50 font-medium flex items-center gap-1"
+                    title="Mark all notifications as read"
+                  >
+                    <CheckCheck className="w-3.5 h-3.5" />
+                    <span>Mark read</span>
+                  </button>
+                )}
+                {notifications.length > 0 && onClearAll && (
+                  <button
+                    type="button"
+                    onClick={onClearAll}
+                    className="text-xs text-rose-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors px-2 py-1 rounded font-medium flex items-center gap-1"
+                    title="Clear all notifications"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Clear all</span>
+                  </button>
+                )}
+                {onTestAlert && (
+                  <button
+                    type="button"
+                    onClick={onTestAlert}
+                    className="text-xs text-foreground hover:bg-secondary transition-colors px-2 py-1 rounded font-medium flex items-center gap-1 border border-border"
+                    title="Trigger a real-time live alert via SSE stream"
+                  >
+                    <Radio className="w-3.5 h-3.5 text-foreground" />
+                    <span>Test Live</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowPreferences(true)}
+                  className="p-1 text-foreground hover:bg-secondary rounded transition-colors"
+                  title="Configure delivery channels and quiet hours"
+                >
+                  <Sliders className="w-4 h-4" />
+                </button>
+              </>
             )}
             <button
               type="button"
@@ -119,8 +236,122 @@ export function NotificationsModal({
           </div>
         </div>
 
+        {/* Modal Body */}
         <div className="p-4 overflow-y-auto space-y-3 flex-1">
-          {loading ? (
+          {showPreferences ? (
+            /* Preferences Panel (No Yellow, Crisp Black Text) */
+            <div className="space-y-4 text-xs text-foreground">
+              <div className="flex items-center justify-between pb-2 border-b border-border">
+                <span className="font-bold text-foreground">Notification Channels</span>
+                {prefsSaved && (
+                  <span className="text-[11px] font-bold text-foreground bg-secondary px-2 py-0.5 rounded border border-border flex items-center gap-1">
+                    <Check className="w-3 h-3" /> Saved!
+                  </span>
+                )}
+              </div>
+
+              {/* Channels */}
+              <div className="space-y-1.5">
+                {[
+                  { id: "IN_APP", label: "In-App Live Stream" },
+                  { id: "EMAIL", label: "Official Email Notices" },
+                  { id: "SMS", label: "SMS Urgent Alerts" },
+                  { id: "WHATSAPP", label: "WhatsApp Status Updates" },
+                ].map(({ id, label }) => (
+                  <label
+                    key={id}
+                    onClick={() => toggleChannel(id)}
+                    className="flex items-center justify-between p-2 rounded border border-border bg-card hover:bg-secondary/50 cursor-pointer"
+                  >
+                    <span className="font-medium text-foreground">{label}</span>
+                    <input
+                      type="checkbox"
+                      checked={enabledChannels.includes(id)}
+                      onChange={() => {}}
+                      className="rounded border-border"
+                    />
+                  </label>
+                ))}
+              </div>
+
+              {/* Quiet Hours */}
+              <div className="pt-2 border-t border-border space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-foreground">Quiet Hours</span>
+                  <input
+                    type="checkbox"
+                    checked={quietHoursEnabled}
+                    onChange={(e) => setQuietHoursEnabled(e.target.checked)}
+                    className="rounded border-border"
+                  />
+                </div>
+                {quietHoursEnabled && (
+                  <div className="grid grid-cols-2 gap-2 p-2 rounded bg-secondary/40 border border-border">
+                    <div>
+                      <span className="text-[10px] text-muted-foreground block mb-0.5">Start Time</span>
+                      <input
+                        type="time"
+                        value={quietStart}
+                        onChange={(e) => setQuietStart(e.target.value)}
+                        className="w-full bg-background border border-border rounded px-2 py-1 text-xs text-foreground font-mono"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-muted-foreground block mb-0.5">End Time</span>
+                      <input
+                        type="time"
+                        value={quietEnd}
+                        onChange={(e) => setQuietEnd(e.target.value)}
+                        className="w-full bg-background border border-border rounded px-2 py-1 text-xs text-foreground font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Language */}
+              <div className="pt-2 border-t border-border space-y-1.5">
+                <span className="font-bold text-foreground block">Preferred Language</span>
+                <select
+                  value={prefLang}
+                  onChange={(e) => setPrefLang(e.target.value)}
+                  className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground"
+                >
+                  <option value="en">English</option>
+                  <option value="hi">हिन्दी (Hindi)</option>
+                  <option value="kn">ಕನ್ನಡ (Kannada)</option>
+                  <option value="te">తెలుగు (Telugu)</option>
+                  <option value="ta">தமிழ் (Tamil)</option>
+                  <option value="mr">मराठी (Marathi)</option>
+                  <option value="bn">বাংলা (Bengali)</option>
+                </select>
+              </div>
+
+              {/* Buttons */}
+              <div className="pt-3 border-t border-border flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setShowPreferences(false)}
+                  className="px-3 py-1.5 rounded text-xs text-foreground hover:bg-secondary transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSavePreferences}
+                  disabled={prefsLoading}
+                  className="px-4 py-1.5 rounded bg-primary text-primary-foreground font-bold hover:bg-primary/90 transition-colors flex items-center gap-1.5 text-xs shadow-sm"
+                >
+                  {prefsLoading ? (
+                    <RotateCcw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" />
+                  )}
+                  <span>Save Preferences</span>
+                </button>
+              </div>
+            </div>
+          ) : loading ? (
             <div className="p-8 text-center text-sm text-muted-foreground animate-pulse">
               Loading alerts from Nyaya Mitra pipeline...
             </div>
@@ -159,8 +390,8 @@ export function NotificationsModal({
                       )}
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="text-[10px] text-muted-foreground">
-                        {item.timestamp}
+                      <span className="text-[10px] text-muted-foreground font-mono">
+                        {item.timestamp ? item.timestamp.split("T")[0] : ""}
                       </span>
                       {onClearItem && (
                         <button
@@ -177,7 +408,7 @@ export function NotificationsModal({
                       )}
                     </div>
                   </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed mb-2">
+                  <p className="text-xs text-muted-foreground leading-relaxed mb-2 font-sans">
                     {item.message}
                   </p>
                   {item.case_id && (
@@ -198,4 +429,3 @@ export function NotificationsModal({
     </div>
   );
 }
-

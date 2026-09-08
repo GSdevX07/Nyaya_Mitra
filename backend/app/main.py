@@ -139,6 +139,10 @@ from app.routes.task_routes import router as task_router
 app.include_router(task_router, prefix="/api")
 app.include_router(task_router)
 
+# ── Production Notification & Escalation Subsystem Router ───────────────────
+from app.routes.notification_routes import router as notification_router
+app.include_router(notification_router, prefix="/api")
+
 # ── Mock database ─────────────────────────────────────────────────────────────
 # 5 hero cases engineered to hit distinct agent decision branches.
 # All data is synthetic see Nyaya_Mitra_Master_Roadmap_v2.md §8, Step 1.1.

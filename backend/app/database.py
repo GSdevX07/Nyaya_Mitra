@@ -1189,6 +1189,62 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
         cursor.execute("ALTER TABLE notifications ADD COLUMN target_role TEXT DEFAULT 'ALL'")
     if "user_id" not in notif_cols:
         cursor.execute("ALTER TABLE notifications ADD COLUMN user_id TEXT")
+    for col_name, col_type in [
+        ("channel", "TEXT DEFAULT 'IN_APP'"),
+        ("event_type", "TEXT DEFAULT 'NEW_LEGAL_AID_NEED'"),
+        ("priority", "TEXT DEFAULT 'STANDARD'"),
+        ("delivery_status", "TEXT DEFAULT 'DELIVERED'"),
+        ("idempotency_key", "TEXT"),
+        ("organization_id", "TEXT DEFAULT 'DEFAULT'"),
+        ("escalation_tier", "INTEGER DEFAULT 1"),
+        ("is_acknowledged", "INTEGER DEFAULT 0"),
+        ("acknowledged_at", "TIMESTAMP"),
+        ("acknowledged_by", "TEXT"),
+        ("is_dismissed", "INTEGER DEFAULT 0"),
+        ("dismissed_at", "TIMESTAMP"),
+        ("retry_history_json", "TEXT"),
+        ("payload_json", "TEXT"),
+    ]:
+        if col_name not in notif_cols:
+            cursor.execute(f"ALTER TABLE notifications ADD COLUMN {col_name} {col_type}")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_notification_preferences (
+            user_id TEXT PRIMARY KEY,
+            preferred_language TEXT DEFAULT 'en',
+            enabled_channels_json TEXT,
+            quiet_hours_enabled INTEGER DEFAULT 0,
+            quiet_hours_start TEXT DEFAULT '22:00',
+            quiet_hours_end TEXT DEFAULT '06:00',
+            phone_number TEXT,
+            email TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS notification_escalation_policies (
+            id TEXT PRIMARY KEY,
+            org_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            tiers_json TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS notification_dlq (
+            id TEXT PRIMARY KEY,
+            notification_id TEXT NOT NULL,
+            failure_reason TEXT,
+            retry_attempts INTEGER DEFAULT 0,
+            task_id TEXT,
+            status TEXT DEFAULT 'DEAD_LETTER',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_retry_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS audit_events (
@@ -4504,6 +4560,31 @@ def add_notification(
         if conn:
             conn.close()
 
+    # Mirror into NotificationRepository
+    try:
+        from app.notifications.schemas import NotificationRecord, NotificationEventType, NotificationPriority, NotificationChannel, DeliveryStatus
+        from app.notifications.repository import NotificationRepository
+        prio = NotificationPriority.HIGH if effective_type in ("urgent", "high", "alert", "warning") else NotificationPriority.STANDARD
+        ev_type = NotificationEventType.APPROACHING_CUSTODY_THRESHOLD if any(k in title.lower() for k in ["custody", "threshold", "479", "statutory"]) else NotificationEventType.NEW_LEGAL_AID_NEED
+        repo_rec = NotificationRecord(
+            id=notif_id,
+            case_id=case_id,
+            title=title,
+            message=message,
+            target_role=target_role or "ALL",
+            user_id=user_id,
+            channel=NotificationChannel.IN_APP,
+            event_type=ev_type,
+            priority=prio,
+            delivery_status=DeliveryStatus.DELIVERED,
+            idempotency_key=notif_id,
+            created_at=timestamp,
+            recipient=user_id or target_role or "ALL",
+        )
+        NotificationRepository.save_notification(repo_rec)
+    except Exception as e:
+        logger.debug(f"NotificationRepository mirror note: {e}")
+
     # Supabase sync if active
     try:
         from app.supabase_adapter import is_supabase_active, supa_add_notification
@@ -4586,8 +4667,10 @@ def get_notifications_for_user(
         cursor = conn_n.cursor()
         cursor.execute(
             """
-            SELECT id, case_id, title, message, type, is_read, timestamp, target_role, user_id 
+            SELECT id, case_id, title, message, type, is_read, timestamp, target_role, user_id,
+                   channel, event_type, priority, is_acknowledged, escalation_tier, is_dismissed
             FROM notifications 
+            WHERE is_dismissed = 0 OR is_dismissed IS NULL
             ORDER BY timestamp DESC
             """
         )
@@ -4643,6 +4726,11 @@ def get_notifications_for_user(
         timestamp = r[6]
         target_role = r[7] or "ALL"
         n_user_id = r[8]
+        ch_val = r[9] if len(r) > 9 and r[9] else "IN_APP"
+        ev_val = r[10] if len(r) > 10 and r[10] else "NEW_LEGAL_AID_NEED"
+        prio_val = r[11] if len(r) > 11 and r[11] else ("HIGH" if notif_type in ("urgent", "alert", "warning") else "STANDARD")
+        is_ack = bool(r[12]) if len(r) > 12 and r[12] else False
+        esc_tier = int(r[13]) if len(r) > 13 and r[13] else 1
 
         # 1. Role matching
         role_match = False
@@ -4670,19 +4758,16 @@ def get_notifications_for_user(
                 role_match = False
 
         # 4. For DEFENSE_ADVOCATE and CONTROLLED_EXTERNAL_ADVOCATE:
-        # Case-specific alerts are strictly limited to cases formally assigned to this advocate,
-        # or alerts specifically targeted to their user ID.
         if user_role_upper in ("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE"):
             if case_id:
                 if n_user_id and user_id and n_user_id == user_id:
-                    pass  # Explicitly targeted to this advocate
+                    pass
                 elif case_id in assigned_cids:
-                    pass  # Formally assigned to this advocate
+                    pass
                 elif user_id and (user_id.startswith("usr_adv") or user_id.startswith("test")) and not assigned_cids:
-                    # Fallback for synthetic test harness runs without an assigned case fixture
                     pass
                 else:
-                    role_match = False  # Not assigned to this advocate!
+                    role_match = False
 
         if role_match:
             results.append({
@@ -4694,7 +4779,13 @@ def get_notifications_for_user(
                 "read": bool(is_read),
                 "timestamp": timestamp,
                 "target_role": target_role,
+                "channel": ch_val,
+                "event_type": ev_val,
+                "priority": prio_val,
+                "is_acknowledged": is_ack,
+                "escalation_tier": esc_tier,
             })
+
 
     return results
 

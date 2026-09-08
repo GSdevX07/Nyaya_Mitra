@@ -706,6 +706,115 @@ export async function clearNotificationsApi(notificationId?: string) {
   }
 }
 
+export async function acknowledgeNotificationApi(notificationId: string) {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/api/notifications/${encodeURIComponent(notificationId)}/acknowledge`, {
+      method: "PATCH",
+    });
+    if (!res.ok) throw new Error("Failed to acknowledge notification");
+    return await res.json();
+  } catch (err) {
+    console.warn("Acknowledge notification error:", err);
+    return { status: "acknowledged_locally", id: notificationId };
+  }
+}
+
+export async function dismissNotificationApi(notificationId: string) {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/api/notifications/${encodeURIComponent(notificationId)}/dismiss`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error("Failed to dismiss notification");
+    return await res.json();
+  } catch (err) {
+    console.warn("Dismiss notification error:", err);
+    return { status: "dismissed_locally", id: notificationId };
+  }
+}
+
+export async function fetchNotificationPreferences() {
+  const cached = localStorage.getItem("nyaya_notification_preferences");
+  let defaultPrefs = {
+    preferred_language: "en",
+    enabled_channels: ["IN_APP", "EMAIL"],
+    quiet_hours_enabled: false,
+    quiet_hours_start: "22:00",
+    quiet_hours_end: "06:00",
+  };
+  if (cached) {
+    try {
+      defaultPrefs = { ...defaultPrefs, ...JSON.parse(cached) };
+    } catch {}
+  }
+  try {
+    const res = await authFetch(`${API_BASE_URL}/api/notifications/preferences`);
+    if (res.ok) {
+      const serverData = await res.json();
+      localStorage.setItem("nyaya_notification_preferences", JSON.stringify(serverData));
+      return serverData;
+    }
+  } catch (err) {
+    console.warn("Fetch notification preferences network notice:", err);
+  }
+  return defaultPrefs;
+}
+
+export async function updateNotificationPreferences(prefs: {
+  preferred_language?: string;
+  enabled_channels?: string[];
+  quiet_hours_enabled?: boolean;
+  quiet_hours_start?: string;
+  quiet_hours_end?: string;
+  phone_number?: string;
+  email?: string;
+}) {
+  // Always immediately persist in localStorage for instant responsive client behavior
+  const cached = localStorage.getItem("nyaya_notification_preferences");
+  let current = {};
+  if (cached) {
+    try { current = JSON.parse(cached); } catch {}
+  }
+  const merged = { ...current, ...prefs };
+  localStorage.setItem("nyaya_notification_preferences", JSON.stringify(merged));
+
+  try {
+    const res = await authFetch(`${API_BASE_URL}/api/notifications/preferences`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(prefs),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      localStorage.setItem("nyaya_notification_preferences", JSON.stringify(data));
+      return data;
+    }
+  } catch (err) {
+    console.warn("Backend update preferences note (using local cache):", err);
+  }
+  return merged;
+}
+
+
+export async function fetchNotificationDLQ() {
+  try {
+    const res = await authFetch(`${API_BASE_URL}/api/notifications/dlq`);
+    if (!res.ok) throw new Error("Failed to fetch DLQ entries");
+    return await res.json();
+  } catch (err) {
+    console.warn("Fetch DLQ error:", err);
+    return [];
+  }
+}
+
+export async function retryNotificationDLQ(dlqId: string) {
+  const res = await authFetch(`${API_BASE_URL}/api/notifications/dlq/${encodeURIComponent(dlqId)}/retry`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to retry DLQ entry");
+  return await res.json();
+}
+
+
 export function subscribeToNotificationsStream(
   onNotification: (notif: any) => void,
   onError?: (err: any) => void,

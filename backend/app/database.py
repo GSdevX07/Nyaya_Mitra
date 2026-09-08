@@ -1870,6 +1870,55 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
         )
     """)
 
+    # ── Analytics & Controlled Export Framework Tables ──────────────────────
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS export_audit_logs (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            user_email TEXT NOT NULL,
+            user_role TEXT NOT NULL,
+            report_type TEXT NOT NULL,
+            format TEXT NOT NULL,
+            record_count INTEGER DEFAULT 0,
+            scope_filter TEXT,
+            purpose TEXT NOT NULL,
+            export_hash TEXT NOT NULL,
+            exported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_export_audit_user ON export_audit_logs(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_export_audit_time ON export_audit_logs(exported_at)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scheduled_reports (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            report_type TEXT NOT NULL,
+            frequency TEXT NOT NULL,
+            recipients_json TEXT NOT NULL,
+            organization_id TEXT DEFAULT 'DEFAULT',
+            jurisdiction TEXT DEFAULT 'ALL',
+            data_minimization_level TEXT DEFAULT 'AGGREGATE_ONLY',
+            is_active INTEGER DEFAULT 1,
+            last_run_at TIMESTAMP,
+            next_run_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scheduled_report_executions (
+            id TEXT PRIMARY KEY,
+            schedule_id TEXT NOT NULL,
+            executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'SUCCESS',
+            summary_content TEXT,
+            delivery_channel TEXT DEFAULT 'IN_APP',
+            FOREIGN KEY (schedule_id) REFERENCES scheduled_reports(id)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sched_exec_schedule ON scheduled_report_executions(schedule_id)")
+
     conn.commit()
 
 

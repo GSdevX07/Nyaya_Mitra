@@ -54,6 +54,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/cases", label: "Inmate Roll" },
         { path: "/documents", label: "Intake Documents" },
         { path: "/hearings", label: "Hearings" },
+        { path: "/reports", label: "Custody Reports" },
       ];
 
     case "POLICE_OFFICER":
@@ -65,6 +66,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
     case "PLATFORM_ADMIN":
       return [
         { path: "/admin", label: "Admin Console" },
+        { path: "/reports", label: "Analytics & Reports" },
         { path: "/ingestion", label: "Data Ingestion" },
         { path: "/audit", label: "Audit Logs" },
         { path: "/identity-review", label: "Identity Candidates" },

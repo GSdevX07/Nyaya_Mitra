@@ -2217,3 +2217,441 @@ export async function expediteCoordinationApi(caseId: string, notes?: string, ta
   return await res.json();
 }
 
+// ── Analytics, Reporting & Impact Intelligence APIs ──────────────────────────
+
+export interface FacilityCustodyMetric {
+  facility_id: string;
+  facility_name: string;
+  facility_type: string;
+  state: string;
+  district: string;
+  capacity: number;
+  current_occupancy: number;
+  undertrials_count: number;
+  occupancy_rate_pct: number;
+  overcrowding_flag: boolean;
+}
+
+export interface LegalAidAttentionItem {
+  case_id: string;
+  accused_name: string;
+  facility: string;
+  status: string;
+  days_in_intake: number;
+  urgency_level: string;
+  assigned_lawyer_id?: string | null;
+  reason: string;
+}
+
+export interface LegalAidAttentionMetric {
+  total_attention_required: number;
+  unassigned_cases_count: number;
+  intake_pending_count: number;
+  legal_need_identified_count: number;
+  panel_requests_pending: number;
+  high_urgency_count: number;
+  cases: LegalAidAttentionItem[];
+}
+
+export interface ApproachingThresholdItem {
+  case_id: string;
+  accused_name: string;
+  facility: string;
+  offense_sections: string;
+  custody_days: number;
+  prescribed_max_days: number;
+  half_sentence_days: number;
+  third_sentence_days: number;
+  statutory_category: string;
+  days_until_threshold: number;
+  threshold_status: string;
+  recommended_action: string;
+}
+
+export interface ApproachingThresholdMetric {
+  total_flagged: number;
+  threshold_reached_count: number;
+  within_15_days_count: number;
+  within_30_days_count: number;
+  cases: ApproachingThresholdItem[];
+}
+
+export interface OverdueActionItem {
+  task_id: string;
+  case_id: string;
+  title: string;
+  action_type: string;
+  assigned_role: string;
+  assigned_user?: string | null;
+  days_overdue: number;
+  escalation_tier: number;
+  sla_target_hours: number;
+  status: string;
+}
+
+export interface OverdueActionMetric {
+  total_overdue: number;
+  critical_overdue_count: number;
+  tier_2_escalated: number;
+  tier_3_escalated: number;
+  tasks: OverdueActionItem[];
+}
+
+export interface MissingDocumentItem {
+  case_id: string;
+  accused_name: string;
+  facility: string;
+  total_required: number;
+  total_present: number;
+  completeness_pct: number;
+  missing_docs: string[];
+  present_docs: string[];
+  is_filing_blocked: boolean;
+}
+
+export interface MissingDocumentMetric {
+  total_cases_evaluated: number;
+  dockets_complete_count: number;
+  dockets_incomplete_count: number;
+  average_completeness_pct: number;
+  most_frequent_missing: { document_type: string; missing_count: number }[];
+  cases: MissingDocumentItem[];
+}
+
+export interface TurnaroundIntakeToAssignmentMetric {
+  total_cases_measured: number;
+  average_hours: number;
+  median_hours: number;
+  target_hours: number;
+  within_sla_pct: number;
+  trend_direction: string;
+}
+
+export interface TurnaroundAssignmentToReviewMetric {
+  total_reviews_measured: number;
+  average_hours: number;
+  median_hours: number;
+  target_hours: number;
+  supervisory_approval_rate_pct: number;
+  trend_direction: string;
+}
+
+export interface UnresolvedConflictItem {
+  conflict_id: string;
+  conflict_type: string;
+  entity_id: string;
+  description: string;
+  source_system: string;
+  confidence_score: number;
+  requires_human_review: boolean;
+  detected_at: string;
+}
+
+export interface UnresolvedConflictMetric {
+  total_unresolved: number;
+  identity_merge_candidates_count: number;
+  cross_facility_duplicates_count: number;
+  connector_divergence_count: number;
+  conflicts: UnresolvedConflictItem[];
+}
+
+export interface UpcomingHearingItem {
+  hearing_id: string;
+  case_id: string;
+  accused_name: string;
+  court_name: string;
+  hearing_date: string;
+  days_away: number;
+  hearing_type: string;
+  assigned_advocate: string;
+  purpose: string;
+}
+
+export interface UpcomingHearingMetric {
+  next_7_days_count: number;
+  next_14_days_count: number;
+  next_30_days_count: number;
+  by_court_breakdown: { court: string; count: number }[];
+  by_purpose_breakdown: { purpose: string; count: number }[];
+  hearings: UpcomingHearingItem[];
+}
+
+export interface ReleaseOutcomeMetric {
+  total_releases_recorded: number;
+  regular_bail_count: number;
+  section_479_statutory_bail_count: number;
+  default_bail_count: number;
+  acquittal_discharge_count: number;
+  post_release_support_active: number;
+  surety_compliance_rate_pct: number;
+  monthly_trend: { month: string; releases: number }[];
+}
+
+export interface NotificationDeliveryMetric {
+  total_dispatched: number;
+  in_app_delivered: number;
+  email_delivered: number;
+  sms_delivered: number;
+  whatsapp_delivered: number;
+  dlq_failures_count: number;
+  delivery_success_rate_pct: number;
+  acknowledgement_rate_pct: number;
+  auto_escalated_count: number;
+}
+
+export interface ConnectorHealthSummaryItem {
+  connector_id: string;
+  display_name: string;
+  connector_type: string;
+  sync_status: string;
+  last_sync: string | null;
+  latency_ms: number;
+  error_rate_pct: number;
+  records_processed: number;
+  records_rejected: number;
+  is_simulated: boolean;
+}
+
+export interface IntegrationHealthMetric {
+  total_connectors: number;
+  healthy_connectors_count: number;
+  degraded_connectors_count: number;
+  overall_uptime_pct: number;
+  connectors: ConnectorHealthSummaryItem[];
+}
+
+export interface AdvocateWorkloadItem {
+  advocate_id: string;
+  name: string;
+  bar_registration_no: string;
+  active_cases: number;
+  district: string;
+  panel_status: string;
+}
+
+export interface RoleTaskWorkloadItem {
+  role: string;
+  pending_tasks: number;
+  overdue_tasks: number;
+  completed_today: number;
+}
+
+export interface WorkloadByTeamMetric {
+  active_panel_advocates_count: number;
+  average_cases_per_advocate: number;
+  top_advocates: AdvocateWorkloadItem[];
+  role_distribution: RoleTaskWorkloadItem[];
+}
+
+export interface AllDashboardsResponse {
+  user_role: string;
+  jurisdiction: string;
+  data_provenance: string;
+  is_synthetic: boolean;
+  methodology_disclaimer: string;
+  generated_at: string;
+  people_in_custody: FacilityCustodyMetric[];
+  legal_aid_attention: LegalAidAttentionMetric;
+  approaching_thresholds: ApproachingThresholdMetric;
+  overdue_actions: OverdueActionMetric;
+  missing_documents: MissingDocumentMetric;
+  time_intake_to_assignment: TurnaroundIntakeToAssignmentMetric;
+  time_assignment_to_review: TurnaroundAssignmentToReviewMetric;
+  unresolved_conflicts: UnresolvedConflictMetric;
+  upcoming_hearings: UpcomingHearingMetric;
+  release_outcomes: ReleaseOutcomeMetric;
+  notification_delivery: NotificationDeliveryMetric;
+  integration_health: IntegrationHealthMetric;
+  workload_by_team: WorkloadByTeamMetric;
+}
+
+export interface LeadershipReportResponse {
+  title: string;
+  jurisdiction: string;
+  period: string;
+  generated_at: string;
+  data_provenance: string;
+  is_synthetic: boolean;
+  methodology_disclaimer: string;
+  executive_summary: Record<string, any>;
+  operational_trends: Record<string, any>[];
+  backlog_analysis: Record<string, any>;
+  turnaround_benchmarks: Record<string, any>;
+  service_coverage: Record<string, any>;
+}
+
+export interface ImpactMetricItem {
+  indicator: string;
+  measured_value: string;
+  baseline_value: string;
+  improvement_delta: string;
+  description: string;
+  is_synthetic: boolean;
+  methodology: string;
+}
+
+export interface ImpactDashboardResponse {
+  title: string;
+  generated_at: string;
+  data_provenance: string;
+  is_synthetic: boolean;
+  methodology_disclaimer: string;
+  fewer_missed_actions_pct: number;
+  faster_assignment_reduction_pct: number;
+  document_completeness_rate_pct: number;
+  manual_search_hours_avoided: number;
+  deadline_visibility_rate_pct: number;
+  post_release_continuity_rate_pct: number;
+  indicators: ImpactMetricItem[];
+}
+
+export interface ExportRequest {
+  report_type: string;
+  format: "CSV" | "JSON" | "PDF";
+  jurisdiction?: string;
+  date_from?: string | null;
+  date_to?: string | null;
+  purpose: string;
+  include_pii?: boolean;
+}
+
+export interface ExportResponse {
+  export_id: string;
+  filename: string;
+  format: string;
+  record_count: number;
+  content: string;
+  checksum_sha256: string;
+  exported_at: string;
+  data_minimized: boolean;
+  jurisdiction_scope: string;
+}
+
+export interface ExportAuditLogRecord {
+  id: string;
+  user_id: string;
+  user_email: string;
+  user_role: string;
+  report_type: string;
+  format: string;
+  record_count: number;
+  scope_filter: string;
+  purpose: string;
+  export_hash: string;
+  exported_at: string;
+}
+
+export interface ScheduledReportRecord {
+  id: string;
+  title: string;
+  report_type: string;
+  frequency: string;
+  recipients: string[];
+  jurisdiction: string;
+  data_minimization_level: string;
+  is_active: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  created_at: string;
+}
+
+export interface ScheduledReportCreateRequest {
+  title: string;
+  report_type: string;
+  frequency: "DAILY" | "WEEKLY" | "MONTHLY" | "QUARTERLY";
+  recipients: string[];
+  jurisdiction?: string;
+  data_minimization_level?: string;
+}
+
+export interface ScheduledExecutionRecord {
+  id: string;
+  schedule_id: string;
+  executed_at: string;
+  status: string;
+  summary_content: string;
+  delivery_channel: string;
+}
+
+export async function fetchAnalyticsDashboards(): Promise<AllDashboardsResponse> {
+  const res = await authFetch(`${API_BASE_URL}/api/analytics/dashboards`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch analytics dashboards: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchLeadershipReport(): Promise<LeadershipReportResponse> {
+  const res = await authFetch(`${API_BASE_URL}/api/analytics/leadership-report`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch leadership report: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchImpactDashboard(): Promise<ImpactDashboardResponse> {
+  const res = await authFetch(`${API_BASE_URL}/api/analytics/impact`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch impact dashboard: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function exportAnalyticsData(payload: ExportRequest): Promise<ExportResponse> {
+  const res = await authFetch(`${API_BASE_URL}/api/analytics/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Export generation failed: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchExportAuditLogs(limit: number = 50): Promise<ExportAuditLogRecord[]> {
+  const res = await authFetch(`${API_BASE_URL}/api/analytics/export/audit-logs?limit=${limit}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch export audit logs: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchScheduledReports(): Promise<ScheduledReportRecord[]> {
+  const res = await authFetch(`${API_BASE_URL}/api/analytics/schedules`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch scheduled reports: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function createScheduledReport(payload: ScheduledReportCreateRequest): Promise<ScheduledReportRecord> {
+  const res = await authFetch(`${API_BASE_URL}/api/analytics/schedules`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to create scheduled report: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function triggerScheduledReport(scheduleId: string): Promise<ScheduledExecutionRecord> {
+  const res = await authFetch(`${API_BASE_URL}/api/analytics/schedules/${encodeURIComponent(scheduleId)}/trigger`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to trigger scheduled report: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+

@@ -399,10 +399,14 @@ function App() {
                 element={
                   <ProtectedRoute
                     allowedRoles={[
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
                       "DLSA_OFFICER",
                       "SUPERVISING_LEGAL_OFFICER",
-                      "GOV_ADMIN",
+                      "JAIL_OFFICER",
                       "READ_ONLY_AUDITOR",
+                      "DEFENSE_ADVOCATE",
+                      "CONTROLLED_EXTERNAL_ADVOCATE",
                     ]}
                   >
                     <ReportsPage />

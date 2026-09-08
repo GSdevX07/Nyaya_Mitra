@@ -146,6 +146,10 @@ app.include_router(task_router)
 from app.routes.notification_routes import router as notification_router
 app.include_router(notification_router, prefix="/api")
 
+# ── Analytics, Reporting, Impact & Controlled Exports Router ────────────────
+from app.routes.analytics_routes import router as analytics_router
+app.include_router(analytics_router)
+
 # ── Mock database ─────────────────────────────────────────────────────────────
 # 5 hero cases engineered to hit distinct agent decision branches.
 # All data is synthetic see Nyaya_Mitra_Master_Roadmap_v2.md §8, Step 1.1.
@@ -4807,8 +4811,9 @@ def get_hearings(
 @app.get("/reports", tags=["Reports"])
 def get_reports(
     current_user: AuthUser = Depends(require_role(
-        Role.GOV_ADMIN, Role.DLSA_OFFICER,
-        Role.SUPERVISING_LEGAL_OFFICER, Role.READ_ONLY_AUDITOR,
+        Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.DLSA_OFFICER,
+        Role.JAIL_OFFICER, Role.SUPERVISING_LEGAL_OFFICER,
+        Role.READ_ONLY_AUDITOR,
     )),
 ):
     """

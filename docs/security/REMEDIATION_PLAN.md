@@ -57,3 +57,37 @@ System hygiene and automated regression prevention.
 | **P3-1** | Missing HTTP Security Headers | `main.py` | Middleware injecting CSP, HSTS, X-Frame-Options, X-Content-Type-Options. | Verified on API responses. |
 | **P3-2** | Lack of Automated CI Security Gates | `.github/workflows/` | GitHub Actions workflow with `pip-audit`, `npm audit`, Bandit SAST, and secret scanning. | CI pipeline passes on commits. |
 | **P3-3** | Sequential Case ID Enumeration | `main.py` | Fail-closed 404 responses for unauthorized case IDs without revealing case existence. | Out-of-district case ID returns generic 404. |
+
+---
+
+## 3. Operational Readiness & Deployment Posture
+
+To maintain clear operational transparency between software implementation and production deployment, controls are tracked by operational state:
+
+### 3.1 Encryption at Rest Status
+- **Architecture & Application Envelopes**: [COMPLETED & DOCUMENTED]
+  - Field-level masking of Tier 1 Medical and Tier 2 PII before delivery.
+  - Column-level sensitive envelopes and password hashing (PBKDF2-SHA256).
+  - HMAC-SHA256 time-expiring document download tokens.
+- **Production Platform Storage Encryption**: [PENDING PRODUCTION PLATFORM CONFIGURATION]
+  - Database disk volume encryption (AWS RDS KMS AES-256 / Supabase TDE).
+  - Object store bucket encryption (S3 SSE-KMS).
+  - Must be enabled by devops/cloud infrastructure team during cloud environment provisioning.
+
+### 3.2 Security Scanning & Enforcement Status
+- **Security Scanning Setup**: [OPERATIONAL]
+  - Bandit SAST, pip-audit, npm audit, and TruffleHog integrated in `.github/workflows/security_ci.yml`.
+- **Release-Blocking Hard Gate Enforcement**: [PENDING PROGRESSIVE TUNING]
+  - Dependency scanners (`pip-audit`, `npm audit`) and TruffleHog currently operate in non-fatal reporting mode (`|| echo ...`) to allow iterative dependency upgrades without breaking local/CI pipelines on non-critical third-party advisories.
+  - Container scanning (`Trivy`) is staged with `if: false` until production Docker image builds are published to the container registry.
+  - Hard release-blocking gates must be enforced prior to formal production staging.
+
+---
+
+## 4. External Security Audit Disclaimer
+
+> [!IMPORTANT]
+> Formal Security Audit Disclaimer:
+> This hardening pass, threat model, internal static analysis, and automated test suite represent foundational engineering practices. They **do not constitute, replace, or equate to a completed external security audit**, penetration test (VAPT), or formal certification by an independent accredited security firm (e.g. CERT-In empaneled auditor).
+> A third-party security assessment and penetration test must be conducted prior to production deployment with real judicial records.
+

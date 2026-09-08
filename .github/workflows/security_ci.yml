@@ -40,15 +40,18 @@ jobs:
 
       - name: Run pip-audit for Known CVEs in Python Dependencies
         run: |
-          # Fails if dependencies have known critical/high vulnerabilities
-          pip-audit --desc on || echo "Audit completed with findings to review."
+          # Operating Policy: Advisory scan in development CI.
+          # Prior to production release, remove '|| echo' to make findings strictly release-blocking.
+          pip-audit --desc on || echo "[ADVISORY] Python dependency vulnerabilities detected for review."
 
       - name: Run Security & Privacy Hardening Test Suite
         env:
           APP_ENV: testing
           DEMO_MODE: "true"
         run: |
+          # Strictly release-blocking: all security unit & authorization tests must pass 100%
           python -m pytest tests/test_security_privacy_hardening.py tests/test_authz.py -v
+
 
   frontend-security:
     name: Frontend Dependency Security Audit
@@ -73,7 +76,9 @@ jobs:
 
       - name: Run npm audit
         run: |
-          npm audit --audit-level=high || echo "Advisories present for review."
+          # Operating Policy: Advisory scan in development CI.
+          # Prior to production release, remove '|| echo' to make high/critical findings release-blocking.
+          npm audit --audit-level=high || echo "[ADVISORY] Frontend dependency vulnerabilities detected for review."
 
   secret-scan:
     name: Automated Secret Detection Scan
@@ -92,12 +97,13 @@ jobs:
           base: ${{ github.event.repository.default_branch }}
           head: HEAD
           extra_args: --debug --only-verified
-        continue-on-error: true
+        continue-on-error: true # Advisory mode during active feature development
 
   container-security:
     name: Container Image Vulnerability Scan
     runs-on: ubuntu-latest
-    if: false # Activated when deployment Dockerfile is built in registry
+    # Operating Policy: Staged with if: false until production Docker image is built in registry
+    if: false
 
     steps:
       - name: Check out code
@@ -115,3 +121,4 @@ jobs:
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
+

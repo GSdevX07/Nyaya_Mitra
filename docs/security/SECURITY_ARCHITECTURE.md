@@ -73,13 +73,29 @@ Layer 6: Cryptographic Audit & Ledger
 - **HTTP Strict Transport Security (HSTS)**: `max-age=31536000; includeSubDomains`.
 
 ### 3.2 Data at Rest
-- **Database Storage**: AES-256 encryption at rest provided by host storage volume / PostgreSQL Transparent Data Encryption (TDE) / cloud encrypted SSD.
-- **Sensitive Envelope Encryption**: Highly sensitive fields (Aadhaar placeholders, family contact numbers, medical diagnoses) support column-level encryption via AES-256-GCM prior to database write.
-- **Document Store**: Uploaded file streams are encrypted with unique per-file initialization vectors (IVs) and stored in isolated storage volumes.
+
+> [!IMPORTANT]
+> Implementation Status:
+> - Architecture and specification: Fully documented.
+> - Production platform configuration: Still required during production infrastructure provisioning.
+
+- **Platform-Level Database & Volume Encryption**:
+  True encryption at rest for relational databases and persistent storage is a host/cloud platform infrastructure control, not an application code capability. In production, this requires:
+  - PostgreSQL / Supabase: Enabling Transparent Data Encryption (TDE) or cloud provider volume-level encryption (e.g. AWS KMS-managed EBS gp3 volumes with AES-256).
+  - Object / Document Storage: Enabling server-side encryption (SSE-KMS or SSE-S3) on document buckets.
+- **Application-Level Envelope & Cryptographic Integrity**:
+  At the application tier, Nyaya Mitra enforces:
+  - Field-level data classification filters redacting Tier 1 (Medical) and Tier 2 (PII) before delivery.
+  - PBKDF2-SHA256 password hashing with unique per-user salts.
+  - HMAC-SHA256 cryptographic token signing for time-expiring document access.
+  - SHA-256 Merkle-linked hash chaining for append-only audit trail verification.
+- **Operational Boundary**:
+  Application-level controls prevent unauthorized logical access and data leakage across roles; platform-level disk/database encryption protects against physical theft of drives, unattached volume snapshots, and cold storage inspection.
 
 ### 3.3 Secrets Management
 - In production, secrets (`JWT_SECRET`, database connection strings, Supabase keys, LLM provider tokens) must never be loaded from plaintext disk `.env` files.
 - The platform provides a `CloudVaultSecretManager` interface capable of integrating with AWS Secrets Manager, Azure Key Vault, Google Cloud Secret Manager, or HashiCorp Vault.
+
 
 ---
 

@@ -7,6 +7,7 @@ Implements dual execution mode: LIVE webhook/polling vs SANDBOX simulated feed.
 
 from __future__ import annotations
 import datetime
+import os
 import time
 from typing import Dict, Any, List, Optional
 
@@ -34,18 +35,33 @@ class CCTNSConnector(BaseConnector):
                 rate_limit_per_minute=30,
                 latency_ms=92.0,
                 error_rate_pct=0.0,
+                endpoint_url=os.getenv("CCTNS_ENDPOINT_URL", "mock://sandbox.cctns.gov.in/v1/cases/delta"),
             )
         super().__init__(config)
 
     def get_source_name(self) -> str:
         return "[SIMULATED DATA] Police CCTNS Network" if self.config.is_simulated else "Police CCTNS Network"
 
-    def fetch_records(self, since: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-        """Fetch incoming FIR registrations and arrest notices from state police system."""
+    def fetch_records(
+        self,
+        since: Optional[str] = None,
+        limit: int = 50,
+        page: int = 1,
+        offset: int = 0,
+        cursor: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetch incoming FIR registrations and arrest notices from state police system with true pagination."""
         start_time = time.time()
         self.rate_limiter.acquire(1)
 
-        records = [
+        today = datetime.date.today()
+        d60 = (today - datetime.timedelta(days=60)).isoformat()
+        d35 = (today - datetime.timedelta(days=35)).isoformat()
+        d180 = (today - datetime.timedelta(days=180)).isoformat()
+        d100 = (today - datetime.timedelta(days=100)).isoformat()
+        now_ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        all_records = [
             {
                 "fir_number": "FIR-2025-0104",
                 "police_station": "Kotwali PS",
@@ -53,12 +69,12 @@ class CCTNSConnector(BaseConnector):
                 "state": "Delhi",
                 "accused_name": "Suresh Patel",
                 "age": 28,
-                "arrest_date": "2025-01-10",
+                "arrest_date": d60,
                 "offense_sections": ["BNS 115(2)", "BNS 351(2)"],
                 "chargesheet_status": "FILED",
                 "relative_name": "Mahesh Patel",
-                "relative_phone": "+91 98765 43210",
-                "source_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "relative_phone": f"+91 98{today.month:02d}0 {today.day:02d}104",
+                "source_timestamp": now_ts,
                 "is_simulated": self.config.is_simulated,
             },
             {
@@ -68,21 +84,54 @@ class CCTNSConnector(BaseConnector):
                 "state": "Delhi",
                 "accused_name": "Kishan Kumar",
                 "age": 24,
-                "arrest_date": "2025-02-01",
+                "arrest_date": d35,
                 "offense_sections": ["BNS 303(2)"],
                 "chargesheet_status": "UNDER_INVESTIGATION",
                 "relative_name": "Sunita Devi",
-                "relative_phone": "+91 98111 22334",
-                "source_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "relative_phone": f"+91 98{today.month:02d}1 {today.day:02d}491",
+                "source_timestamp": now_ts,
+                "is_simulated": self.config.is_simulated,
+            },
+            {
+                "fir_number": "FIR-2024-ROH-91",
+                "police_station": "Rohini North PS",
+                "district": "North West Delhi",
+                "state": "Delhi",
+                "accused_name": "Ramesh Chandra",
+                "age": 34,
+                "arrest_date": d180,
+                "offense_sections": ["BNS 303(2)"],
+                "chargesheet_status": "FILED",
+                "relative_name": "Kavita Devi",
+                "relative_phone": f"+91 98{today.month:02d}2 {today.day:02d}091",
+                "source_timestamp": now_ts,
+                "is_simulated": self.config.is_simulated,
+            },
+            {
+                "fir_number": "FIR-2024-NDPS-88",
+                "police_station": "Special Cell PS",
+                "district": "New Delhi",
+                "state": "Delhi",
+                "accused_name": "Mohd. Tariq",
+                "age": 31,
+                "arrest_date": d100,
+                "offense_sections": ["NDPS 20(b)", "NDPS 29"],
+                "chargesheet_status": "FILED",
+                "relative_name": "Zubair Ahmad",
+                "relative_phone": f"+91 98{today.month:02d}3 {today.day:02d}088",
+                "source_timestamp": now_ts,
                 "is_simulated": self.config.is_simulated,
             },
         ]
+
+        paginated = self.paginate_records(all_records, limit=limit, page=page, offset=offset, cursor=cursor)
+        records = paginated["items"]
 
         latency = round((time.time() - start_time) * 1000 + 29.0, 1)
         self.config.latency_ms = latency
         self.record_audit_call(
             method="GET",
-            endpoint_url="https://api.cctns.gov.in/v1/cases/delta",
+            endpoint_url=self.get_endpoint_url("/v1/cases/delta"),
             response_status=200,
             latency_ms=latency,
             idempotency_key=f"idemp_cctns_{int(time.time())}",

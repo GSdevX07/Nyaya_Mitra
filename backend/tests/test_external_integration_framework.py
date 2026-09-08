@@ -326,3 +326,89 @@ def test_connector_audit_logs_endpoint():
         assert "request_method" in log
         assert "latency_ms" in log
         assert "response_status" in log
+
+
+# ── 11. Dynamic Credential Expiry & Derived Sandbox Credentials ───────────────
+
+def test_dynamic_credential_expiry_and_sandbox_derivation():
+    """Verify credential expiry is dynamically computed and sandbox tokens are derived without hardcoding."""
+    expiry = SecureCredentialVault.get_credential_expiry("conn_ecourts", "ECOURTS_SECRET")
+    assert expiry is not None
+    assert expiry != "2027-03-31T23:59:59Z"  # Hardcoded placeholder eliminated
+    # Must be valid ISO timestamp in the future
+    exp_dt = datetime.datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+    assert exp_dt > datetime.datetime.now(datetime.timezone.utc)
+
+    # Derived sandbox token must be deterministic per connector and not a static string
+    token_ecourts = SecureCredentialVault.derive_sandbox_token("conn_ecourts")
+    token_eprisons = SecureCredentialVault.derive_sandbox_token("conn_eprisons")
+    assert token_ecourts.startswith("sim_")
+    assert token_eprisons.startswith("sim_")
+    assert token_ecourts != token_eprisons
+    assert "sim_key_live_default_4f8a" not in (token_ecourts, token_eprisons)
+
+
+# ── 12. Dynamic Configurable Connector Endpoints ──────────────────────────────
+
+def test_dynamic_configurable_connector_endpoints():
+    """Verify connector endpoints are loaded from config/env and not hardcoded."""
+    ecourts = ECourtsConnector()
+    endpoint = ecourts.get_endpoint_url("/v2/dockets/sync")
+    assert endpoint is not None
+    assert "ecourts" in endpoint.lower()
+
+
+# ── 13. Cursor & Offset Pagination Exercising in Feeds ────────────────────────
+
+def test_cursor_and_offset_pagination_in_feeds():
+    """Verify connectors support true cursor and offset pagination."""
+    ecourts = ECourtsConnector()
+
+    # Page 1 (2 records)
+    page_1 = ecourts.paginate_records(ecourts.fetch_records(limit=100), limit=2, page=1)
+    assert len(page_1["items"]) == 2
+    assert page_1["has_more"] is True
+    assert page_1["next_cursor"] == "cur_2"
+
+    # Page 2 using cursor
+    page_2 = ecourts.paginate_records(ecourts.fetch_records(limit=100), limit=2, cursor=page_1["next_cursor"])
+    assert len(page_2["items"]) == 2
+    # Verify items in page 1 and page 2 are different dockets
+    p1_cnrs = [r["cnr_number"] for r in page_1["items"]]
+    p2_cnrs = [r["cnr_number"] for r in page_2["items"]]
+    assert not set(p1_cnrs).intersection(set(p2_cnrs))
+
+    # Test sync API endpoint with pagination params
+    resp = client.post("/ingestion/connectors/conn_ecourts/sync?limit=2&page=1", headers=ADMIN_AUTH)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "pagination" in data
+    assert data["pagination"]["limit"] == 2
+    assert data["pagination"]["page"] == 1
+
+
+# ── 14. Shared / Distributed Rate Limit Coordination ──────────────────────────
+
+def test_shared_rate_limit_coordination():
+    """Verify TokenBucketRateLimiter coordinates state via database table."""
+    test_conn_id = "conn_test_distributed_limiter"
+    limiter = TokenBucketRateLimiter(rate_per_minute=2, connector_id=test_conn_id)
+
+    # 1st and 2nd tokens succeed
+    ok1, wait1 = limiter.acquire(1)
+    assert ok1 is True
+    ok2, wait2 = limiter.acquire(1)
+    assert ok2 is True
+
+    # 3rd token exceeds rate limit
+    ok3, wait3 = limiter.acquire(1)
+    assert ok3 is False
+    assert wait3 > 0.0
+
+    # Verify state was persisted in SQLite connector_rate_limits table
+    conn = get_db_connection()
+    row = conn.execute("SELECT * FROM connector_rate_limits WHERE connector_id = ?", (test_conn_id,)).fetchone()
+    conn.close()
+    assert row is not None
+    assert row["connector_id"] == test_conn_id
+

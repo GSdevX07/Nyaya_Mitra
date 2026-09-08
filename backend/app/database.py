@@ -1860,6 +1860,16 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_connector_audit_conn ON connector_audit_logs(connector_id)")
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS connector_rate_limits (
+            connector_id TEXT PRIMARY KEY,
+            tokens REAL NOT NULL,
+            last_refill REAL NOT NULL,
+            capacity INTEGER NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
 
 

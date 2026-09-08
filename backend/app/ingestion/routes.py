@@ -158,20 +158,36 @@ def get_ingestion_dashboard(
 @ingestion_router.post("/connectors/{connector_id}/sync")
 def trigger_connector_sync(
     connector_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1),
+    offset: int = Query(0, ge=0),
+    cursor: Optional[str] = Query(None),
     current_user: AuthUser = Depends(require_role(
         Role.PLATFORM_ADMIN, Role.GOV_ADMIN, Role.SUPERVISING_LEGAL_OFFICER
     ))
 ):
-    """Trigger manual or simulated sync on the requested connector."""
+    """Trigger manual or simulated sync on the requested connector with cursor/offset pagination."""
     conn = _REGISTRY.get(connector_id)
     if not conn:
         raise HTTPException(status_code=404, detail=f"Connector '{connector_id}' not found.")
 
     pipeline = get_ingestion_pipeline()
-    records = []
+    pagination_meta = {}
 
-    if hasattr(conn, "fetch_records"):
-        records = conn.fetch_records()
+    if hasattr(conn, "fetch_paginated_records"):
+        paginated_res = conn.fetch_paginated_records(limit=limit, page=page, offset=offset, cursor=cursor)
+        records = paginated_res.get("items", [])
+        pagination_meta = {
+            "total_available": paginated_res.get("total", len(records)),
+            "page": paginated_res.get("page", page),
+            "limit": paginated_res.get("limit", limit),
+            "offset": paginated_res.get("offset", offset),
+            "has_more": paginated_res.get("has_more", False),
+            "next_cursor": paginated_res.get("next_cursor"),
+            "prev_cursor": paginated_res.get("prev_cursor"),
+        }
+    elif hasattr(conn, "fetch_records"):
+        records = conn.fetch_records(limit=limit)
     elif hasattr(conn, "fetch_simulated_feed"):
         records = conn.fetch_simulated_feed()
     else:
@@ -191,6 +207,7 @@ def trigger_connector_sync(
         "conflicts_detected": batch.conflicts_detected,
         "latency_ms": conn.config.latency_ms,
         "next_sync_at": conn.config.next_sync_at,
+        "pagination": pagination_meta,
     }
 
 

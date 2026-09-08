@@ -50,6 +50,20 @@ class SyncStatus(str, Enum):
     DISABLED = "DISABLED"
 
 
+class ConnectorOperationalStatus(str, Enum):
+    ONLINE = "ONLINE"
+    DEGRADED = "DEGRADED"
+    OFFLINE = "OFFLINE"
+    SANDBOX_SIMULATED = "SANDBOX_SIMULATED"
+
+
+class CredentialStatus(str, Enum):
+    CONFIGURED = "CONFIGURED"
+    MISSING = "MISSING"
+    EXPIRED = "EXPIRED"
+    SIMULATED = "SIMULATED"
+
+
 class AuthMethod(str, Enum):
     API_KEY = "API_KEY"
     BEARER_TOKEN = "BEARER_TOKEN"
@@ -68,13 +82,22 @@ class ConnectorConfig(BaseModel):
     auth_method: AuthMethod = AuthMethod.NONE
     is_simulated: bool = False
     sync_status: SyncStatus = SyncStatus.HEALTHY
+    operational_status: ConnectorOperationalStatus = ConnectorOperationalStatus.ONLINE
     sync_interval_minutes: int = 60
     last_successful_sync: Optional[str] = None
+    next_sync_at: Optional[str] = None
     records_received: int = 0
+    records_processed: int = 0
     records_rejected: int = 0
     validation_failures: int = 0
     duplicates_detected: int = 0
     conflicts_count: int = 0
+    latency_ms: float = 0.0
+    error_rate_pct: float = 0.0
+    credential_status: CredentialStatus = CredentialStatus.SIMULATED
+    credential_expiry: Optional[str] = None
+    masked_credential: Optional[str] = None
+    rate_limit_per_minute: int = 60
     failure_policy: str = "DLQ_AND_ALERT"  # DLQ_AND_ALERT, RETRY_EXPONENTIAL, DROP
     field_mapping: Dict[str, str] = Field(default_factory=dict)
     endpoint_url: Optional[str] = None
@@ -164,12 +187,34 @@ class FieldConflict(BaseModel):
     canonical_timestamp: str
     proposed_value: Any
     proposed_source: str
+    entity_type: str = "CASE"
     proposed_timestamp: str
     severity: ConflictSeverity = ConflictSeverity.MEDIUM
     status: ConflictStatus = ConflictStatus.PENDING_REVIEW
     resolution_notes: Optional[str] = None
     resolved_by: Optional[str] = None
     resolved_at: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
+
+
+class ConflictResolutionRequest(BaseModel):
+    resolution: ConflictStatus
+    override_value: Optional[Any] = None
+    notes: Optional[str] = "Resolved during legal review session"
+
+
+class ConnectorAuditLogEntry(BaseModel):
+    id: str = Field(default_factory=lambda: generate_ingestion_id("aud"))
+    connector_id: str
+    request_method: str
+    endpoint_url: str
+    request_headers_masked: Optional[str] = None
+    request_hash: Optional[str] = None
+    response_status: int = 200
+    latency_ms: float = 0.0
+    idempotency_key: Optional[str] = None
+    attempt_number: int = 1
+    error_message: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
 
 

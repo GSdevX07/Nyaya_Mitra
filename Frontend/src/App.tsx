@@ -415,6 +415,26 @@ function App() {
                   <ProtectedRoute
                     allowedRoles={[
                       "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "DLSA_OFFICER",
+                      "READ_ONLY_AUDITOR",
+                    ]}
+                  >
+                    <IngestionDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/conflicts"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "DLSA_OFFICER",
+                      "READ_ONLY_AUDITOR",
                     ]}
                   >
                     <IngestionDashboard />

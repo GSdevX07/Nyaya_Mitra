@@ -75,6 +75,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
         { path: "/gov", label: "State Overview" },
         { path: "/dashboard", label: "Command Center" },
         { path: "/cases", label: "Cases" },
+        { path: "/ingestion", label: "Institutional Feeds" },
         { path: "/identity-review", label: "Identity Review" },
         { path: "/legal-sources", label: "Legal Knowledge Governance" },
         { path: "/reports", label: "Reports" },
@@ -84,6 +85,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
     case "SUPERVISING_LEGAL_OFFICER":
       return [
         { path: "/supervisor", label: "Supervisory Workbench" },
+        { path: "/ingestion", label: "Ingestion & Conflicts" },
         { path: "/identity-review", label: "Identity Review" },
         { path: "/radar", label: "Eligibility Radar" },
         { path: "/documents", label: "Documents" },

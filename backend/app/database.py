@@ -1763,6 +1763,103 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_logs_capability ON ai_governance_logs(capability)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_logs_case ON ai_governance_logs(case_id)")
 
+    # ── External Integration Framework Tables ──────────────────────────────
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS external_connectors (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            connector_type TEXT NOT NULL,
+            organization_owner TEXT NOT NULL,
+            auth_method TEXT DEFAULT 'NONE',
+            is_simulated INTEGER DEFAULT 1,
+            sync_status TEXT DEFAULT 'HEALTHY',
+            sync_interval_minutes INTEGER DEFAULT 60,
+            last_successful_sync TEXT,
+            next_sync_at TEXT,
+            records_received INTEGER DEFAULT 0,
+            records_rejected INTEGER DEFAULT 0,
+            validation_failures INTEGER DEFAULT 0,
+            duplicates_detected INTEGER DEFAULT 0,
+            conflicts_count INTEGER DEFAULT 0,
+            latency_ms REAL DEFAULT 0.0,
+            error_rate_pct REAL DEFAULT 0.0,
+            credential_status TEXT DEFAULT 'SIMULATED',
+            credential_expiry TEXT,
+            masked_credential TEXT,
+            rate_limit_per_minute INTEGER DEFAULT 60,
+            configuration_json TEXT DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS external_ingestion_records (
+            id TEXT PRIMARY KEY,
+            connector_id TEXT NOT NULL,
+            batch_id TEXT NOT NULL,
+            external_record_id TEXT,
+            source_version TEXT DEFAULT 'v1',
+            source_timestamp TEXT,
+            received_at TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            raw_payload_json TEXT NOT NULL,
+            normalized_payload_json TEXT,
+            status TEXT DEFAULT 'RECEIVED',
+            reconciliation_action TEXT,
+            target_case_id TEXT,
+            error_message TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ext_records_connector ON external_ingestion_records(connector_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ext_records_hash ON external_ingestion_records(payload_hash)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ext_records_case ON external_ingestion_records(target_case_id)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS integration_conflicts (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL,
+            accused_id TEXT NOT NULL,
+            accused_name TEXT,
+            entity_type TEXT DEFAULT 'CASE',
+            field_name TEXT NOT NULL,
+            canonical_value TEXT,
+            canonical_source TEXT,
+            canonical_timestamp TEXT,
+            proposed_value TEXT,
+            proposed_source TEXT,
+            proposed_timestamp TEXT,
+            severity TEXT DEFAULT 'MEDIUM',
+            status TEXT DEFAULT 'PENDING_REVIEW',
+            resolution_notes TEXT,
+            resolved_by TEXT,
+            resolved_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_int_conflicts_case ON integration_conflicts(case_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_int_conflicts_status ON integration_conflicts(status)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS connector_audit_logs (
+            id TEXT PRIMARY KEY,
+            connector_id TEXT NOT NULL,
+            request_method TEXT NOT NULL,
+            endpoint_url TEXT NOT NULL,
+            request_headers_masked TEXT,
+            request_hash TEXT,
+            response_status INTEGER,
+            latency_ms REAL DEFAULT 0.0,
+            idempotency_key TEXT,
+            attempt_number INTEGER DEFAULT 1,
+            error_message TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_connector_audit_conn ON connector_audit_logs(connector_id)")
+
     conn.commit()
 
 

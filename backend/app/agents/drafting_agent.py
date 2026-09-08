@@ -192,7 +192,7 @@ if __name__ == "__main__":
     print(f"Offense   : {mock_case.offense_sections}")
     print(f"Days Held : {mock_case.custody_days}")
     print("-" * 60)
-    print("Calling generate() via llm_client...\n")
+    print("Calling Governed AI Gateway...\n")
 
     result = draft_bail_application(mock_case, retrieved_law=mock_retrieved_law)
 

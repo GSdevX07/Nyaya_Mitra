@@ -35,7 +35,6 @@ from app.agents.notification_agent import trigger_notification
 from app.agents.prioritization_agent import calculate_urgency_score
 from app.agents.retrieval_agent import execute_retrieval
 from app.agents.status_agent import get_status
-from app.llm_client import get_last_provider
 from app.models.schemas import CaseRecord
 
 

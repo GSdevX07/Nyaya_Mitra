@@ -54,7 +54,6 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from app.ai import get_ai_gateway, GatewayRequest, AICapability
-from app.llm_client import generate, get_last_provider
 from app.rag.legal_ingestion import LegalIngestionError, extract_pdf_text, run_data_prep_kit
 from app.rag.vector_store import retrieve_legal_chunks, VectorStoreUnavailable
 from app.services.security_scanner import validate_file_signature, scan_file_security, ScanStatus
@@ -94,7 +93,7 @@ class DocumentPipelineResult(BaseModel):
     extracted_fields_with_spans: Dict[str, Any] = Field(default_factory=dict)
     rag_statute_citations: List[Dict[str, str]] = Field(default_factory=list)
     granite_assessment: Dict[str, Any] = Field(default_factory=dict)
-    llm_used: str = "IBM-Granite-3.2"
+    llm_used: str = "governed-ai-gateway"
     security_scan: Optional[Dict[str, Any]] = None
     processing_time_ms: float = 0.0
 
@@ -173,7 +172,7 @@ def _ocr_image(image_bytes: bytes, suffix: str) -> tuple[bool, float, str, str, 
         (is_handwritten, detection_confidence, ocr_engine, extracted_text,
          ocr_confidence, manual_verification_required, verification_reason)
     """
-    from app.llm_client import ocr_image_via_easyocr
+    from app.services.ocr_service import ocr_image_via_easyocr
     
     is_handwritten, detect_conf = detect_is_handwritten(image_bytes)
 
@@ -615,7 +614,7 @@ def _build_assessment(
     else:
         generated = "Automated legal assessment requires manual review of document records."
 
-    provider = res.provider_name
+    model_name = res.model_name or res.provider_name
     findings = [
         f"{key.replace('_', ' ').title()}: {value}"
         for key, value in metadata.items()
@@ -623,7 +622,7 @@ def _build_assessment(
     ]
     return {
         "assessment_id": str(uuid.uuid4()),
-        "model_name": provider,
+        "model_name": model_name,
         "case_id": metadata.get("case_id"),
         "eligibility_status": eligibility_status,
         "confidence_score": 0.0,
@@ -706,7 +705,7 @@ def execute_full_document_pipeline(
         extracted_fields_with_spans=spans,
         rag_statute_citations=citations,
         granite_assessment=assessment,
-        llm_used=get_last_provider(),
+        llm_used=assessment.get("model_name") or "governed-ai-gateway",
         security_scan=scan_dict,
         processing_time_ms=round((time.monotonic() - started) * 1000, 2),
     )

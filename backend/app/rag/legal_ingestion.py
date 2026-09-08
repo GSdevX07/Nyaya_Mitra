@@ -26,7 +26,7 @@ def extract_pdf_text(content: bytes) -> str:
     if not text:
         # Fallback to local EasyOCR for scanned PDFs containing embedded images
         try:
-            from app.llm_client import ocr_image_via_easyocr
+            from app.services.ocr_service import ocr_image_via_easyocr
             page_texts = []
             for page in reader.pages:
                 for img in getattr(page, "images", []):

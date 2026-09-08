@@ -12,7 +12,6 @@ Design pattern (from Nyaya_Mitra_Master_Roadmap_v2.md §9, Agent 2.2):
 
 from __future__ import annotations
 
-from app.llm_client import generate
 from app.models.schemas import CaseRecord
 
 

@@ -158,18 +158,27 @@ class LegalSynthesisOutput(BaseModel):
 
 class DraftPreparationOutput(BaseModel):
     case_reference: Optional[str] = Field(
-        default="Case reference pending legal review",
+        default=None,
         description="Case citation or reference number",
     )
     petition_type: str = "Statutory Bail Application"
-    jurisdictional_court: str = "Court of Competent Jurisdiction"
-    designated_counsel: str = "Legal Aid Panel Counsel"
+    jurisdictional_court: Optional[str] = Field(
+        default=None,
+        description="Competent jurisdictional court where petition is filed",
+    )
+    designated_counsel: Optional[str] = Field(
+        default=None,
+        description="Assigned legal aid defense advocate",
+    )
     petition_body_text: str = Field(default="")
     draft_text: Optional[str] = None
     mandatory_document_checklist: Dict[str, bool] = Field(default_factory=dict)
     missing_document_warnings: List[str] = Field(default_factory=list)
     requires_advocate_signature: bool = True
-    counsel_signature_block: str = "Advocate on Record\nLegal Aid Panel Counsel"
+    counsel_signature_block: Optional[str] = Field(
+        default=None,
+        description="Formal advocate signature and bar designation block",
+    )
     data_status: str = Field(default="VALID", description="VALID, MISSING_FACTS, or MANUAL_REVIEW_REQUIRED")
     rationale: AuditableRationale = Field(
         default_factory=lambda: AuditableRationale(
@@ -185,9 +194,21 @@ class DraftPreparationOutput(BaseModel):
         if isinstance(data, dict):
             has_case = bool(data.get("case_reference") or data.get("case_id"))
             if not data.get("case_reference"):
-                data["case_reference"] = data.get("case_id") or "Case reference pending legal review"
-            if not has_case and not data.get("data_status"):
+                data["case_reference"] = data.get("case_id") or None
+            if not has_case:
                 data["data_status"] = "MISSING_FACTS"
+
+            # Strict nullability on court and counsel:
+            # Do NOT mask missing facts with dummy placeholders.
+            if not data.get("jurisdictional_court"):
+                data["jurisdictional_court"] = None
+                data["data_status"] = "MISSING_FACTS"
+            if not data.get("designated_counsel"):
+                data["designated_counsel"] = None
+                data["data_status"] = "MISSING_FACTS"
+
+            if not data.get("counsel_signature_block") and data.get("designated_counsel"):
+                data["counsel_signature_block"] = f"Advocate on Record: {data['designated_counsel']}\nLegal Aid Panel Counsel"
 
             pbt = data.get("petition_body_text")
             dt = data.get("draft_text")
@@ -203,12 +224,11 @@ class DraftPreparationOutput(BaseModel):
                 )
                 data["petition_body_text"] = default_text
                 data["draft_text"] = default_text
-                if not data.get("data_status"):
-                    data["data_status"] = "MISSING_FACTS"
+                data["data_status"] = "MISSING_FACTS"
 
             if not data.get("rationale"):
                 case_ref = data.get("case_reference")
-                cites = [f"Dossier:{case_ref}"] if (case_ref and case_ref != "Case reference pending legal review") else []
+                cites = [f"Dossier:{case_ref}"] if case_ref else []
                 data["rationale"] = {
                     "source_citations": cites,
                     "retrieved_legal_source_ids": data.get("retrieved_legal_source_ids") or [],

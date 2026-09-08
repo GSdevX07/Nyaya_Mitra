@@ -131,7 +131,20 @@ class DeterministicFallbackProvider(BaseProvider):
             }
 
         elif capability == AICapability.DRAFT_PREPARATION:
-            is_479 = "479" in str(sections) or "479" in untrusted_text or "479" in str(structured_context) or custody_days >= 180 or "bail" in untrusted_text.lower()
+            verified_statutes = (
+                structured_context.get("verified_applicable_statutes")
+                or structured_context.get("applicable_sections")
+                or []
+            )
+            if isinstance(verified_statutes, str):
+                verified_statutes = [verified_statutes]
+
+            is_479 = (
+                any("479" in str(s) for s in (list(sections) if isinstance(sections, list) else [str(sections)]))
+                or any("479" in str(s) for s in verified_statutes)
+                or ("479" in untrusted_text)
+                or ("479" in str(structured_context.get("statutory_provision", "")))
+            )
             pet_title = (
                 "APPLICATION FOR REGULAR BAIL UNDER SECTION 479 OF THE BHARATIYA NAGARIK SURAKSHA SANHITA, 2023."
                 if is_479 else
@@ -143,19 +156,26 @@ class DeterministicFallbackProvider(BaseProvider):
                 "2. That the applicant has completed significant detention pending trial and is eligible for bail.\n"
             )
             retrieved_sources = ["src_bnss_2023_sec_479"] if is_479 else []
-            citations = [f"Dossier:{case_id}"]
+            citations = [f"Dossier:{case_id}"] if case_id else []
             if is_479:
                 citations.append("src_bnss_2023_sec_479")
 
+            court_header = court.upper() if court else "[JURISDICTIONAL COURT TO BE SPECIFIED]"
+            sig_block = (
+                f"Advocate: {counsel}\nLegal Aid Panel Counsel\nDistrict Legal Services Authority"
+                if counsel else None
+            )
+            has_missing = not bool(court) or not bool(counsel) or not bool(case_id)
+
             body = (
-                f"IN THE COURT OF {court.upper()}\n\n"
+                f"IN THE COURT OF {court_header}\n\n"
                 f"IN THE MATTER OF:\n"
-                f"{name.upper()} ... APPLICANT / ACCUSED\n"
+                f"{(name or 'APPLICANT').upper()} ... APPLICANT / ACCUSED\n"
                 f"VERSUS\n"
                 f"STATE (NCT OF DELHI / LOCAL POLICE) ... RESPONDENT\n"
-                f"FIR NO: {fir}\n"
-                f"POLICE STATION: {ps.upper()}\n"
-                f"U/S: {sec_str}\n\n"
+                f"FIR NO: {fir or 'NOT SPECIFIED'}\n"
+                f"POLICE STATION: {(ps or 'LOCAL PS').upper()}\n"
+                f"U/S: {sec_str or 'NOT SPECIFIED'}\n\n"
                 f"{pet_title}\n\n"
                 f"MOST RESPECTFULLY SHOWETH:\n"
                 f"1. That the applicant has completed {custody_days} calendar days in judicial detention.\n"
@@ -164,11 +184,17 @@ class DeterministicFallbackProvider(BaseProvider):
                 f"PRAYER:\n"
                 f"It is therefore prayed that this Hon'ble Court may be pleased to release the applicant on bail."
             )
+            extracted_draft_facts = {"days": custody_days}
+            if counsel:
+                extracted_draft_facts["counsel"] = counsel
+            if court:
+                extracted_draft_facts["court"] = court
+
             return {
-                "case_reference": case_id,
+                "case_reference": case_id or None,
                 "petition_type": "Bail Application under Section 479 BNSS" if is_479 else "Statutory Bail Application",
-                "jurisdictional_court": court,
-                "designated_counsel": counsel,
+                "jurisdictional_court": court or None,
+                "designated_counsel": counsel or None,
                 "petition_body_text": body,
                 "draft_text": body,
                 "mandatory_document_checklist": {
@@ -177,41 +203,63 @@ class DeterministicFallbackProvider(BaseProvider):
                 },
                 "missing_document_warnings": ["Charge sheet verification pending"] if "charge_sheet" not in (structured_context.get("present_docs") or []) else [],
                 "requires_advocate_signature": True,
-                "counsel_signature_block": f"Advocate: {counsel}\nLegal Aid Panel Counsel\nDistrict Legal Services Authority",
+                "counsel_signature_block": sig_block,
+                "data_status": "MISSING_FACTS" if has_missing else "VALID",
                 "rationale": {
                     "source_citations": citations,
                     "retrieved_legal_source_ids": retrieved_sources,
-                    "extracted_facts": {"days": custody_days, "counsel": counsel},
+                    "extracted_facts": extracted_draft_facts,
                     "rule_results": ["Rule:Statutory_Bail_Draft_Template_Generated"],
                     "decision_explanation": "Draft prepared using verified statutory template for advocate review.",
                 },
             }
 
         elif capability == AICapability.RETRIEVAL_ASSISTED_LEGAL_SYNTHESIS:
-            is_479 = "479" in str(sections) or "479" in untrusted_text or "479" in str(structured_context) or custody_days >= 180
+            verified_statutes = (
+                structured_context.get("verified_applicable_statutes")
+                or structured_context.get("applicable_sections")
+                or []
+            )
+            if isinstance(verified_statutes, str):
+                verified_statutes = [verified_statutes]
+
+            is_479 = (
+                any("479" in str(s) for s in (list(sections) if isinstance(sections, list) else [str(sections)]))
+                or any("479" in str(s) for s in verified_statutes)
+                or ("479" in untrusted_text)
+                or ("479" in str(structured_context.get("statutory_provision", "")))
+            )
             retrieved_sources = ["src_bnss_2023_sec_479"] if is_479 else []
-            citations = [f"Dossier:{case_id}"]
+            citations = [f"Dossier:{case_id}"] if case_id else []
             if is_479:
                 citations.append("src_bnss_2023_sec_479")
+
+            court_str = f"before {court}" if court else "before the competent jurisdictional court"
+            accused_name = name or "Accused"
+            sec_display = sec_str or "unspecified sections"
 
             if is_479:
                 grounds = (
                     f"Statutory grounds analysis under Section 479 of the Bharatiya Nagarik Suraksha Sanhita (BNSS), 2023: "
-                    f"Accused {name} has completed {custody_days} calendar days in judicial detention for alleged offenses under {sec_str}. "
-                    f"Based on certified dockets pending before {court}, statutory detention threshold criteria are satisfied for regular bail consideration."
+                    f"Accused {accused_name} has completed {custody_days} calendar days in judicial detention for alleged offenses under {sec_display}. "
+                    f"Based on certified dockets pending {court_str}, statutory detention threshold criteria are satisfied for regular bail consideration."
                 )
                 precedents = [{"title": "Section 479 BNSS Mandatory Bail Guidelines", "citation": "BNSS 2023 s. 479"}]
                 trans_notes = "Statutory relief governed under Section 479 of the Bharatiya Nagarik Suraksha Sanhita, 2023."
             else:
                 grounds = (
-                    f"Statutory grounds analysis for case {case_id}: "
-                    f"Accused {name} has completed {custody_days} calendar days in detention under {sec_str} pending before {court}."
+                    f"Statutory grounds analysis for case {case_id or 'record'}: "
+                    f"Accused {accused_name} has completed {custody_days} calendar days in detention under {sec_display} pending {court_str}."
                 )
                 precedents = []
                 trans_notes = None
 
+            extracted_syn_facts = {"custody_days": custody_days, "sections": sec_str}
+            if court:
+                extracted_syn_facts["court"] = court
+
             return {
-                "case_reference": case_id,
+                "case_reference": case_id or None,
                 "reporting_period": "Current Review Period",
                 "applicable_statutory_sections": sections if isinstance(sections, list) else [str(sections)],
                 "binding_precedents": precedents,
@@ -219,10 +267,11 @@ class DeterministicFallbackProvider(BaseProvider):
                 "synthesis_summary": grounds,
                 "statutory_transition_notes": trans_notes,
                 "unresolved_legal_questions": [],
+                "data_status": "VALID" if (case_id and name and court) else "MISSING_FACTS",
                 "rationale": {
                     "source_citations": citations,
                     "retrieved_legal_source_ids": retrieved_sources,
-                    "extracted_facts": {"custody_days": custody_days, "sections": sec_str, "court": court},
+                    "extracted_facts": extracted_syn_facts,
                     "rule_results": ["Rule:Section_479_Eligibility_Verified"] if is_479 else ["Rule:Statutory_Grounds_Verified"],
                     "decision_explanation": "Extracted factual detention duration and mapped statutory grounds.",
                 },

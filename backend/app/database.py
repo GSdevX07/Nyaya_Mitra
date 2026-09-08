@@ -1899,12 +1899,24 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
             organization_id TEXT DEFAULT 'DEFAULT',
             jurisdiction TEXT DEFAULT 'ALL',
             data_minimization_level TEXT DEFAULT 'AGGREGATE_ONLY',
+            created_by_user_id TEXT,
+            created_by_role TEXT,
             is_active INTEGER DEFAULT 1,
             last_run_at TIMESTAMP,
             next_run_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Dynamic column upgrades for pre-existing scheduled_reports databases
+    try:
+        sr_cols = [c[1] for c in cursor.execute("PRAGMA table_info(scheduled_reports);").fetchall()]
+        if "created_by_user_id" not in sr_cols:
+            cursor.execute("ALTER TABLE scheduled_reports ADD COLUMN created_by_user_id TEXT;")
+        if "created_by_role" not in sr_cols:
+            cursor.execute("ALTER TABLE scheduled_reports ADD COLUMN created_by_role TEXT;")
+    except Exception as e:
+        logger.warning(f"scheduled_reports column upgrade error: {e}")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scheduled_report_executions (
@@ -1918,6 +1930,16 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
         )
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_sched_exec_schedule ON scheduled_report_executions(schedule_id)")
+
+    # Canonical Custodial Facilities Seeding (Sanctioned Capacities according to Prison Statistics)
+    cursor.execute("""
+        INSERT OR IGNORE INTO facilities (id, organization_id, name, facility_type, state, district, capacity, current_occupancy, is_active)
+        VALUES 
+            ('fac_tihar_jail_04', 'org_tihar_jail', 'Central Jail No. 4, Tihar (Synthetic)', 'Central Prison', 'Delhi', 'Central Delhi', 5200, 4, 1),
+            ('fac_rohini_jail', 'org_tihar_jail', 'Rohini District Jail (Synthetic)', 'District Prison', 'Delhi', 'North Delhi', 1050, 2, 1),
+            ('fac_mandoli_jail', 'org_tihar_jail', 'Mandoli Prison Complex (Synthetic)', 'Central Prison', 'Delhi', 'East Delhi', 3776, 3, 1),
+            ('fac_bangalore_central', 'org_kslsa_bangalore', 'Central Prison, Parappana Agrahara (Synthetic)', 'Central Prison', 'Karnataka', 'Bengaluru Urban', 4000, 2, 1)
+    """)
 
     conn.commit()
 

@@ -19,6 +19,7 @@ from fastapi import HTTPException, status
 
 from app.auth.dependencies import AuthUser
 from app.auth.roles import Role
+from app.auth.user_store import get_user_by_email
 from app.database import get_db_connection
 from app.analytics.schemas import (
     ReportFrequency,
@@ -29,6 +30,18 @@ from app.analytics.schemas import (
 from app.analytics.service import AnalyticsService
 
 logger = logging.getLogger("nyaya_mitra.analytics.scheduled_reports")
+
+# Official approved domains for institutional reporting
+OFFICIAL_APPROVED_DOMAINS = (
+    "gov.in",
+    "nic.in",
+    "delhi.gov.in",
+    "nyayamitra.in",
+    "nyayamitra.org",
+    "kslsa.kar.nic.in",
+    "delhicourts.nic.in",
+    "tiharprisons.delhi.gov.in",
+)
 
 
 def _calculate_next_run(frequency: ReportFrequency) -> str:
@@ -47,7 +60,7 @@ def _calculate_next_run(frequency: ReportFrequency) -> str:
 
 
 class ScheduledReportManager:
-    """Manager for scheduled reports lifecycle and execution."""
+    """Manager for scheduled reports lifecycle, recipient verification, and execution."""
 
     @classmethod
     def list_schedules(cls, user: AuthUser) -> List[ScheduledReportRecord]:
@@ -67,17 +80,17 @@ class ScheduledReportManager:
                 """
             )
         else:
-            jurisdiction = user.district or "ALL"
+            jurisdiction = user.district or ""
             cursor.execute(
                 """
                 SELECT id, title, report_type, frequency, recipients_json,
                        jurisdiction, data_minimization_level, is_active,
                        last_run_at, next_run_at, created_at
                 FROM scheduled_reports
-                WHERE jurisdiction = ? OR jurisdiction = 'ALL'
+                WHERE (jurisdiction = ? AND jurisdiction != 'ALL') OR created_by_user_id = ?
                 ORDER BY created_at DESC
                 """,
-                (jurisdiction,),
+                (jurisdiction, user.id),
             )
 
         rows = cursor.fetchall()
@@ -105,6 +118,57 @@ class ScheduledReportManager:
         return schedules
 
     @classmethod
+    def _validate_recipients(cls, user: AuthUser, recipients: List[str]) -> List[str]:
+        """
+        Validate that every recipient email is an approved registered user
+        or from an authorized official government/judicial domain.
+        """
+        validated = []
+        for email in recipients:
+            clean_email = email.strip().lower()
+            if not clean_email or "@" not in clean_email:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid email address format: '{email}'.",
+                )
+
+            domain = clean_email.split("@")[-1]
+            rec_user = get_user_by_email(clean_email)
+
+            if rec_user:
+                if not rec_user.is_active:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Recipient '{email}' is an inactive user account.",
+                    )
+                # Ensure institutional clearance
+                if rec_user.role not in (
+                    Role.PLATFORM_ADMIN,
+                    Role.GOV_ADMIN,
+                    Role.DLSA_OFFICER,
+                    Role.SUPERVISING_LEGAL_OFFICER,
+                    Role.JAIL_OFFICER,
+                    Role.READ_ONLY_AUDITOR,
+                    Role.DEFENSE_ADVOCATE,
+                    Role.CONTROLLED_EXTERNAL_ADVOCATE,
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Recipient '{email}' is not authorized to receive institutional reports.",
+                    )
+            elif any(domain == app_dom or domain.endswith("." + app_dom) for app_dom in OFFICIAL_APPROVED_DOMAINS):
+                # Authorized institutional domain
+                pass
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Recipient '{email}' is not an approved registered user or authorized official domain.",
+                )
+
+            validated.append(clean_email)
+        return validated
+
+    @classmethod
     def create_schedule(cls, user: AuthUser, req: ScheduledReportCreateRequest) -> ScheduledReportRecord:
         # Validate clearance
         if user.role not in (
@@ -125,6 +189,9 @@ class ScheduledReportManager:
                 detail="At least one recipient email must be specified.",
             )
 
+        # Enforce approved recipient validation
+        validated_recipients = cls._validate_recipients(user, req.recipients)
+
         schedule_id = f"sch_{uuid.uuid4().hex[:10]}"
         now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
         next_run = _calculate_next_run(req.frequency)
@@ -132,23 +199,27 @@ class ScheduledReportManager:
 
         conn = get_db_connection()
         cursor = conn.cursor()
+        user_role_str = user.role.value if hasattr(user.role, "value") else str(user.role)
         cursor.execute(
             """
             INSERT INTO scheduled_reports (
                 id, title, report_type, frequency, recipients_json,
                 organization_id, jurisdiction, data_minimization_level,
+                created_by_user_id, created_by_role,
                 is_active, last_run_at, next_run_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
             """,
             (
                 schedule_id,
                 req.title.strip(),
                 req.report_type.upper(),
                 req.frequency.value,
-                json.dumps(req.recipients),
+                json.dumps(validated_recipients),
                 getattr(user, "org_id", "") or "DEFAULT",
                 effective_jurisdiction,
                 req.data_minimization_level,
+                user.id,
+                user_role_str,
                 next_run,
                 now_str,
             ),
@@ -160,7 +231,7 @@ class ScheduledReportManager:
             title=req.title.strip(),
             report_type=req.report_type.upper(),
             frequency=req.frequency.value,
-            recipients=req.recipients,
+            recipients=validated_recipients,
             jurisdiction=effective_jurisdiction,
             data_minimization_level=req.data_minimization_level,
             is_active=True,
@@ -171,13 +242,13 @@ class ScheduledReportManager:
 
     @classmethod
     def trigger_schedule(cls, user: AuthUser, schedule_id: str) -> ScheduledExecutionRecord:
-        """Manually or cyclically execute a report schedule and generate minimized summary."""
+        """Manually execute a report schedule with strong ownership and jurisdiction enforcement."""
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
             SELECT id, title, report_type, frequency, recipients_json,
-                   jurisdiction, data_minimization_level
+                   jurisdiction, data_minimization_level, created_by_user_id
             FROM scheduled_reports
             WHERE id = ?
             """,
@@ -193,7 +264,28 @@ class ScheduledReportManager:
         title = row[1]
         report_type = row[2]
         frequency = row[3]
-        jurisdiction = row[5]
+        jurisdiction = row[5] or "ALL"
+        created_by_user_id = row[7]
+
+        # Strong ownership & jurisdiction authorization check
+        is_state_level = user.role in (Role.PLATFORM_ADMIN, Role.GOV_ADMIN)
+        if not is_state_level:
+            is_owner = bool(created_by_user_id and user.id == created_by_user_id)
+            has_district_jurisdiction = bool(
+                user.district and
+                user.district.upper() != "ALL" and
+                jurisdiction != "ALL" and
+                user.district.strip().lower() == jurisdiction.strip().lower()
+            )
+            if not (is_owner or has_district_jurisdiction):
+                logger.warning(
+                    "User %s (district: %s) attempted unauthorized execution of schedule %s (jurisdiction: %s, creator: %s)",
+                    user.id, user.district, schedule_id, jurisdiction, created_by_user_id
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Forbidden: You do not have ownership or jurisdictional clearance to trigger this scheduled report.",
+                )
 
         # Generate minimized aggregated summary
         exec_id = f"exec_{uuid.uuid4().hex[:10]}"

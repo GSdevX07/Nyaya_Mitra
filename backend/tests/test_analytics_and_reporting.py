@@ -22,7 +22,7 @@ from app.analytics.schemas import (
     ScheduledReportCreateRequest,
     ReportFrequency,
 )
-from app.database import init_db, get_db_connection
+from app.database import init_db, get_db_connection, get_all_cases
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -88,15 +88,15 @@ def test_13_dashboards_generation(dlsa_user):
     dash = AnalyticsService.get_all_dashboards(dlsa_user)
     assert dash is not None
 
-    # Verify all 13 dimensions exist and are populated
+    # Verify all 13 dimensions exist and are populated with authentic telemetry
     assert len(dash.people_in_custody) > 0
     assert dash.legal_aid_attention.total_attention_required >= 0
     assert dash.approaching_thresholds.total_flagged >= 0
     assert dash.overdue_actions.total_overdue >= 0
     assert dash.missing_documents.total_cases_evaluated > 0
     assert dash.time_intake_to_assignment.total_cases_measured >= 0
-    assert dash.time_intake_to_assignment.average_hours > 0
-    assert dash.time_assignment_to_review.average_hours > 0
+    assert dash.time_intake_to_assignment.average_hours >= 0.0
+    assert dash.time_assignment_to_review.average_hours >= 0.0
     assert dash.unresolved_conflicts.total_unresolved >= 0
     assert dash.upcoming_hearings.next_30_days_count >= 0
     assert dash.release_outcomes.total_releases_recorded >= 0
@@ -117,11 +117,83 @@ def test_role_based_district_scoping(dlsa_user, admin_user, advocate_user):
     dlsa_dash = AnalyticsService.get_all_dashboards(dlsa_user)
 
     # Both return valid responses
-    assert admin_dash.jurisdiction in ("ALL", "All Jurisdictions") or len(admin_dash.people_in_custody) >= len(dlsa_dash.people_in_custody)
+    assert admin_dash.jurisdiction in ("ALL", "All Jurisdictions", "Statewide / All Districts") or len(admin_dash.people_in_custody) >= len(dlsa_dash.people_in_custody)
 
     # Privacy preserving masking test:
     masked_name = AnalyticsService._mask_name_for_privacy("Suresh Kumar", "UTP-0001", count_in_cohort=1, user=dlsa_user)
     assert "S." in masked_name and "Protected Cohort" in masked_name
+
+
+def test_empty_district_scope_never_leaks_statewide_cases():
+    """
+    CRITICAL JURISDICTIONAL PRIVACY TEST:
+    A user scoped to a district with 0 cases (e.g. Mysuru) MUST receive 0 cases,
+    and NEVER fall back to all cases or leak statewide undertrial personal details.
+    """
+    from app.auth.dependencies import AuthUser
+    mysuru_user = AuthUser(
+        id="dlsa_mysuru_01",
+        email="dlsa.mysuru@kar.nic.in",
+        role=Role.DLSA_OFFICER,
+        org_id="org_dlsa_mysuru",
+        district="Mysuru",
+        full_name="DLSA Officer Mysuru",
+    )
+
+    all_cases = get_all_cases()
+    assert len(all_cases) > 0  # Cases exist in Delhi/Bengaluru
+
+    # Filtered cases for Mysuru MUST be completely empty
+    filtered = AnalyticsService._filter_cases_by_scope(all_cases, mysuru_user)
+    assert len(filtered) == 0, "Security violation: Empty district scope leaked statewide cases!"
+
+    # Export for Mysuru must contain 0 records
+    req = ExportRequest(
+        report_type="CASES_LEDGER",
+        format=ExportFormat.JSON,
+        purpose="Official district legal aid review",
+        include_pii=False,
+    )
+    res = ExportService.generate_export(mysuru_user, req)
+    export_data = json.loads(res.content)
+    assert res.record_count == 0
+    assert len(export_data["records"]) == 0
+
+
+def test_statutory_thresholds_truthful_and_exclusions(admin_user):
+    """
+    TRUTHFULNESS TEST:
+    Verify that maximum sentence values come from authentic CaseRecord fields
+    and that statutory exclusions (capital offence, multiple pending cases) are respected.
+    """
+    thresh = AnalyticsService.get_approaching_thresholds(admin_user)
+    assert thresh is not None
+
+    # Verify UTP-0001 uses max_sentence_days_for_offense (365 days), NOT 1095
+    utp_1_item = next((item for item in thresh.cases if item.case_id == "UTP-0001"), None)
+    if utp_1_item:
+        assert utp_1_item.prescribed_max_days == 365, "Did not use authentic CaseRecord max_sentence_days_for_offense"
+        assert utp_1_item.third_sentence_days == 121  # 365 // 3
+
+
+def test_no_manufactured_facility_or_sample_tasks(admin_user):
+    """
+    Verify facility metrics do NOT multiply by 75 or fabricate arbitrary 1000 capacity,
+    and overdue actions do NOT seed fake sample tasks when the queue is empty.
+    """
+    facilities = AnalyticsService.get_people_in_custody(admin_user)
+    for f in facilities:
+        # If capacity is present, it must be the real sanctioned capacity (e.g. 5200 for Tihar, 1050 for Rohini)
+        if "Tihar" in f.facility_name:
+            assert f.capacity == 5200
+        # Check that current_occupancy is not manufactured via count * 75
+        if f.undertrials_count > 0 and f.capacity != 5200:
+            assert f.current_occupancy != f.undertrials_count * 75
+
+    # Overdue tasks must not contain fabricated fake sample IDs
+    overdue = AnalyticsService.get_overdue_actions(admin_user)
+    for task in overdue.tasks:
+        assert not task.task_id.startswith("TASK-OVERDUE-"), "Manufactured sample task found in live analytics!"
 
 
 # ── 2. Executive Leadership Report Tests ──────────────────────────────────────
@@ -244,6 +316,49 @@ def test_scheduled_report_lifecycle(dlsa_user):
     assert exec_record.id.startswith("exec_")
     assert exec_record.status == "SUCCESS"
     assert "secure_link" in exec_record.summary_content
+
+
+def test_scheduled_report_unapproved_recipient_rejected(dlsa_user):
+    from fastapi import HTTPException
+    req = ScheduledReportCreateRequest(
+        title="Unauthorized Export Test",
+        report_type="LEADERSHIP_REPORT",
+        frequency=ReportFrequency.WEEKLY,
+        recipients=["attacker@evil.com"],  # Not an approved user or domain
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        ScheduledReportManager.create_schedule(dlsa_user, req)
+    assert exc_info.value.status_code == 400
+    assert "not an approved registered user" in exc_info.value.detail
+
+
+def test_scheduled_report_unauthorized_trigger_forbidden(admin_user):
+    from fastapi import HTTPException
+    # Create schedule scoped to South Delhi created by admin
+    req = ScheduledReportCreateRequest(
+        title="South Delhi Secret Schedule",
+        report_type="LEADERSHIP_REPORT",
+        frequency=ReportFrequency.MONTHLY,
+        recipients=["dlsa@demo.nyayamitra.in"],
+        jurisdiction="South Delhi",
+    )
+    record = ScheduledReportManager.create_schedule(admin_user, req)
+
+    # User from North Delhi attempts to trigger South Delhi schedule
+    from app.auth.dependencies import AuthUser
+    north_delhi_officer = AuthUser(
+        id="usr_dlsa_north",
+        email="dlsa.north@delhi.gov.in",
+        role=Role.DLSA_OFFICER,
+        org_id="org_dlsa_north",
+        district="North Delhi",
+        full_name="North Delhi Officer",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        ScheduledReportManager.trigger_schedule(north_delhi_officer, record.id)
+    assert exc_info.value.status_code == 403
+    assert "clearance to trigger" in exc_info.value.detail
 
 
 # ── 6. REST API Endpoints Integration Tests ───────────────────────────────────

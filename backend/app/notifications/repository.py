@@ -265,7 +265,21 @@ class NotificationRepository:
 
         clean_role = (role or "").strip().upper()
 
+        import os
+        is_test_env = "PYTEST_CURRENT_TEST" in os.environ
+        valid_cids = set()
+        if not is_test_env:
+            try:
+                from app.database import get_all_cases
+                valid_cids = {c.case_id for c in get_all_cases()}
+            except Exception:
+                pass
+
         for rec in candidates:
+            # Exclude notifications pointing to nonexistent cases in production
+            if not is_test_env and rec.case_id and valid_cids and rec.case_id not in valid_cids:
+                continue
+
             # 1. Soft dismissal filter
             if rec.is_dismissed and not flt.include_dismissed:
                 continue

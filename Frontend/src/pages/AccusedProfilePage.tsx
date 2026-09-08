@@ -129,11 +129,15 @@ export const AccusedProfilePage: React.FC = () => {
     if (user?.linked_case_id) {
       return `acc_${user.linked_case_id.toLowerCase().replace("-", "_")}`;
     }
-    return "acc_utp_0001";
+    return "";
   }, [id, user?.linked_case_id]);
 
   useEffect(() => {
     const fetchProfileData = async () => {
+      if (!effectiveAccusedId) {
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setFetchError(null);
       try {
@@ -159,8 +163,10 @@ export const AccusedProfilePage: React.FC = () => {
       }
     };
 
-    if (token) {
+    if (token && effectiveAccusedId) {
       fetchProfileData();
+    } else {
+      setLoading(false);
     }
   }, [effectiveAccusedId, token]);
 
@@ -225,6 +231,23 @@ export const AccusedProfilePage: React.FC = () => {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (!effectiveAccusedId) {
+    return (
+      <div className="p-8 text-center bg-card rounded-xl border border-border max-w-2xl mx-auto my-12 shadow-sm">
+        <Scale className="h-12 w-12 text-primary mx-auto mb-3" />
+        <h2 className="text-xl font-bold font-serif text-foreground">
+          No Accused Profile Selected
+        </h2>
+        <p className="text-muted-foreground mt-2 text-sm max-w-md mx-auto">
+          Please select an accused person from the master registry or active case ledger to inspect their consolidated dossier.
+        </p>
+        <Link to="/cases" className="mt-6 inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-xs font-bold font-mono uppercase rounded-sm hover:opacity-90 transition-opacity">
+          <ArrowLeft className="h-4 w-4" /> View Master Case Registry
+        </Link>
       </div>
     );
   }

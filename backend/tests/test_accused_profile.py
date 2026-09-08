@@ -5,8 +5,10 @@ Timeline (Facts vs Interpretations), ABAC Medical Quarantining, and Identity Res
 import pytest
 from fastapi.testclient import TestClient
 
+from app.database import init_db
 from app.main import app
 
+init_db()
 client = TestClient(app)
 
 
@@ -89,6 +91,7 @@ def test_timeline_facts_vs_system_interpretations():
 
 def test_duplicate_identity_resolution_workflow():
     """Verify retrieval and human review resolution of duplicate identity candidates."""
+    init_db()
     # 1. Fetch pending candidates
     token = _get_token("SUPERVISING_LEGAL_OFFICER")
     headers = {"Authorization": f"Bearer {token}"}

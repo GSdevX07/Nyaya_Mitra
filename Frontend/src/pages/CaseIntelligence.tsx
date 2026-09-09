@@ -1225,7 +1225,7 @@ export function CaseIntelligence() {
             </>
           ) : (
             <div className="flex items-center gap-2">
-              {hasAssignedCounsel && !editableDraft && hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+              {hasAssignedCounsel && !editableDraft && hasRole("DEFENSE_ADVOCATE") && (
                 <button
                   onClick={handleGenerateAiDraft}
                   disabled={generatingDraft}
@@ -2116,7 +2116,7 @@ export function CaseIntelligence() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+                  {hasRole("DEFENSE_ADVOCATE") && (
                     <button
                       onClick={handleGenerateAiDraft}
                       disabled={generatingDraft || !hasAssignedCounsel}
@@ -2135,10 +2135,17 @@ export function CaseIntelligence() {
                   >
                     {generatingDraft ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} {isDlsa ? "Internal Copy" : "Download PDF"}
                   </button>
+                  <button
+                    onClick={() => navigate(`/workspace/documents?case_id=${c.case_id}`)}
+                    className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-sm text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-opacity"
+                    title="Open Document Workspace with side-by-side diff, readiness audit, and revision lineage"
+                  >
+                    <Scale className="w-4 h-4" /> Open in Workspace
+                  </button>
                 </div>
               </div>
 
-              {!editableDraft.trim() && hasAssignedCounsel && hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+              {!editableDraft.trim() && hasAssignedCounsel && hasRole("DEFENSE_ADVOCATE") && (
                 <div className="p-4 rounded-sm border border-primary/20 bg-primary/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                   <div className="space-y-1">
                     <p className="text-sm font-semibold text-foreground flex items-center gap-2">
@@ -2247,12 +2254,12 @@ export function CaseIntelligence() {
                     Editable Petition Text (Reviewed by Defence Counsel):
                   </label>
                   <div className="flex items-center gap-3">
-                    {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+                    {hasRole("DEFENSE_ADVOCATE") && (
                       <span className="text-[11px] font-mono text-primary font-semibold">
                         Counsel Work Product // Versioned Legal Draft
                       </span>
                     )}
-                    {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+                    {hasRole("DEFENSE_ADVOCATE") && (
                       <button
                         onClick={handleSaveDraft}
                         disabled={savingDraft || !editableDraft.trim()}
@@ -2268,22 +2275,22 @@ export function CaseIntelligence() {
                 <textarea
                   value={editableDraft}
                   onChange={(e) => setEditableDraft(e.target.value)}
-                  readOnly={!hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE")}
+                  readOnly={!hasRole("DEFENSE_ADVOCATE")}
                   rows={16}
                   className={`w-full p-4 font-mono text-xs border border-border rounded-sm leading-relaxed resize-y ${
-                    hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE")
+                    hasRole("DEFENSE_ADVOCATE")
                       ? "bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                       : "bg-muted/30 text-foreground cursor-not-allowed"
                   }`}
                 />
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-border">
                   <p className="text-[11px] font-mono text-muted-foreground">
-                    {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE")
+                    {hasRole("DEFENSE_ADVOCATE")
                       ? `Counsel Review Status: ${advocateSignedOff ? "✓ Legal Sign-Off Recorded (Awaiting Supervisory Approval)" : "Draft Under Active Counsel Review"}`
                       : "Draft Petitions are prepared by assigned defense counsel and reviewed by supervisors prior to court filing."}
                   </p>
                   <div className="flex items-center gap-2">
-                    {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && (
+                    {hasRole("DEFENSE_ADVOCATE") && (
                       <>
                         <button
                           onClick={handleSaveDraft}
@@ -2352,7 +2359,7 @@ export function CaseIntelligence() {
                 )}
 
                 {/* ── Level 3: Defence Legal-Aid Advocate Files In Court ── */}
-                {hasRole("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE") && c.assignment_status === "ASSIGNED" && (matterState === "APPROVED" || c.status === "APPROVED_READY_FOR_FILING" || c.status === "APPROVED") && c.status !== "FILED" && (
+                {hasRole("DEFENSE_ADVOCATE") && c.assignment_status === "ASSIGNED" && (matterState === "APPROVED" || c.status === "APPROVED_READY_FOR_FILING" || c.status === "APPROVED") && c.status !== "FILED" && (
                   <div className="p-4 rounded-sm border border-blue-500/30 bg-blue-500/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-3">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">

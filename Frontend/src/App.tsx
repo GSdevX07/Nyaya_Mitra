@@ -31,6 +31,7 @@ import { DocumentAssessmentPage } from "./pages/DocumentAssessmentPage";
 import { LegalSourcesAdmin } from "./pages/LegalSourcesAdmin";
 import { SupervisorWorkbench } from "./pages/SupervisorWorkbench";
 import { DlsaWorkspace } from "./pages/DlsaWorkspace";
+import { DocumentWorkspacePage } from "./pages/DocumentWorkspacePage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 function App() {
@@ -332,6 +333,46 @@ function App() {
                     <DocumentsPage />
                   </ProtectedRoute>
                 }
+              />
+              <Route
+                path="/workspace/documents"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "DEFENSE_ADVOCATE",
+                      "CONTROLLED_EXTERNAL_ADVOCATE",
+                      "READ_ONLY_AUDITOR",
+                    ]}
+                  >
+                    <DocumentWorkspacePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/case/:id/documents/workspace"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "DLSA_OFFICER",
+                      "SUPERVISING_LEGAL_OFFICER",
+                      "PLATFORM_ADMIN",
+                      "GOV_ADMIN",
+                      "DEFENSE_ADVOCATE",
+                      "CONTROLLED_EXTERNAL_ADVOCATE",
+                      "READ_ONLY_AUDITOR",
+                    ]}
+                  >
+                    <DocumentWorkspacePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/documents/workspace"
+                element={<Navigate to="/workspace/documents" replace />}
               />
               <Route
                 path="/document-assessment"

@@ -2010,6 +2010,69 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
             ('fac_bangalore_central', 'org_kslsa_bangalore', 'Central Prison, Parappana Agrahara (Synthetic)', 'Central Prison', 'Karnataka', 'Bengaluru Urban', 4000, 2, 1)
     """)
 
+    # 15. Professional Document Workspace: Versioned Templates & Governed Drafts
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS document_templates (
+            id TEXT PRIMARY KEY,
+            organization_id TEXT NOT NULL DEFAULT 'GLOBAL_DEFAULT',
+            name TEXT NOT NULL,
+            doc_type TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            jurisdiction TEXT NOT NULL DEFAULT 'National / BNSS 2023',
+            statutory_ground TEXT NOT NULL,
+            description TEXT,
+            content_template TEXT NOT NULL,
+            required_fields_json TEXT NOT NULL DEFAULT '[]',
+            required_documents_json TEXT NOT NULL DEFAULT '[]',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_by TEXT NOT NULL DEFAULT 'SYSTEM',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_doc_templates_org ON document_templates(organization_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_doc_templates_type ON document_templates(doc_type)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS legal_document_drafts (
+            draft_id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL,
+            artifact_id TEXT NOT NULL DEFAULT 'bail_draft_01',
+            template_id TEXT,
+            template_version INTEGER DEFAULT 1,
+            version_number INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'DRAFT',
+            original_ai_text TEXT NOT NULL,
+            content_text TEXT NOT NULL,
+            exact_case_facts_json TEXT NOT NULL DEFAULT '{}',
+            source_documents_json TEXT NOT NULL DEFAULT '[]',
+            legal_rule_result_json TEXT NOT NULL DEFAULT '{}',
+            retrieved_legal_sources_json TEXT NOT NULL DEFAULT '[]',
+            prompt_version TEXT NOT NULL DEFAULT 'v1.0',
+            ai_model_name TEXT NOT NULL DEFAULT 'Groq/LLaMA-3-70b + BNSS Engine',
+            source_citations_json TEXT NOT NULL DEFAULT '[]',
+            linked_case_facts_json TEXT NOT NULL DEFAULT '{}',
+            missing_facts_json TEXT NOT NULL DEFAULT '[]',
+            unresolved_warnings_json TEXT NOT NULL DEFAULT '[]',
+            reviewer_comments_json TEXT NOT NULL DEFAULT '[]',
+            readiness_check_result_json TEXT DEFAULT '{}',
+            is_immutable INTEGER NOT NULL DEFAULT 0,
+            approved_by TEXT,
+            approved_by_role TEXT,
+            approved_at TIMESTAMP,
+            submission_package_json TEXT,
+            external_filing_reference TEXT,
+            external_filing_date TEXT,
+            created_by TEXT NOT NULL,
+            created_by_role TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_drafts_case ON legal_document_drafts(case_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_drafts_status ON legal_document_drafts(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_drafts_artifact ON legal_document_drafts(artifact_id, version_number)")
+
     conn.commit()
 
 
@@ -2244,41 +2307,45 @@ def init_db():
               AND case_id NOT IN (SELECT case_id FROM cases)
         """)
 
-        # Clean up ephemeral synthetic cases from authoritative Supabase PostgreSQL
-        try:
-            from app.supabase_adapter import get_supabase_client, is_supabase_active
-            if is_supabase_active():
-                cli = get_supabase_client()
-                if cli:
-                    for pat in ephemeral_patterns:
+        # Clean up ephemeral synthetic cases from authoritative Supabase PostgreSQL in background thread
+        def _bg_supabase_cleanup():
+            try:
+                from app.supabase_adapter import get_supabase_client, is_supabase_active
+                if is_supabase_active():
+                    cli = get_supabase_client()
+                    if cli:
+                        for pat in ephemeral_patterns:
+                            try:
+                                cli.table("charges").delete().ilike("case_id", pat).execute()
+                                cli.table("family_contacts").delete().ilike("accused_id", pat).execute()
+                                cli.table("court_cases").delete().ilike("id", pat).execute()
+                                cli.table("custody_records").delete().ilike("accused_id", pat).execute()
+                                cli.table("cases").delete().ilike("case_id", pat).execute()
+                                cli.table("task_queue").delete().ilike("case_id", pat).execute()
+                                cli.table("notifications").delete().ilike("case_id", pat).execute()
+                                cli.table("notifications").delete().ilike("id", pat).execute()
+                            except Exception:
+                                pass
                         try:
-                            cli.table("charges").delete().ilike("case_id", pat).execute()
-                            cli.table("family_contacts").delete().ilike("accused_id", pat).execute()
-                            cli.table("court_cases").delete().ilike("id", pat).execute()
-                            cli.table("custody_records").delete().ilike("accused_id", pat).execute()
-                            cli.table("cases").delete().ilike("case_id", pat).execute()
-                            cli.table("task_queue").delete().ilike("case_id", pat).execute()
-                            cli.table("notifications").delete().ilike("case_id", pat).execute()
-                            cli.table("notifications").delete().ilike("id", pat).execute()
+                            valid_cids = {c.case_id for c in hero_cases}
+                            s_cases = cli.table("cases").select("case_id").execute()
+                            if s_cases.data:
+                                valid_cids.update(r["case_id"] for r in s_cases.data if r.get("case_id"))
+                            res_notifs = cli.table("notifications").select("id, case_id").execute()
+                            if res_notifs.data:
+                                orphans = [
+                                    n["id"] for n in res_notifs.data
+                                    if n.get("case_id") and n.get("case_id") not in valid_cids
+                                ]
+                                for i in range(0, len(orphans), 20):
+                                    cli.table("notifications").delete().in_("id", orphans[i:i+20]).execute()
                         except Exception:
                             pass
-                    try:
-                        valid_cids = {c.case_id for c in hero_cases}
-                        s_cases = cli.table("cases").select("case_id").execute()
-                        if s_cases.data:
-                            valid_cids.update(r["case_id"] for r in s_cases.data if r.get("case_id"))
-                        res_notifs = cli.table("notifications").select("id, case_id").execute()
-                        if res_notifs.data:
-                            orphans = [
-                                n["id"] for n in res_notifs.data
-                                if n.get("case_id") and n.get("case_id") not in valid_cids
-                            ]
-                            for i in range(0, len(orphans), 20):
-                                cli.table("notifications").delete().in_("id", orphans[i:i+20]).execute()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=_bg_supabase_cleanup, daemon=True).start()
 
         # Migrate any legacy LEGAL_NEED_IDENTIFIED records to canonical LEGAL_AID_REQUIRED
         cursor.execute("UPDATE cases SET status = 'LEGAL_AID_REQUIRED' WHERE status = 'LEGAL_NEED_IDENTIFIED'")
@@ -7290,6 +7357,264 @@ from app.services.case_service import CaseService
 case_repo = CaseRepository(DB_PATH)
 audit_repo = AuditRepository(DB_PATH)
 case_service = CaseService(case_repo, audit_repo)
+
+
+# ── Professional Document Workspace: Templates & Governed Drafts ──────────────
+
+def store_document_template(tmpl: Dict[str, Any]) -> bool:
+    """Store or insert a versioned legal document template."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO document_templates (
+                id, organization_id, name, doc_type, version, jurisdiction, statutory_ground,
+                description, content_template, required_fields_json, required_documents_json,
+                is_active, created_by, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            tmpl["id"],
+            tmpl.get("organization_id", "GLOBAL_DEFAULT"),
+            tmpl["name"],
+            tmpl["doc_type"],
+            tmpl.get("version", 1),
+            tmpl.get("jurisdiction", "National / BNSS 2023"),
+            tmpl["statutory_ground"],
+            tmpl.get("description", ""),
+            tmpl["content_template"],
+            json.dumps(tmpl.get("required_fields", [])),
+            json.dumps(tmpl.get("required_documents", [])),
+            1 if tmpl.get("is_active", True) else 0,
+            tmpl.get("created_by", "SYSTEM"),
+            tmpl.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            tmpl.get("updated_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        ))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to store document template {tmpl.get('id')}: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_document_templates(organization_id: Optional[str] = None, doc_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieve templates accessible to organization (global + tenant-specific)."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        query = "SELECT * FROM document_templates WHERE is_active = 1"
+        params: List[Any] = []
+        if organization_id and organization_id != "GLOBAL_DEFAULT":
+            query += " AND (organization_id = 'GLOBAL_DEFAULT' OR organization_id = ?)"
+            params.append(organization_id)
+        elif organization_id == "GLOBAL_DEFAULT":
+            query += " AND organization_id = 'GLOBAL_DEFAULT'"
+        if doc_type:
+            query += " AND doc_type = ?"
+            params.append(doc_type)
+        query += " ORDER BY name ASC"
+        cursor.execute(query, tuple(params))
+        rows = cursor.fetchall()
+        cols = [d[0] for d in cursor.description]
+        results = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            d["required_fields"] = json.loads(d["required_fields_json"]) if d.get("required_fields_json") else []
+            d["required_documents"] = json.loads(d["required_documents_json"]) if d.get("required_documents_json") else []
+            results.append(d)
+        return results
+    finally:
+        conn.close()
+
+
+def get_document_template_by_id(template_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve template by unique ID."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM document_templates WHERE id = ?", (template_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cursor.description]
+        d = dict(zip(cols, row))
+        d["required_fields"] = json.loads(d["required_fields_json"]) if d.get("required_fields_json") else []
+        d["required_documents"] = json.loads(d["required_documents_json"]) if d.get("required_documents_json") else []
+        return d
+    finally:
+        conn.close()
+
+
+def store_legal_document_draft(draft: Dict[str, Any]) -> bool:
+    """Store or insert a legal document draft with complete snapshot and audit associations."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        cursor.execute("""
+            INSERT OR REPLACE INTO legal_document_drafts (
+                draft_id, case_id, artifact_id, template_id, template_version, version_number,
+                status, original_ai_text, content_text, exact_case_facts_json, source_documents_json,
+                legal_rule_result_json, retrieved_legal_sources_json, prompt_version, ai_model_name,
+                source_citations_json, linked_case_facts_json, missing_facts_json, unresolved_warnings_json,
+                reviewer_comments_json, readiness_check_result_json, is_immutable, approved_by,
+                approved_by_role, approved_at, submission_package_json, external_filing_reference,
+                external_filing_date, created_by, created_by_role, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            draft["draft_id"],
+            draft["case_id"],
+            draft.get("artifact_id", "bail_draft_01"),
+            draft.get("template_id"),
+            draft.get("template_version", 1),
+            draft.get("version_number", 1),
+            draft.get("status", "DRAFT"),
+            draft["original_ai_text"],
+            draft["content_text"],
+            json.dumps(draft.get("exact_case_facts", {})),
+            json.dumps(draft.get("source_documents", [])),
+            json.dumps(draft.get("legal_rule_result", {})),
+            json.dumps(draft.get("retrieved_legal_sources", [])),
+            draft.get("prompt_version", "v1.0"),
+            draft.get("ai_model_name", "Groq/LLaMA-3-70b + BNSS Engine"),
+            json.dumps(draft.get("source_citations", [])),
+            json.dumps(draft.get("linked_case_facts", {})),
+            json.dumps(draft.get("missing_facts", [])),
+            json.dumps(draft.get("unresolved_warnings", [])),
+            json.dumps(draft.get("reviewer_comments", [])),
+            json.dumps(draft.get("readiness_check_result", {})),
+            1 if draft.get("is_immutable") else 0,
+            draft.get("approved_by"),
+            draft.get("approved_by_role"),
+            draft.get("approved_at"),
+            json.dumps(draft.get("submission_package")) if draft.get("submission_package") else None,
+            draft.get("external_filing_reference"),
+            draft.get("external_filing_date"),
+            draft.get("created_by", "SYSTEM"),
+            draft.get("created_by_role", "SYSTEM"),
+            draft.get("created_at") or now_iso,
+            draft.get("updated_at") or now_iso,
+        ))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to store legal document draft {draft.get('draft_id')}: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_legal_document_draft(draft_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve full legal document draft record by ID."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM legal_document_drafts WHERE draft_id = ?", (draft_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cursor.description]
+        d = dict(zip(cols, row))
+        d["exact_case_facts"] = json.loads(d["exact_case_facts_json"]) if d.get("exact_case_facts_json") else {}
+        d["source_documents"] = json.loads(d["source_documents_json"]) if d.get("source_documents_json") else []
+        d["legal_rule_result"] = json.loads(d["legal_rule_result_json"]) if d.get("legal_rule_result_json") else {}
+        d["retrieved_legal_sources"] = json.loads(d["retrieved_legal_sources_json"]) if d.get("retrieved_legal_sources_json") else []
+        d["source_citations"] = json.loads(d["source_citations_json"]) if d.get("source_citations_json") else []
+        d["linked_case_facts"] = json.loads(d["linked_case_facts_json"]) if d.get("linked_case_facts_json") else {}
+        d["missing_facts"] = json.loads(d["missing_facts_json"]) if d.get("missing_facts_json") else []
+        d["unresolved_warnings"] = json.loads(d["unresolved_warnings_json"]) if d.get("unresolved_warnings_json") else []
+        d["reviewer_comments"] = json.loads(d["reviewer_comments_json"]) if d.get("reviewer_comments_json") else []
+        d["readiness_check_result"] = json.loads(d["readiness_check_result_json"]) if d.get("readiness_check_result_json") else {}
+        d["submission_package"] = json.loads(d["submission_package_json"]) if d.get("submission_package_json") else None
+        d["is_immutable"] = bool(d.get("is_immutable"))
+        return d
+    finally:
+        conn.close()
+
+
+def update_legal_document_draft(draft_id: str, updates: Dict[str, Any]) -> bool:
+    """Update fields on a legal document draft (enforces immutability check)."""
+    current = get_legal_document_draft(draft_id)
+    if not current:
+        return False
+    if current.get("is_immutable") and "external_filing_reference" not in updates and "submission_package" not in updates:
+        raise PermissionError(f"Draft '{draft_id}' is permanently immutable because it has received formal legal sign-off. Please initiate a new revision workflow.")
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        set_clauses = ["updated_at = ?"]
+        params: List[Any] = [now_iso]
+
+        json_fields = {
+            "exact_case_facts": "exact_case_facts_json",
+            "source_documents": "source_documents_json",
+            "legal_rule_result": "legal_rule_result_json",
+            "retrieved_legal_sources": "retrieved_legal_sources_json",
+            "source_citations": "source_citations_json",
+            "linked_case_facts": "linked_case_facts_json",
+            "missing_facts": "missing_facts_json",
+            "unresolved_warnings": "unresolved_warnings_json",
+            "reviewer_comments": "reviewer_comments_json",
+            "readiness_check_result": "readiness_check_result_json",
+            "submission_package": "submission_package_json",
+        }
+
+        for key, val in updates.items():
+            if key in json_fields:
+                set_clauses.append(f"{json_fields[key]} = ?")
+                params.append(json.dumps(val) if val is not None else None)
+            elif key == "is_immutable":
+                set_clauses.append("is_immutable = ?")
+                params.append(1 if val else 0)
+            elif key in ("content_text", "status", "approved_by", "approved_by_role", "approved_at",
+                         "external_filing_reference", "external_filing_date", "template_id", "template_version"):
+                set_clauses.append(f"{key} = ?")
+                params.append(val)
+
+        params.append(draft_id)
+        query = f"UPDATE legal_document_drafts SET {', '.join(set_clauses)} WHERE draft_id = ?"
+        cursor.execute(query, tuple(params))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def list_legal_document_drafts_for_case(case_id: str) -> List[Dict[str, Any]]:
+    """List all drafts and revisions for a given case, ordered by version descending."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM legal_document_drafts 
+            WHERE case_id = ? 
+            ORDER BY version_number DESC, created_at DESC
+        """, (case_id,))
+        rows = cursor.fetchall()
+        cols = [d[0] for d in cursor.description]
+        drafts = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            d["exact_case_facts"] = json.loads(d["exact_case_facts_json"]) if d.get("exact_case_facts_json") else {}
+            d["source_documents"] = json.loads(d["source_documents_json"]) if d.get("source_documents_json") else []
+            d["legal_rule_result"] = json.loads(d["legal_rule_result_json"]) if d.get("legal_rule_result_json") else {}
+            d["retrieved_legal_sources"] = json.loads(d["retrieved_legal_sources_json"]) if d.get("retrieved_legal_sources_json") else []
+            d["source_citations"] = json.loads(d["source_citations_json"]) if d.get("source_citations_json") else []
+            d["linked_case_facts"] = json.loads(d["linked_case_facts_json"]) if d.get("linked_case_facts_json") else {}
+            d["missing_facts"] = json.loads(d["missing_facts_json"]) if d.get("missing_facts_json") else []
+            d["unresolved_warnings"] = json.loads(d["unresolved_warnings_json"]) if d.get("unresolved_warnings_json") else []
+            d["reviewer_comments"] = json.loads(d["reviewer_comments_json"]) if d.get("reviewer_comments_json") else []
+            d["readiness_check_result"] = json.loads(d["readiness_check_result_json"]) if d.get("readiness_check_result_json") else {}
+            d["submission_package"] = json.loads(d["submission_package_json"]) if d.get("submission_package_json") else None
+            d["is_immutable"] = bool(d.get("is_immutable"))
+            drafts.append(d)
+        return drafts
+    finally:
+        conn.close()
+
 
 
 

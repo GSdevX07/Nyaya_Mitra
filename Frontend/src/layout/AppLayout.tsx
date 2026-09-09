@@ -34,6 +34,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
     case "DEFENSE_ADVOCATE":
       return [
         { path: "/advocate", label: "My Assigned Cases" },
+        { path: "/workspace/documents", label: "Drafting Workspace" },
         { path: "/radar", label: "Eligibility Radar" },
         { path: "/documents", label: "Assigned Documents" },
         { path: "/legal-sources", label: "Legal Knowledge Base" },
@@ -44,6 +45,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
     case "CONTROLLED_EXTERNAL_ADVOCATE":
       return [
         { path: "/advocate", label: "My Assigned Cases" },
+        { path: "/workspace/documents", label: "Drafting Workspace" },
         { path: "/documents", label: "Authorized Documents" },
         { path: "/legal-sources", label: "Legal Knowledge Base" },
         { path: "/actions", label: "Counsel Actions" },
@@ -93,6 +95,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
     case "SUPERVISING_LEGAL_OFFICER":
       return [
         { path: "/supervisor", label: "Supervisory Workbench" },
+        { path: "/workspace/documents", label: "Drafting Workspace" },
         { path: "/ingestion", label: "Ingestion & Conflicts" },
         { path: "/identity-review", label: "Identity Review" },
         { path: "/radar", label: "Eligibility Radar" },
@@ -109,6 +112,7 @@ function getNavItemsForRole(role?: Role): NavItem[] {
     default:
       return [
         { path: "/dlsa", label: "DLSA Operations Desk" },
+        { path: "/workspace/documents", label: "Drafting Workspace" },
         { path: "/dashboard", label: "Legal-Aid Workbench" },
         { path: "/cases", label: "Cases" },
         { path: "/identity-review", label: "Identity Review" },

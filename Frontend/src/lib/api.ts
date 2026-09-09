@@ -2709,3 +2709,334 @@ export async function fetchOperationsDashboard(): Promise<OperationsDashboardDat
   return await res.json();
 }
 
+// ==========================================
+// Document Workspace API & Types
+// ==========================================
+
+export interface DocumentTemplate {
+  template_id: string;
+  name: string;
+  doc_type: string;
+  statutory_ground: string;
+  version: number;
+  organization_id: string;
+  content_template: string;
+  required_fields: string[];
+  description?: string;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ReviewerComment {
+  comment_id: string;
+  author_id: string;
+  author_name: string;
+  author_role: string;
+  created_at: string;
+  comment: string;
+}
+
+export interface LegalDocumentDraft {
+  draft_id: string;
+  case_id: string;
+  template_id: string;
+  version_number: number;
+  status: "DRAFT" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "SUPERSEDED" | "FILED";
+  is_immutable: boolean;
+  created_by_user_id: string;
+  approved_by?: string;
+  approved_at?: string;
+  rejection_reason?: string;
+  created_at: string;
+  updated_at: string;
+  content_text: string;
+  original_ai_text: string;
+  exact_case_facts: Record<string, any>;
+  source_documents: Array<{
+    document_id: string;
+    document_type: string;
+    sha256_hash: string;
+    verified: boolean;
+  }>;
+  legal_rule_result: {
+    statute: string;
+    eligible: boolean;
+    is_eligible?: boolean;
+    mandatory_release_applicable: boolean;
+    computed_at: string;
+  };
+  retrieved_legal_sources: Array<{
+    citation: string;
+    title: string;
+    excerpt: string;
+    relevance_score?: number;
+  }>;
+  ai_model_name: string;
+  prompt_version: string;
+  reviewer_comments: ReviewerComment[];
+  filing_reference?: string;
+  submission_package?: Record<string, any>;
+  readiness_check_result?: any;
+}
+
+export interface ReadinessReport {
+  is_ready: boolean;
+  can_approve: boolean;
+  blocking_issues: string[];
+  warnings: string[];
+  missing_fields: string[];
+  unsupported_factual_claims: string[];
+  uncited_legal_assertions: string[];
+  template_structural_mismatches: string[];
+  unmet_evidence_prerequisites: string[];
+  checked_at: string;
+}
+
+export interface DraftDiffResult {
+  additions: number;
+  deletions: number;
+  unchanged: number;
+  diff_lines: Array<{
+    type: "added" | "deleted" | "unchanged";
+    text: string;
+  }>;
+}
+
+export interface SubmissionPackageManifest {
+  package_id: string;
+  draft_id: string;
+  case_id: string;
+  filing_mode: string;
+  is_automatically_filed: boolean;
+  human_sign_off: {
+    approved_by: string;
+    approved_at: string;
+  };
+  exhibits: string[];
+  document_hash: string;
+  prepared_at: string;
+  status: string;
+  instructions: string;
+}
+
+export interface DocumentExportPayload {
+  draft_id: string;
+  case_id: string;
+  version_number: number;
+  export_type: "EXTERNAL_COURT" | "INTERNAL_CERTIFIED";
+  includes_internal_notes: boolean;
+  exported_text: string;
+  sha256_checksum: string;
+  exported_at: string;
+  exported_by_role: string;
+}
+
+export async function fetchDocumentTemplates(docType?: string): Promise<DocumentTemplate[]> {
+  const url = new URL(`${API_BASE_URL}/api/documents/templates`);
+  if (docType) url.searchParams.set("doc_type", docType);
+  const res = await authFetch(url.toString());
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch templates: HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data.templates || [];
+}
+
+export async function fetchDocumentTemplateById(templateId: string): Promise<DocumentTemplate> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/templates/${templateId}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch template: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function createDocumentTemplate(template: Partial<DocumentTemplate>): Promise<DocumentTemplate> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/templates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(template),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to create template: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function generateGroundedDraft(
+  caseId: string,
+  templateId: string,
+  customInstructions?: string
+): Promise<LegalDocumentDraft> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      case_id: caseId,
+      template_id: templateId,
+      custom_instructions: customInstructions,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to generate draft: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchCaseDrafts(caseId: string): Promise<LegalDocumentDraft[]> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/case/${caseId}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch case drafts: HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data.drafts || [];
+}
+
+export async function fetchDraftDetail(draftId: string): Promise<LegalDocumentDraft> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/${draftId}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch draft: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function updateDraftContent(draftId: string, contentText: string): Promise<LegalDocumentDraft> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/${draftId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content_text: contentText }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to update draft content: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function validateDraftReadiness(draftId: string): Promise<ReadinessReport> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/${draftId}/readiness`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to validate draft readiness: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function addDraftComment(draftId: string, comment: string): Promise<LegalDocumentDraft> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/${draftId}/comments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to add reviewer comment: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function approveDraft(draftId: string, comment?: string): Promise<LegalDocumentDraft> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/${draftId}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const message = err.detail?.blocking_issues
+      ? `Approval blocked: ${err.detail.blocking_issues.join("; ")}`
+      : (typeof err.detail === "string" ? err.detail : `Approval failed: HTTP ${res.status}`);
+    throw new Error(message);
+  }
+  return await res.json();
+}
+
+export async function rejectDraft(draftId: string, comment: string): Promise<LegalDocumentDraft> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/${draftId}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to reject draft: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function createDraftRevision(draftId: string): Promise<LegalDocumentDraft> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/${draftId}/revise`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to create draft revision: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function prepareSubmissionPackage(
+  draftId: string,
+  exhibits?: string[]
+): Promise<SubmissionPackageManifest> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/${draftId}/package`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ exhibits: exhibits || [] }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to prepare submission package: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function recordExternalFiling(
+  draftId: string,
+  data: { filing_reference: string; filing_date: string; court_name: string }
+): Promise<LegalDocumentDraft> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/${draftId}/record-filing`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to record court filing: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchDraftDiff(draftIdA: string, draftIdB: string): Promise<DraftDiffResult> {
+  const url = new URL(`${API_BASE_URL}/api/documents/drafts/diff`);
+  url.searchParams.set("draft_id_a", draftIdA);
+  url.searchParams.set("draft_id_b", draftIdB);
+  const res = await authFetch(url.toString());
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch draft diff: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function exportDraftDocument(
+  draftId: string,
+  includeInternalNotes: boolean = false
+): Promise<DocumentExportPayload> {
+  const url = new URL(`${API_BASE_URL}/api/documents/drafts/${draftId}/export`);
+  url.searchParams.set("include_internal_notes", String(includeInternalNotes));
+  const res = await authFetch(url.toString());
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to export draft: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+

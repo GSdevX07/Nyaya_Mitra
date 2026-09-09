@@ -218,6 +218,10 @@ app.include_router(analytics_router)
 # ── Background Jobs & Asynchronous Worker Task Queue Router ─────────────────
 app.include_router(job_router)
 
+# ── Professional Document Workspace: Versioned Templates & Governed Drafts ──
+from app.routes.document_workspace_routes import router as document_workspace_router
+app.include_router(document_workspace_router)
+
 # ── Mock database ─────────────────────────────────────────────────────────────
 # 5 hero cases engineered to hit distinct agent decision branches.
 # All data is synthetic see Nyaya_Mitra_Master_Roadmap_v2.md §8, Step 1.1.

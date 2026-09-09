@@ -283,7 +283,16 @@ def test_backup_and_test_restore_verification(tmp_path):
 
     # Run automated test-restore into sandbox
     report = verify_restore_sandbox(manifest.database_path)
-    assert report.status == "PASSED"
+
+    if report.status != "PASSED":
+        print(f"Restore failed with status: {report.status}")
+        print(f"Report details: {report}")
+        if hasattr(report, "tables_found"):
+            print(f"Tables found: {report.tables_found}")
+        if hasattr(report, "error"):
+            print(f"Error: {report.error}")
+
+    assert report.status == "PASSED", f"Restore verification failed: {report.error or report}"
     assert report.integrity_check == "ok"
     assert "cases" in report.tables_found
     assert "audit_events" in report.tables_found

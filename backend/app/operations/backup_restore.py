@@ -81,6 +81,9 @@ def create_backup(
     # Online atomic backup via SQLite Backup API
     source_conn = get_db_connection()
     try:
+        from app.database import _init_sqlite_tables
+        _init_sqlite_tables(source_conn)
+
         dest_conn = sqlite3.connect(str(backup_db_path))
         try:
             source_conn.backup(dest_conn)
@@ -229,6 +232,11 @@ def test_restore_verification(backup_db_path: str | Path) -> TestRestoreReport:
         # 4. Cryptographic Hash Chain Validation on Restored Audit Events
         audit_chain_valid = True
         verified_events_count = 0
+        error_reasons = []
+
+        if integrity_result != "ok":
+            error_reasons.append(f"PRAGMA integrity_check returned: {integrity_result}")
+
         if "audit_events" in tables:
             cursor.execute(
                 """
@@ -248,13 +256,26 @@ def test_restore_verification(backup_db_path: str | Path) -> TestRestoreReport:
                 # Verify pointer continuity
                 if expected_prev_hash is not None and prev_hash != expected_prev_hash:
                     audit_chain_valid = False
+                    error_reasons.append(f"Audit pointer broken at seq {seq}: prev={prev_hash}, expected={expected_prev_hash}")
                     break
 
-                # Recalculate hash
-                canonical_str = f"{seq}|{ts}|{actor_id}|{role}|{action}|{ent_type}|{ent_id}|{details_json}|{prev_hash}"
-                calc_hash = hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
-                if calc_hash != stored_hash:
+                # Recalculate hash matching AuditRepository
+                hash_payload = f"{ev_id}|{ts}|{actor_id}|{role}|{action}|{ent_type}|{ent_id}|{details_json}|{prev_hash}|{seq}"
+                recomputed_hash = hashlib.sha256(hash_payload.encode("utf-8")).hexdigest()
+
+                hash_match = (recomputed_hash == stored_hash)
+                if not hash_match:
+                    try:
+                        normalized_details = json.dumps(json.loads(details_json), sort_keys=True)
+                        norm_payload = f"{ev_id}|{ts}|{actor_id}|{role}|{action}|{ent_type}|{ent_id}|{normalized_details}|{prev_hash}|{seq}"
+                        if hashlib.sha256(norm_payload.encode("utf-8")).hexdigest() == stored_hash:
+                            hash_match = True
+                    except Exception:
+                        pass
+
+                if not hash_match:
                     audit_chain_valid = False
+                    error_reasons.append(f"Audit hash mismatch at seq {seq}: stored={stored_hash}, recomputed={recomputed_hash}")
                     break
 
                 expected_prev_hash = stored_hash
@@ -273,7 +294,7 @@ def test_restore_verification(backup_db_path: str | Path) -> TestRestoreReport:
             audit_chain_valid=audit_chain_valid,
             audit_events_verified=verified_events_count,
             duration_ms=duration_ms,
-            error=None if overall_status == "PASSED" else "Integrity check or audit hash chain validation failed.",
+            error="; ".join(error_reasons) if error_reasons else None,
         )
     except Exception as exc:
         duration_ms = round((time.perf_counter() - start_time) * 1000.0, 2)

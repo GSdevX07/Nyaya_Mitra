@@ -1952,6 +1952,54 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_dispatched_actions_case ON dispatched_actions(case_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_dispatched_actions_status ON dispatched_actions(status)")
 
+    # 13. Durable Background Jobs & Asynchronous Worker Task Queue
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS background_jobs (
+            id TEXT PRIMARY KEY,
+            job_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            result_json TEXT,
+            error_message TEXT,
+            error_category TEXT,
+            retry_count INTEGER DEFAULT 0,
+            max_retries INTEGER DEFAULT 3,
+            next_retry_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            duration_ms REAL,
+            idempotency_key TEXT UNIQUE,
+            trace_id TEXT,
+            span_id TEXT,
+            actor_id TEXT,
+            organization_id TEXT
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_bg_jobs_status ON background_jobs(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_bg_jobs_type ON background_jobs(job_type)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_bg_jobs_idempotency ON background_jobs(idempotency_key)")
+
+    # 14. Mutating Request Idempotency & Deduplication Cache
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS idempotent_requests (
+            idempotency_key TEXT NOT NULL,
+            endpoint TEXT NOT NULL,
+            request_hash TEXT NOT NULL,
+            actor_id TEXT,
+            status TEXT NOT NULL,
+            status_code INTEGER,
+            response_headers_json TEXT,
+            response_body_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NOT NULL,
+            PRIMARY KEY (idempotency_key, endpoint)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotent_requests(expires_at)")
+
     # Canonical Custodial Facilities Seeding (Sanctioned Capacities according to Prison Statistics)
     cursor.execute("""
         INSERT OR IGNORE INTO facilities (id, organization_id, name, facility_type, state, district, capacity, current_occupancy, is_active)

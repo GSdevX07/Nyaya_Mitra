@@ -2655,3 +2655,57 @@ export async function triggerScheduledReport(scheduleId: string): Promise<Schedu
   return await res.json();
 }
 
+// ── Operations & Production Reliability Dashboard ────────────────────────────
+
+export interface OperationsDashboardData {
+  status: string;
+  timestamp: string;
+  database: {
+    connected: boolean;
+    engine: string;
+  };
+  queue: {
+    QUEUED?: number;
+    PROCESSING?: number;
+    COMPLETED?: number;
+    FAILED?: number;
+    DEAD_LETTER?: number;
+  };
+  circuit_breakers: Record<string, {
+    name: string;
+    state: string;
+    consecutive_failures: number;
+    failure_threshold: number;
+    recovery_timeout_sec: number;
+  }>;
+  telemetry: {
+    http?: {
+      total_requests: number;
+      total_errors: number;
+      error_rate: number;
+      avg_latency_ms: number;
+    };
+    ai_usage?: {
+      requests: number;
+      tokens: number;
+    };
+    ocr?: {
+      operations: number;
+      failures: number;
+    };
+    connectors?: {
+      syncs: number;
+      failures: number;
+    };
+  };
+}
+
+export async function fetchOperationsDashboard(): Promise<OperationsDashboardData> {
+  const res = await authFetch(`${API_BASE_URL}/api/operations/dashboard`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch operations dashboard: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+

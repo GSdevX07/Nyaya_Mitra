@@ -37,6 +37,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+import time
 import hashlib
 import json
 import datetime
@@ -47,7 +48,7 @@ logger = logging.getLogger("nyaya_mitra.api")
 
 from fastapi import FastAPI, HTTPException, status, File, UploadFile, Body, Form, Depends, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response, JSONResponse
 from pydantic import BaseModel
 
 from app.agents.orchestrator import process_case
@@ -82,6 +83,13 @@ from app.auth.roles import Role
 from app.auth.user_store import AuthUser
 
 
+# ── Reliability, Telemetry & Worker imports ───────────────────────────────────
+from app.telemetry.tracing import TracingMiddleware
+from app.middleware.idempotency import IdempotencyMiddleware
+from app.telemetry.metrics import get_metrics_collector, generate_prometheus_metrics
+from app.routes.job_routes import router as job_router
+from app.services.circuit_breaker import get_all_circuit_statuses
+
 # ── App initialisation ────────────────────────────────────────────────────────
 from contextlib import asynccontextmanager
 
@@ -91,8 +99,12 @@ async def lifespan(app: FastAPI):
     init_db()
     from app.notifications.scheduler import AutomaticEscalationWorker
     AutomaticEscalationWorker.start(poll_interval_seconds=60)
+    from app.jobs.workers import get_worker_pool
+    worker_pool = get_worker_pool()
+    worker_pool.start()
     yield
     AutomaticEscalationWorker.stop()
+    await worker_pool.stop()
 
 app = FastAPI(
     title="Nyaya Mitra Backend API",
@@ -112,17 +124,50 @@ app.add_middleware(
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "Idempotency-Key",
+        "X-Request-ID",
+        "X-Trace-ID",
+        "X-Span-ID",
+    ],
+    expose_headers=[
+        "X-Request-ID",
+        "X-Trace-ID",
+        "X-Span-ID",
+        "Idempotency-Key",
+        "Idempotent-Replayed",
+    ],
 )
+
+app.add_middleware(TracingMiddleware)
+app.add_middleware(IdempotencyMiddleware)
 
 
 @app.middleware("http")
-async def add_security_headers(request: Request, call_next):
+async def add_security_headers_and_telemetry(request: Request, call_next):
     """
     Inject production defense-in-depth HTTP security headers into every response.
     Protects against MIME sniffing, clickjacking, framing, and XSS.
+    Records operational HTTP request metrics.
     """
+    start_req_time = time.perf_counter()
     response = await call_next(request)
+    duration_s = time.perf_counter() - start_req_time
+
+    # Record telemetry metrics without failing request
+    try:
+        get_metrics_collector().record_http_request(
+            route=request.url.path,
+            method=request.method,
+            status_code=response.status_code,
+            duration_seconds=duration_s,
+        )
+    except Exception:
+        pass
+
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
@@ -170,6 +215,9 @@ app.include_router(notification_router, prefix="/api")
 from app.routes.analytics_routes import router as analytics_router
 app.include_router(analytics_router)
 
+# ── Background Jobs & Asynchronous Worker Task Queue Router ─────────────────
+app.include_router(job_router)
+
 # ── Mock database ─────────────────────────────────────────────────────────────
 # 5 hero cases engineered to hit distinct agent decision branches.
 # All data is synthetic see Nyaya_Mitra_Master_Roadmap_v2.md §8, Step 1.1.
@@ -190,7 +238,111 @@ def _find_case(case_id: str) -> CaseRecord:
     return case
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# ── Operational Health & Telemetry Endpoints ──────────────────────────────────
+
+@app.get("/health/live", tags=["Health"])
+def liveness():
+    """Fast operational liveness check confirming application process is running."""
+    return {
+        "status": "alive",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+
+
+@app.get("/health/ready", tags=["Health"])
+def readiness():
+    """
+    Operational readiness check validating database connectivity and queue engine.
+    Fails closed (HTTP 503) without leaking credentials or internal topology.
+    """
+    db_ok = False
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            row = cursor.fetchone()
+            db_ok = row is not None and row[0] == 1
+        finally:
+            conn.close()
+    except Exception:
+        db_ok = False
+
+    from app.jobs.engine import get_job_engine
+    try:
+        queue_depths = get_job_engine().get_queue_depth()
+        queue_ok = True
+    except Exception:
+        queue_ok = False
+        queue_depths = {}
+
+    is_ready = db_ok and queue_ok
+    status_code = status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE
+
+    payload = {
+        "status": "ready" if is_ready else "degraded",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "checks": {
+            "database": "operational" if db_ok else "unreachable",
+            "background_queue": "operational" if queue_ok else "degraded",
+        },
+    }
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.get("/metrics", tags=["Telemetry"])
+def prometheus_telemetry():
+    """Prometheus exposition format for Grafana / CloudWatch scraper."""
+    content = generate_prometheus_metrics()
+    return Response(content=content, media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
+@app.get("/api/operations/telemetry", tags=["Operations"])
+def get_telemetry_summary():
+    """Structured telemetry metrics summary."""
+    collector = get_metrics_collector()
+    from app.jobs.engine import get_job_engine
+    try:
+        collector.update_queue_depths(get_job_engine().get_queue_depth())
+    except Exception:
+        pass
+    return collector.get_summary()
+
+
+@app.get("/api/operations/dashboard", tags=["Operations"])
+def get_operations_dashboard():
+    """Consolidated operational health, background queue, circuit breakers, and telemetry dashboard."""
+    from app.jobs.engine import get_job_engine
+    collector = get_metrics_collector()
+
+    try:
+        queue_depths = get_job_engine().get_queue_depth()
+        collector.update_queue_depths(queue_depths)
+    except Exception:
+        queue_depths = {}
+
+    db_ok = False
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            row = cursor.fetchone()
+            db_ok = row is not None and row[0] == 1
+        finally:
+            conn.close()
+    except Exception:
+        db_ok = False
+
+    return {
+        "status": "operational" if db_ok else "degraded",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "database": {"connected": db_ok, "engine": "sqlite_dual_mode"},
+        "queue": queue_depths,
+        "circuit_breakers": get_all_circuit_statuses(),
+        "telemetry": collector.get_summary(),
+    }
+
 
 @app.get("/", tags=["Health"])
 @app.get("/health", tags=["Health"])

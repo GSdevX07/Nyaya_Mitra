@@ -126,3 +126,31 @@ class PrisonReleaseConfirmationRequest(BaseModel):
 class ExpediteCoordinationRequest(BaseModel):
     notes: Optional[str] = Field("Expediting missing charge sheet / custody certificate.", description="Institutional coordination directives")
     target_roles: Optional[List[str]] = Field(default_factory=lambda: ["JAIL_OFFICER", "POLICE_OFFICER"], description="Agencies / roles to alert")
+
+
+class FIRRecordIntakeRequest(BaseModel):
+    fir_number: str = Field(..., min_length=1, description="Official station FIR number (e.g. FIR-2024-108)")
+    police_station: str = Field(..., min_length=2, description="Designated police station name")
+    police_station_id: Optional[str] = Field(None, description="Station institutional identifier")
+    district: str = Field(..., min_length=2, description="Police district jurisdiction")
+    state: Optional[str] = Field("Delhi", description="State jurisdiction")
+    accused_name: str = Field(..., min_length=2, description="Full name of accused / arrestee")
+    offense_sections: List[str] = Field(default_factory=lambda: ["IPC 379 / BNS 303"], description="Sections invoked in FIR")
+    filing_date: Optional[str] = Field(None, description="FIR registration date (YYYY-MM-DD)")
+    arrest_date: Optional[str] = Field(None, description="Date of arrest if executed")
+    incident_details: Optional[str] = Field(None, description="Summary of allegations / incident log")
+    court_name: Optional[str] = Field("Competent Remand Court", description="Jurisdictional Magistrate Court")
+    charge_sheet_status: Optional[str] = Field("PENDING_INVESTIGATION", description="Charge sheet procedural status")
+    remand_status: Optional[str] = Field("INITIAL_REMAND", description="Custody remand status")
+    investigating_officer: Optional[str] = Field(None, description="Name and badge number of Investigating Officer")
+
+
+class FIRRecordUpdateRequest(BaseModel):
+    fir_number: Optional[str] = None
+    offense_sections: Optional[List[str]] = None
+    charge_sheet_status: Optional[str] = None
+    remand_status: Optional[str] = None
+    court_name: Optional[str] = None
+    investigating_officer: Optional[str] = None
+    investigation_notes: Optional[str] = None
+    filing_date: Optional[str] = None

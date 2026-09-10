@@ -120,8 +120,6 @@ function App() {
                   <ProtectedRoute
                     allowedRoles={[
                       "DLSA_OFFICER",
-                      "PLATFORM_ADMIN",
-                      "GOV_ADMIN",
                     ]}
                   >
                     <DlsaWorkspace />
@@ -324,7 +322,6 @@ function App() {
                       "PLATFORM_ADMIN",
                       "GOV_ADMIN",
                       "JAIL_OFFICER",
-                      "POLICE_OFFICER",
                       "DEFENSE_ADVOCATE",
                       "CONTROLLED_EXTERNAL_ADVOCATE",
                       "READ_ONLY_AUDITOR",
@@ -341,8 +338,6 @@ function App() {
                     allowedRoles={[
                       "DLSA_OFFICER",
                       "SUPERVISING_LEGAL_OFFICER",
-                      "PLATFORM_ADMIN",
-                      "GOV_ADMIN",
                       "DEFENSE_ADVOCATE",
                       "CONTROLLED_EXTERNAL_ADVOCATE",
                       "READ_ONLY_AUDITOR",

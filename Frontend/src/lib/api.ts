@@ -336,6 +336,60 @@ export async function completePoliceAction(actionId: string, documentId: string,
   return await res.json();
 }
 
+export interface FIRRecordIntakePayload {
+  fir_number: string;
+  police_station: string;
+  police_station_id?: string;
+  district: string;
+  state?: string;
+  accused_name: string;
+  offense_sections: string[];
+  filing_date?: string;
+  arrest_date?: string;
+  incident_details?: string;
+  court_name?: string;
+  charge_sheet_status?: string;
+  remand_status?: string;
+  investigating_officer?: string;
+}
+
+export interface FIRRecordUpdatePayload {
+  fir_number?: string;
+  offense_sections?: string[];
+  charge_sheet_status?: string;
+  remand_status?: string;
+  court_name?: string;
+  investigating_officer?: string;
+  investigation_notes?: string;
+  filing_date?: string;
+}
+
+export async function intakeFIRRecord(payload: FIRRecordIntakePayload): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/cases/fir-intake`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `Status ${res.status}` }));
+    throw new Error(err.detail || "Failed to intake FIR record");
+  }
+  return await res.json();
+}
+
+export async function updateFIRRecord(caseId: string, payload: FIRRecordUpdatePayload): Promise<any> {
+  const res = await authFetch(`${API_BASE_URL}/cases/${encodeURIComponent(caseId)}/fir`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `Status ${res.status}` }));
+    throw new Error(err.detail || "Failed to update FIR record");
+  }
+  return await res.json();
+}
+
 export async function fetchCases(): Promise<BackendCaseSummary[]> {
   try {
     const res = await authFetch(`${API_BASE_URL}/cases`);
@@ -2714,16 +2768,20 @@ export async function fetchOperationsDashboard(): Promise<OperationsDashboardDat
 // ==========================================
 
 export interface DocumentTemplate {
-  template_id: string;
+  template_id?: string;
+  id?: string;
   name: string;
   doc_type: string;
   statutory_ground: string;
   version: number;
-  organization_id: string;
+  organization_id?: string;
+  jurisdiction?: string;
   content_template: string;
   required_fields: string[];
+  required_documents?: string[];
   description?: string;
   is_active: boolean;
+  created_by?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -2778,20 +2836,28 @@ export interface LegalDocumentDraft {
   filing_reference?: string;
   submission_package?: Record<string, any>;
   readiness_check_result?: any;
+  sha256_hash?: string;
+  parent_version_id?: string;
 }
 
 export interface ReadinessReport {
-  is_ready: boolean;
+  is_ready?: boolean;
   can_approve: boolean;
-  blocking_issues: string[];
-  warnings: string[];
-  missing_fields: string[];
-  unsupported_factual_claims: string[];
-  uncited_legal_assertions: string[];
-  template_structural_mismatches: string[];
-  unmet_evidence_prerequisites: string[];
-  checked_at: string;
+  status?: string;
+  readiness_score?: number;
+  total_blocking_issues?: number;
+  total_warnings?: number;
+  blocking_issues: Array<any>;
+  warnings: Array<any>;
+  missing_fields?: string[];
+  unsupported_factual_claims?: string[];
+  uncited_legal_assertions?: string[];
+  template_structural_mismatches?: string[];
+  unmet_evidence_prerequisites?: string[];
+  checked_at?: string;
 }
+
+export type DraftReadinessResult = ReadinessReport;
 
 export interface DraftDiffResult {
   additions: number;
@@ -2862,6 +2928,19 @@ export async function createDocumentTemplate(template: Partial<DocumentTemplate>
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `Failed to create template: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function updateDocumentTemplate(templateId: string, payload: Partial<DocumentTemplate>): Promise<DocumentTemplate> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/templates/${templateId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to update template: HTTP ${res.status}`);
   }
   return await res.json();
 }
@@ -2957,15 +3036,32 @@ export async function approveDraft(draftId: string, comment?: string): Promise<L
   return await res.json();
 }
 
-export async function rejectDraft(draftId: string, comment: string): Promise<LegalDocumentDraft> {
+export const fetchLegalDocumentDraftsForCase = fetchCaseDrafts;
+export const getDraftReadiness = validateDraftReadiness;
+export const approveLegalDocumentDraft = approveDraft;
+
+export async function rejectDraft(draftId: string, reason: string): Promise<LegalDocumentDraft> {
   const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/${draftId}/reject`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ comment }),
+    body: JSON.stringify({ reason, comment: reason }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `Failed to reject draft: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function requestDraftRevisions(draftId: string, reason: string): Promise<LegalDocumentDraft> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/${draftId}/request-revisions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to request revisions: HTTP ${res.status}`);
   }
   return await res.json();
 }
@@ -3039,4 +3135,146 @@ export async function exportDraftDocument(
   return await res.json();
 }
 
+export async function exportDraftPDF(
+  draftId: string,
+  includeInternalNotes: boolean = false
+): Promise<Blob> {
+  const url = new URL(`${API_BASE_URL}/api/documents/drafts/${draftId}/export/pdf`);
+  url.searchParams.set("include_internal_notes", String(includeInternalNotes));
+  const res = await authFetch(url.toString());
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to export draft PDF: HTTP ${res.status}`);
+  }
+  return await res.blob();
+}
 
+
+// ── Institutional Delegations & Document Requisition Interfaces ─────────────
+
+export interface InstitutionalDelegation {
+  delegation_id: string;
+  granted_to_user_id: string;
+  granted_to_role: string;
+  granted_by_user_id: string;
+  granted_by_role: string;
+  organization_id: string;
+  jurisdiction?: string;
+  capability: string;
+  allowed_document_types: string[];
+  allowed_case_scope: string[];
+  valid_from: string;
+  valid_until: string;
+  status: "ACTIVE" | "REVOKED" | "EXPIRED";
+  reason: string;
+  created_at: string;
+  revoked_at?: string;
+  revoked_by_user_id?: string;
+  audit_reference?: string;
+}
+
+export interface DelegationCheckResponse {
+  is_delegated: boolean;
+  delegation: InstitutionalDelegation | null;
+}
+
+export interface DocumentPreparationRequisitionRequest {
+  case_id: string;
+  template_id?: string;
+  document_type?: string;
+  urgency?: "ROUTINE" | "NORMAL" | "URGENT" | "CRITICAL" | "CRITICAL_479";
+  reason: string;
+  missing_prerequisites?: string[];
+  assigned_counsel_id?: string;
+  assigned_counsel_name?: string;
+}
+
+export interface DocumentPreparationRequisitionResponse {
+  status: string;
+  requisition_id: string;
+  case_id: string;
+  task_id: string;
+  assigned_counsel_id?: string;
+  assigned_counsel_name?: string;
+  urgency: string;
+  message: string;
+}
+
+export async function requestDocumentPreparationApi(
+  req: DocumentPreparationRequisitionRequest
+): Promise<DocumentPreparationRequisitionResponse> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/drafts/request-preparation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to dispatch document preparation request: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchMyActiveDelegationApi(params?: {
+  case_id?: string;
+  capability?: string;
+  document_type?: string;
+}): Promise<DelegationCheckResponse> {
+  const url = new URL(`${API_BASE_URL}/api/documents/delegations/my-active`);
+  if (params?.case_id) url.searchParams.set("case_id", params.case_id);
+  if (params?.capability) url.searchParams.set("capability", params.capability);
+  if (params?.document_type) url.searchParams.set("document_type", params.document_type);
+  const res = await authFetch(url.toString());
+  if (!res.ok) {
+    return { is_delegated: false, delegation: null };
+  }
+  return await res.json();
+}
+
+export async function listDelegationsApi(params?: {
+  user_id?: string;
+  capability?: string;
+  status?: string;
+}): Promise<{ delegations: InstitutionalDelegation[]; total: number }> {
+  const url = new URL(`${API_BASE_URL}/api/documents/delegations`);
+  if (params?.user_id) url.searchParams.set("user_id", params.user_id);
+  if (params?.capability) url.searchParams.set("capability", params.capability);
+  if (params?.status) url.searchParams.set("status", params.status);
+  const res = await authFetch(url.toString());
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch delegations: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function createDelegationApi(
+  payload: Partial<InstitutionalDelegation>
+): Promise<InstitutionalDelegation> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/delegations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to create delegation: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function revokeDelegationApi(
+  delegationId: string,
+  reason?: string
+): Promise<{ delegation_id: string; status: string; message: string }> {
+  const res = await authFetch(`${API_BASE_URL}/api/documents/delegations/${delegationId}/revoke`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to revoke delegation: HTTP ${res.status}`);
+  }
+  return await res.json();
+}

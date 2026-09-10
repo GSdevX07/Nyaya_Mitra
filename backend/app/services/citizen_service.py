@@ -362,7 +362,21 @@ def get_citizen_entitled_documents(case_id: str, lang: str = "en") -> List[Dict[
 
 
 def get_citizen_document_summary(doc_id: str, case_id: str, lang: str = "en") -> Dict[str, Any]:
-    """Retrieve text summary and preview for low-bandwidth viewing."""
+    """
+    Retrieve text summary and preview for low-bandwidth viewing.
+    Strictly verifies case ownership, approved entitlement status,
+    and returns 404/403 for unauthorized, privileged, or guessed documents.
+    """
+    CITIZEN_ENTITLED_TYPES = {
+        "fir": "Police First Information Report (FIR)",
+        "charge_sheet": "Police Final Report / Charge Sheet",
+        "remand_order": "Magisterial Remand Production Order",
+        "custody_certificate": "Superintendent Custody Certificate",
+        "bail_application": "Defense Bail Application Draft",
+        "court_order": "Court Bail Disposition Order",
+        "nominal_roll": "Jail Nominal Roll Certificate",
+    }
+
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -371,8 +385,13 @@ def get_citizen_document_summary(doc_id: str, case_id: str, lang: str = "en") ->
         if row:
             cols = [d[0] for d in cursor.description]
             doc = dict(zip(cols, row))
+            d_type = (doc.get("document_type") or "").lower().strip().replace("-", "_").replace(" ", "_")
+            if d_type not in CITIZEN_ENTITLED_TYPES and d_type.replace("doc_", "") not in CITIZEN_ENTITLED_TYPES:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Forbidden: Document is not authorized for release to citizen.",
+                )
             raw_text = doc.get("extracted_text") or doc.get("custom_text") or ""
-            d_type = doc.get("document_type", "official_record")
             summary = summarize_document(case_id=case_id, doc_type=d_type, raw_text=raw_text, doc_obj=doc, lang=lang)
             return {
                 "id": doc_id,
@@ -384,13 +403,66 @@ def get_citizen_document_summary(doc_id: str, case_id: str, lang: str = "en") ->
                 "file_size_formatted": f"{max(1, round((doc.get('file_size_bytes') or 0) / 1024))} KB",
                 "status": "VERIFIED",
             }
-        
-        d_type = doc_id.replace(f"doc_{case_id}_", "")
-        summary = summarize_document(case_id=case_id, doc_type=d_type, raw_text="", lang=lang)
+
+        # Check synthesized entitlement against case present_docs
+        doc_id_clean = doc_id.lower().strip()
+        case_id_clean = case_id.lower().strip()
+        clean_prefix = f"doc_{case_id_clean}_"
+        if doc_id_clean.startswith(clean_prefix):
+            d_type = doc_id_clean[len(clean_prefix):].replace("-", "_").replace(" ", "_")
+        elif doc_id_clean.startswith("doc_"):
+            d_type = doc_id_clean[4:].replace("-", "_").replace(" ", "_")
+        else:
+            d_type = doc_id_clean.replace("-", "_").replace(" ", "_")
+
+        ALIAS_MAP = {
+            "fir": "fir",
+            "fir_copy": "fir",
+            "police_fir": "fir",
+            "charge_sheet": "charge_sheet",
+            "final_report": "charge_sheet",
+            "remand_order": "remand_order",
+            "remand_production_order": "remand_order",
+            "custody_certificate": "custody_certificate",
+            "jail_custody_certificate": "custody_certificate",
+            "bail_application": "bail_application",
+            "court_order": "court_order",
+            "bail_order": "court_order",
+            "nominal_roll": "nominal_roll",
+        }
+        canon_type = ALIAS_MAP.get(d_type, d_type)
+
+        if canon_type not in CITIZEN_ENTITLED_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Document '{doc_id}' not found for case '{case_id}'.",
+            )
+
+        from app.database import _MEMORY_CASES
+        c_obj = get_case(case_id)
+        present_set = set()
+        if c_obj and c_obj.present_docs:
+            for p in c_obj.present_docs:
+                p_norm = p.lower().strip().replace("-", "_").replace(" ", "_")
+                present_set.add(ALIAS_MAP.get(p_norm, p_norm))
+                present_set.add(p_norm)
+        if case_id in _MEMORY_CASES and _MEMORY_CASES[case_id].present_docs:
+            for p in _MEMORY_CASES[case_id].present_docs:
+                p_norm = p.lower().strip().replace("-", "_").replace(" ", "_")
+                present_set.add(ALIAS_MAP.get(p_norm, p_norm))
+                present_set.add(p_norm)
+
+        if canon_type not in present_set and d_type not in present_set:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Document '{doc_id}' not found for case '{case_id}'.",
+            )
+
+        summary = summarize_document(case_id=case_id, doc_type=canon_type, raw_text="", lang=lang)
         return {
             "id": doc_id,
             "case_id": case_id,
-            "document_type": d_type,
+            "document_type": canon_type,
             "file_name": f"{doc_id}.pdf",
             "text_summary": summary,
             "text_preview": summary,

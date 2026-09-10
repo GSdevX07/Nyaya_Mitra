@@ -11,6 +11,7 @@ import hashlib
 import json
 import datetime
 import logging
+import textwrap
 from typing import Dict, Any, List, Optional, Tuple
 
 from app.auth.roles import Role
@@ -75,6 +76,8 @@ def compute_draft_diff(original_text: str, modified_text: str) -> Dict[str, Any]
     return {
         "additions": additions,
         "deletions": deletions,
+        "lines_added": additions,
+        "lines_deleted": deletions,
         "unchanged": unchanged,
         "total_changes": additions + deletions,
         "diff_lines": diff_lines,
@@ -89,6 +92,7 @@ def generate_document_export_payload(
     """
     Generate an export payload with audit metadata.
     Enforces that internal audit notes are strictly excluded unless the actor has explicit permission.
+    If include_internal_notes=True is passed by an unauthorized role, raises PermissionError.
     """
     content = draft_dict.get("content_text", "")
     version_tag = f"v{draft_dict.get('version_number', 1)}.0"
@@ -184,8 +188,8 @@ def prepare_submission_package(
     if not draft:
         raise LookupError(f"Draft '{draft_id}' not found.")
 
-    if actor.role not in {Role.DEFENSE_ADVOCATE, Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER}:
-        raise PermissionError(f"Forbidden: Role '{actor.role.value}' is not authorized to prepare court submission packages.")
+    if actor.role not in {Role.DEFENSE_ADVOCATE, Role.SUPERVISING_LEGAL_OFFICER}:
+        raise PermissionError(f"Forbidden: Role '{actor.role.value}' is not authorized to prepare court submission packages. Restricted to assigned counsel and supervisors.")
 
     if draft.get("status") != "APPROVED" and not draft.get("is_immutable"):
         raise ValueError("Cannot prepare submission package: Document draft must be formally approved before packaging.")
@@ -247,8 +251,8 @@ def record_external_filing(
     if not draft:
         raise LookupError(f"Draft '{draft_id}' not found.")
 
-    if actor.role not in {Role.DEFENSE_ADVOCATE, Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER}:
-        raise PermissionError(f"Forbidden: Role '{actor.role.value}' is not authorized to record external court filings.")
+    if actor.role not in {Role.DEFENSE_ADVOCATE, Role.SUPERVISING_LEGAL_OFFICER}:
+        raise PermissionError(f"Forbidden: Role '{actor.role.value}' is not authorized to record external court filings. Restricted to assigned counsel and supervising legal officers.")
 
     if not filing_reference or not filing_reference.strip():
         raise ValueError("A valid court filing receipt number or CNR acknowledgment reference is required.")
@@ -299,3 +303,96 @@ def record_external_filing(
         "filing_date": filing_date,
         "message": f"Court filing recorded successfully under reference '{filing_reference}'.",
     }
+
+
+def _build_pdf_1_4_bytes(text: str) -> bytes:
+    """
+    Produce standard %PDF-1.4 binary data containing the petition text.
+    Implements multi-page pagination with formal margins.
+    Verifiable by pypdf and standard PDF parsers.
+    """
+    raw_lines = text.split("\n")
+    wrapped_lines: List[str] = []
+    for line in raw_lines:
+        if not line:
+            wrapped_lines.append("")
+        else:
+            for sub in textwrap.wrap(line, width=82, replace_whitespace=False, drop_whitespace=False):
+                wrapped_lines.append(sub)
+
+    lines_per_page = 48
+    page_chunks = [
+        wrapped_lines[i : i + lines_per_page]
+        for i in range(0, max(1, len(wrapped_lines)), lines_per_page)
+    ]
+    num_pages = len(page_chunks)
+
+    body = [b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"]
+    offsets: Dict[int, int] = {}
+
+    def write_obj(num: int, data: bytes):
+        offsets[num] = sum(len(b) for b in body)
+        body.append(f"{num} 0 obj\n".encode("latin-1") + data + b"\nendobj\n")
+
+    font_obj_num = 3 + num_pages * 2
+
+    # 1. Catalog
+    write_obj(1, b"<< /Type /Catalog /Pages 2 0 R >>")
+
+    # 2. Pages list
+    kids_str = " ".join(f"{3 + i * 2} 0 R" for i in range(num_pages))
+    write_obj(2, f"<< /Type /Pages /Kids [{kids_str}] /Count {num_pages} >>".encode("latin-1"))
+
+    # Each page
+    for i, chunk in enumerate(page_chunks):
+        page_obj_num = 3 + i * 2
+        content_obj_num = page_obj_num + 1
+
+        # Content stream
+        stream = "BT\n/F1 9 Tf\n50 790 Td\n13 TL\n"
+        for line in chunk:
+            esc = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+            stream += f"({esc}) '\n"
+        stream += "ET"
+        stream_bytes = stream.encode("latin-1", "replace")
+
+        # Page object
+        page_dict = f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Contents {content_obj_num} 0 R /Resources << /Font << /F1 {font_obj_num} 0 R >> >> >>".encode("latin-1")
+        write_obj(page_obj_num, page_dict)
+
+        # Content stream object
+        content_data = f"<< /Length {len(stream_bytes)} >>\nstream\n".encode("latin-1") + stream_bytes + b"\nendstream"
+        write_obj(content_obj_num, content_data)
+
+    # Font object
+    write_obj(font_obj_num, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+
+    # Xref & Trailer
+    total_objs = font_obj_num + 1
+    xref_offset = sum(len(b) for b in body)
+    xref = f"xref\n0 {total_objs}\n0000000000 65535 f \n"
+    for n in range(1, total_objs):
+        off = offsets[n]
+        xref += f"{off:010d} 00000 n \n"
+    trailer = f"trailer\n<< /Size {total_objs} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n"
+    body.append(xref.encode("latin-1"))
+    body.append(trailer.encode("latin-1"))
+
+    return b"".join(body)
+
+
+def generate_draft_court_pdf(
+    draft_dict: Dict[str, Any],
+    include_internal_notes: bool,
+    actor: AuthUser,
+) -> bytes:
+    """
+    Generate certified %PDF-1.4 binary document for court submission.
+    Enforces that internal audit notes are omitted unless authorized.
+    """
+    export_payload = generate_document_export_payload(
+        draft_dict=draft_dict,
+        include_internal_notes=include_internal_notes,
+        actor=actor,
+    )
+    return _build_pdf_1_4_bytes(export_payload["exported_text"])

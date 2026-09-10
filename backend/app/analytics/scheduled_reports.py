@@ -243,6 +243,22 @@ class ScheduledReportManager:
     @classmethod
     def trigger_schedule(cls, user: AuthUser, schedule_id: str) -> ScheduledExecutionRecord:
         """Manually execute a report schedule with strong ownership and jurisdiction enforcement."""
+        if user.role in (
+            Role.READ_ONLY_AUDITOR,
+            Role.ACCUSED_USER,
+            Role.FAMILY_GUARDIAN,
+            Role.POLICE_OFFICER,
+        ) or user.role not in (
+            Role.PLATFORM_ADMIN,
+            Role.GOV_ADMIN,
+            Role.DLSA_OFFICER,
+            Role.SUPERVISING_LEGAL_OFFICER,
+            Role.JAIL_OFFICER,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Role not authorized to trigger scheduled report executions.",
+            )
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(

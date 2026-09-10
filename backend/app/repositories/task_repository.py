@@ -47,6 +47,10 @@ class BaseTaskRepository(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def get_tasks_for_case(self, case_id: str) -> List[Dict[str, Any]]:
+        pass
+
+    @abc.abstractmethod
     def upsert_tasks(self, tasks: List[Dict[str, Any]]) -> bool:
         pass
 
@@ -60,6 +64,10 @@ class BaseTaskRepository(abc.ABC):
 
     @abc.abstractmethod
     def bulk_update_tasks(self, task_ids: List[str], updates: Dict[str, Any]) -> int:
+        pass
+
+    @abc.abstractmethod
+    def list_tasks(self, owner_role: Optional[str] = None) -> List[Dict[str, Any]]:
         pass
 
 
@@ -126,15 +134,39 @@ class SupabaseTaskRepository(BaseTaskRepository):
 
     def get_task_by_id(self, task_id: str) -> Optional[Dict[str, Any]]:
         from app.supabase_adapter import supa_get_task_by_id
-        return supa_get_task_by_id(task_id)
+        task = supa_get_task_by_id(task_id)
+        if not task:
+            task = SqliteTaskRepository().get_task_by_id(task_id)
+        return task
+
+    def get_tasks_for_case(self, case_id: str) -> List[Dict[str, Any]]:
+        tasks = []
+        try:
+            if self.client:
+                res = self.client.table("task_queue").select("*").eq("case_id", case_id).execute()
+                if res.data:
+                    tasks.extend(res.data)
+        except Exception as e:
+            logger.warning(f"Supabase get_tasks_for_case error: {e}")
+        # Merge with local sqlite tasks
+        sqlite_tasks = SqliteTaskRepository().get_tasks_for_case(case_id)
+        seen_ids = {t.get("id") for t in tasks if t.get("id")}
+        for st in sqlite_tasks:
+            if st.get("id") not in seen_ids:
+                tasks.append(st)
+        return tasks
 
     def upsert_tasks(self, tasks: List[Dict[str, Any]]) -> bool:
         from app.supabase_adapter import supa_upsert_task_queue_items
-        return supa_upsert_task_queue_items(tasks)
+        res = supa_upsert_task_queue_items(tasks)
+        try:
+            SqliteTaskRepository().upsert_tasks(tasks)
+        except Exception:
+            pass
+        return res
 
     def upsert_task(self, task: Dict[str, Any]) -> bool:
-        from app.supabase_adapter import supa_upsert_task_queue_items
-        return supa_upsert_task_queue_items([task])
+        return self.upsert_tasks([task])
 
     def update_task(self, task_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         from app.supabase_adapter import supa_update_task
@@ -143,6 +175,19 @@ class SupabaseTaskRepository(BaseTaskRepository):
     def bulk_update_tasks(self, task_ids: List[str], updates: Dict[str, Any]) -> int:
         from app.supabase_adapter import supa_bulk_update_tasks
         return supa_bulk_update_tasks(task_ids, updates)
+
+    def list_tasks(self, owner_role: Optional[str] = None) -> List[Dict[str, Any]]:
+        try:
+            if self.client:
+                q = self.client.table("task_queue").select("*")
+                if owner_role:
+                    q = q.eq("owner_role", owner_role)
+                res = q.execute()
+                if res.data:
+                    return res.data
+        except Exception as e:
+            logger.warning(f"Supabase list_tasks error: {e}")
+        return SqliteTaskRepository().list_tasks(owner_role=owner_role)
 
 
 class SqliteTaskRepository(BaseTaskRepository):
@@ -310,6 +355,15 @@ class SqliteTaskRepository(BaseTaskRepository):
         finally:
             conn.close()
 
+    def get_tasks_for_case(self, case_id: str) -> List[Dict[str, Any]]:
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            rows = cursor.execute("SELECT * FROM task_queue WHERE case_id = ?", (case_id,)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def upsert_tasks(self, tasks: List[Dict[str, Any]]) -> bool:
         if not tasks:
             return True
@@ -381,6 +435,20 @@ class SqliteTaskRepository(BaseTaskRepository):
             cursor.execute(f"UPDATE task_queue SET {', '.join(fields)} WHERE id IN ({placeholders})", vals)
             conn.commit()
             return cursor.rowcount
+        finally:
+            conn.close()
+
+    def list_tasks(self, owner_role: Optional[str] = None) -> List[Dict[str, Any]]:
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            if owner_role:
+                cursor.execute("SELECT * FROM task_queue WHERE owner_role = ?", (owner_role,))
+            else:
+                cursor.execute("SELECT * FROM task_queue")
+            rows = cursor.fetchall()
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in rows]
         finally:
             conn.close()
 

@@ -18,14 +18,22 @@ import {
   Hash,
   ShieldCheck,
   BookOpen,
+  ExternalLink,
+  GitBranch,
 } from "lucide-react";
 
 import {
   fetchCases,
   fetchMatterArtifacts,
+  fetchLegalDocumentDraftsForCase,
+  getDraftReadiness,
+  approveLegalDocumentDraft,
+  requestDraftRevisions,
   submitMatterApproval,
   requestMatterTransition,
   type CaseRecord,
+  type LegalDocumentDraft,
+  type DraftReadinessResult,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { UniversalTaskQueue } from "@/components/UniversalTaskQueue";
@@ -39,13 +47,15 @@ export function SupervisorWorkbench() {
   // Review Drawer State
   const [selectedCase, setSelectedCase] = useState<CaseRecord | null>(null);
   const [artifactsLoading, setArtifactsLoading] = useState(false);
+  const [selectedDraft, setSelectedDraft] = useState<LegalDocumentDraft | null>(null);
   const [selectedArtifact, setSelectedArtifact] = useState<any | null>(null);
+  const [readinessResult, setReadinessResult] = useState<DraftReadinessResult | null>(null);
   const [approvalComment, setApprovalComment] = useState("");
   const [revisionNotes, setRevisionNotes] = useState("");
   const [actionInProgress, setActionInProgress] = useState(false);
   const [actionNotice, setActionNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  // ── Role Authorization Guard ──────────────────────────────────────────────
+  // Authorization Guard
   if (user?.role !== "SUPERVISING_LEGAL_OFFICER" && user?.role !== "PLATFORM_ADMIN" && user?.role !== "GOV_ADMIN") {
     return <Navigate to="/dashboard" replace />;
   }
@@ -70,46 +80,70 @@ export function SupervisorWorkbench() {
   const handleOpenReview = async (c: CaseRecord) => {
     setSelectedCase(c);
     setArtifactsLoading(true);
+    setSelectedDraft(null);
     setSelectedArtifact(null);
+    setReadinessResult(null);
     setApprovalComment("Petition scrutinized against Section 479 BNSS. Grounds verified. Approved for official court filing.");
     setRevisionNotes("");
     try {
-      const res = await fetchMatterArtifacts(c.case_id);
+      // 1. Fetch from legal document drafts
+      const draftsList = await fetchLegalDocumentDraftsForCase(c.case_id).catch(() => [] as LegalDocumentDraft[]);
+      if (Array.isArray(draftsList) && draftsList.length > 0) {
+        const latestDraft = draftsList[draftsList.length - 1];
+        setSelectedDraft(latestDraft);
+        try {
+          const readiness = await getDraftReadiness(latestDraft.draft_id);
+          setReadinessResult(readiness);
+        } catch (e) {
+          console.warn("Could not load readiness for draft:", e);
+        }
+      }
+
+      // 2. Fetch from matter artifacts as fallback/additional metadata
+      const res = await fetchMatterArtifacts(c.case_id).catch(() => ({ artifacts: [] }));
       const list = res.artifacts || res || [];
       if (list.length > 0) {
         setSelectedArtifact(list[0]);
-      } else {
-        setSelectedArtifact(null);
       }
     } catch (err) {
       console.error("Failed to load artifacts:", err);
-      setSelectedArtifact(null);
     } finally {
       setArtifactsLoading(false);
     }
   };
 
   const handleSupervisoryApprove = async () => {
-    if (!selectedCase || !selectedArtifact) return;
+    if (!selectedCase) return;
+    if (readinessResult && !readinessResult.can_approve) {
+      setActionNotice({
+        type: "error",
+        message: `Approval blocked: Draft has ${readinessResult.total_blocking_issues} unresolved blocking readiness issues.`,
+      });
+      return;
+    }
+
     setActionInProgress(true);
     try {
-      const artVerId = selectedArtifact.artifact_version_id || `v1-${selectedCase.case_id}`;
-      await submitMatterApproval(selectedCase.case_id, {
-        artifact_id: selectedArtifact.artifact_id || `DRAFT-${selectedCase.case_id}`,
-        artifact_version_id: artVerId,
-        artifact_type: selectedArtifact.artifact_type || "BAIL_APPLICATION",
-        decision: "APPROVED",
-        approval_level: 2,
-        comment: approvalComment || "Supervisory Level-2 Approval granted.",
-      });
+      if (selectedDraft) {
+        await approveLegalDocumentDraft(selectedDraft.draft_id, approvalComment || "Supervisory Level-2 Approval granted.");
+      } else if (selectedArtifact) {
+        const artVerId = selectedArtifact.artifact_version_id || `v1-${selectedCase.case_id}`;
+        await submitMatterApproval(selectedCase.case_id, {
+          artifact_id: selectedArtifact.artifact_id || `DRAFT-${selectedCase.case_id}`,
+          artifact_version_id: artVerId,
+          artifact_type: selectedArtifact.artifact_type || "BAIL_APPLICATION",
+          decision: "APPROVED",
+          approval_level: 2,
+          comment: approvalComment || "Supervisory Level-2 Approval granted.",
+        });
 
-      // Synchronize state machine transition to APPROVED
-      await requestMatterTransition(
-        selectedCase.case_id,
-        "SUPERVISORY_APPROVE",
-        { artifact_version_id: artVerId },
-        approvalComment || "Supervisory Level-2 Approval granted."
-      );
+        await requestMatterTransition(
+          selectedCase.case_id,
+          "SUPERVISORY_APPROVE",
+          { artifact_version_id: artVerId },
+          approvalComment || "Supervisory Level-2 Approval granted."
+        );
+      }
 
       setActionNotice({
         type: "success",
@@ -128,34 +162,37 @@ export function SupervisorWorkbench() {
   };
 
   const handleRequestRevisions = async () => {
-    if (!selectedCase || !selectedArtifact) return;
+    if (!selectedCase) return;
     if (!revisionNotes.trim()) {
       alert("Please provide detailed revision instructions for the defense advocate.");
       return;
     }
     setActionInProgress(true);
     try {
-      const artVerId = selectedArtifact.artifact_version_id || `v1-${selectedCase.case_id}`;
-      await submitMatterApproval(selectedCase.case_id, {
-        artifact_id: selectedArtifact.artifact_id || `DRAFT-${selectedCase.case_id}`,
-        artifact_version_id: artVerId,
-        artifact_type: selectedArtifact.artifact_type || "BAIL_APPLICATION",
-        decision: "CHANGES_REQUESTED",
-        approval_level: 2,
-        comment: revisionNotes,
-      });
+      if (selectedDraft) {
+        await requestDraftRevisions(selectedDraft.draft_id, revisionNotes);
+      } else {
+        const artVerId = selectedArtifact?.artifact_version_id || `v1-${selectedCase.case_id}`;
+        await submitMatterApproval(selectedCase.case_id, {
+          artifact_id: selectedArtifact?.artifact_id || `DRAFT-${selectedCase.case_id}`,
+          artifact_version_id: artVerId,
+          artifact_type: selectedArtifact?.artifact_type || "BAIL_APPLICATION",
+          decision: "CHANGES_REQUESTED",
+          approval_level: 2,
+          comment: revisionNotes,
+        });
 
-      // Return state machine to HUMAN_REVIEW
-      await requestMatterTransition(
-        selectedCase.case_id,
-        "REQUEST_REVISIONS",
-        { comment: revisionNotes },
-        revisionNotes
-      );
+        await requestMatterTransition(
+          selectedCase.case_id,
+          "REQUEST_REVISIONS",
+          { comment: revisionNotes },
+          revisionNotes
+        );
+      }
 
       setActionNotice({
         type: "success",
-        message: `Revision directives dispatched to defense counsel for case ${selectedCase.case_id}. Matter returned to counsel queue.`,
+        message: `Revision directives dispatched to defense counsel for case ${selectedCase.case_id}. Matter returned to counsel queue with task assigned.`,
       });
       setSelectedCase(null);
       await loadCases();
@@ -189,6 +226,8 @@ export function SupervisorWorkbench() {
     (c) => (c.required_docs?.length || 0) > (c.present_docs?.length || 0)
   ).length;
 
+  const canApproveCurrent = !readinessResult || readinessResult.can_approve;
+
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
       {/* Header */}
@@ -207,7 +246,7 @@ export function SupervisorWorkbench() {
             Supervisory Review &amp; Legal Governance Desk
           </h1>
           <p className="text-xs font-sans text-muted-foreground mt-1 max-w-2xl">
-            Scrutinize counsel bail petitions, verify Section 479 BNSS eligibility grounds, authorize Level-2 supervisory approvals, issue revision directives, and resolve cross-district legal exceptions.
+            Scrutinize counsel bail petitions, verify Section 479 BNSS eligibility grounds, inspect readiness check results, authorize Level-2 supervisory approvals, and issue revision directives to panel advocates.
           </p>
         </div>
 
@@ -249,8 +288,8 @@ export function SupervisorWorkbench() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-card border-2 border-border p-4 rounded-sm space-y-1">
           <div className="text-[11px] font-mono text-muted-foreground uppercase">Pending Supervisory Approvals</div>
-          <div className="text-2xl font-serif font-bold text-red-600">{pendingApprovalsCount}</div>
-          <div className="text-[10px] font-mono text-red-600 flex items-center gap-1">
+          <div className="text-2xl font-serif font-bold text-foreground">{pendingApprovalsCount}</div>
+          <div className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
             <Clock className="w-3 h-3" /> Level-2 Supervisory Decision Required
           </div>
         </div>
@@ -263,14 +302,14 @@ export function SupervisorWorkbench() {
 
         <div className="bg-card border-2 border-border p-4 rounded-sm space-y-1">
           <div className="text-[11px] font-mono text-muted-foreground uppercase">Document Blockers</div>
-          <div className="text-2xl font-serif font-bold text-rose-600">{missingDocsCount}</div>
-          <div className="text-[10px] font-mono text-rose-600">Incomplete prison/court records</div>
+          <div className="text-2xl font-serif font-bold text-foreground">{missingDocsCount}</div>
+          <div className="text-[10px] font-mono text-muted-foreground">Incomplete prison/court records</div>
         </div>
 
         <div className="bg-card border-2 border-border p-4 rounded-sm space-y-1">
           <div className="text-[11px] font-mono text-muted-foreground uppercase">Statutory Rule Grounding</div>
-          <div className="text-2xl font-serif font-bold text-emerald-600 dark:text-emerald-400">BNSS Sec 479</div>
-          <div className="text-[10px] font-mono text-emerald-600">Strict NALSA &amp; SLSA adherence</div>
+          <div className="text-2xl font-serif font-bold text-foreground">BNSS Sec 479</div>
+          <div className="text-[10px] font-mono text-muted-foreground">Strict NALSA &amp; SLSA adherence</div>
         </div>
       </div>
 
@@ -383,7 +422,7 @@ export function SupervisorWorkbench() {
                       <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground font-mono">
                         <span>Assigned Advocate: <strong className="text-foreground">{c.assigned_lawyer || "Panel Advocate"}</strong></span>
                         <span>•</span>
-                        <span>Custody Served: <strong className="text-primary font-bold">{c.custody_days}d</strong></span>
+                        <span>Custody Served: <strong className="text-foreground font-bold">{c.custody_days}d</strong></span>
                         <span>•</span>
                         <span>Offenses: <strong className="text-foreground">{c.offense_sections?.join(", ") || "—"}</strong></span>
                       </div>
@@ -396,6 +435,13 @@ export function SupervisorWorkbench() {
                       >
                         <Eye className="w-3.5 h-3.5" /> Scrutinize &amp; Approve
                       </button>
+
+                      <Link
+                        to={`/documents?case_id=${c.case_id}`}
+                        className="px-3 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground border border-border rounded-sm text-xs font-serif font-semibold flex items-center gap-1 transition-colors"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> Document Workspace
+                      </Link>
 
                       <Link
                         to={`/case/${c.case_id}`}
@@ -413,7 +459,7 @@ export function SupervisorWorkbench() {
           {unassignedMattersCount > 0 && (
             <div className="p-4 bg-muted/40 border border-border rounded-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono">
               <div className="flex items-center gap-2 text-muted-foreground">
-                <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                <AlertCircle className="w-4 h-4 text-muted-foreground shrink-0" />
                 <span>
                   Notice: <strong className="text-foreground">{unassignedMattersCount} undertrial matters</strong> in this district currently await DLSA panel advocate assignment.
                 </span>
@@ -432,8 +478,8 @@ export function SupervisorWorkbench() {
       {/* TAB 3: Exceptions & Conflict Desk */}
       {activeTab === "exceptions" && (
         <div className="space-y-6">
-          <div className="p-4 bg-red-500/5 border border-border rounded-sm">
-            <h3 className="font-serif font-bold text-sm uppercase text-red-600 dark:text-red-400">
+          <div className="p-4 bg-card border border-border rounded-sm">
+            <h3 className="font-serif font-bold text-sm uppercase text-foreground">
               Institutional Exception Handling &amp; Conflict Resolution
             </h3>
             <p className="text-xs text-muted-foreground mt-0.5">
@@ -444,7 +490,7 @@ export function SupervisorWorkbench() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="p-5 border-2 border-border bg-card rounded-sm space-y-3">
               <div className="flex items-center gap-2 text-foreground font-serif font-bold text-sm uppercase">
-                <AlertCircle className="w-4 h-4 text-red-600" />
+                <AlertCircle className="w-4 h-4 text-primary" />
                 Identity Discrepancies &amp; Aliases
               </div>
               <p className="text-xs text-muted-foreground">
@@ -517,12 +563,20 @@ export function SupervisorWorkbench() {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => setSelectedCase(null)}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <Link
+                  to={`/documents?case_id=${selectedCase.case_id}`}
+                  className="px-2.5 py-1 text-xs font-mono font-bold border border-border bg-secondary hover:bg-secondary/80 rounded-sm flex items-center gap-1"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Open Workspace
+                </Link>
+                <button
+                  onClick={() => setSelectedCase(null)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {artifactsLoading ? (
@@ -536,11 +590,45 @@ export function SupervisorWorkbench() {
                   <div className="flex items-center justify-between text-xs font-mono text-muted-foreground">
                     <span className="font-bold uppercase">Draft Petition Text</span>
                     <span className="px-2 py-0.5 bg-secondary rounded border border-border text-[10px]">
-                      {selectedArtifact?.version_tag || "v1.0-counsel-signoff"}
+                      {selectedDraft?.version_number ? `Version ${selectedDraft.version_number}` : (selectedArtifact?.version_tag || "v1.0-counsel-signoff")}
                     </span>
                   </div>
 
-                  {!selectedArtifact ? (
+                  {/* Readiness Banner if available */}
+                  {readinessResult && (
+                    <div className={`p-3 border rounded-sm text-xs font-mono space-y-1.5 ${
+                      readinessResult.can_approve
+                        ? "bg-emerald-500/10 border-emerald-500/30 text-foreground"
+                        : "bg-red-500/10 border-red-500/30 text-foreground"
+                    }`}>
+                      <div className="flex items-center justify-between font-bold uppercase">
+                        <span className="flex items-center gap-1.5">
+                          {readinessResult.can_approve ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          ) : (
+                            <AlertTriangle className="w-4 h-4 text-red-600" />
+                          )}
+                          Readiness Evaluation: {readinessResult.can_approve ? "CLEARED FOR APPROVAL" : "BLOCKED (UNRESOLVED ISSUES)"}
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-card border border-border">
+                          Score: {readinessResult.readiness_score}%
+                        </span>
+                      </div>
+
+                      {readinessResult.blocking_issues && readinessResult.blocking_issues.length > 0 && (
+                        <div className="space-y-1 pt-1">
+                          <div className="text-[11px] font-bold text-red-600">Blocking Deficiencies:</div>
+                          <ul className="list-disc list-inside text-[11px] space-y-0.5 text-muted-foreground">
+                            {readinessResult.blocking_issues.map((issue: any, idx: number) => (
+                              <li key={idx}>{typeof issue === "string" ? issue : (issue.message || issue.field || JSON.stringify(issue))}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {!selectedDraft && !selectedArtifact ? (
                     <div className="p-8 text-center text-xs font-mono text-muted-foreground border border-dashed border-border rounded-sm">
                       <Scale className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
                       <div className="font-bold text-foreground">Pending Counsel Draft Submission</div>
@@ -550,17 +638,23 @@ export function SupervisorWorkbench() {
                     </div>
                   ) : (
                     <>
-                      <div className="p-4 bg-muted/30 border border-border rounded-sm font-mono text-xs whitespace-pre-wrap leading-relaxed max-h-[420px] overflow-y-auto">
-                        {selectedArtifact.content_text || "No draft content recorded."}
+                      <div className="p-4 bg-muted/30 border border-border rounded-sm font-mono text-xs whitespace-pre-wrap leading-relaxed max-h-[380px] overflow-y-auto">
+                        {selectedDraft?.content_text || selectedArtifact?.content_text || "No draft content recorded."}
                       </div>
 
                       <div className="p-3 bg-secondary/40 border border-border rounded-sm text-[11px] font-mono space-y-1">
                         <div className="flex items-center gap-1.5 text-muted-foreground">
                           <Hash className="w-3.5 h-3.5 text-primary shrink-0" />
-                          <span>Artifact Digest: <strong className="text-foreground select-all">{selectedArtifact.sha256_hash || "Not Recorded"}</strong></span>
+                          <span>Artifact Digest: <strong className="text-foreground select-all">{selectedDraft?.sha256_hash || selectedArtifact?.sha256_hash || "Not Recorded"}</strong></span>
                         </div>
-                        <div className="text-muted-foreground">
-                          Level-1 Counsel: <strong>{selectedCase.assigned_lawyer || "Assigned Legal Aid Advocate"}</strong>
+                        <div className="text-muted-foreground flex items-center justify-between">
+                          <span>Level-1 Counsel: <strong>{selectedCase.assigned_lawyer || "Assigned Legal Aid Advocate"}</strong></span>
+                          {selectedDraft?.parent_version_id && (
+                            <span className="flex items-center gap-1 text-[10px]">
+                              <GitBranch className="w-3 h-3 text-muted-foreground" />
+                              Parent: {selectedDraft.parent_version_id}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </>
@@ -578,8 +672,9 @@ export function SupervisorWorkbench() {
                       <div>Custody Counted: <strong className="text-foreground">{selectedCase.custody_days} days</strong></div>
                       <div>Offenses: <strong className="text-foreground">{selectedCase.offense_sections?.join(", ") || "—"}</strong></div>
                       <div>Delay Exclusions: <strong className="text-foreground">{selectedCase.excluded_delay_days || 0} days</strong></div>
+                      <div>Present Docs: <strong className="text-foreground">{selectedCase.present_docs?.join(", ") || "None"}</strong></div>
                       <div className="text-emerald-700 dark:text-emerald-400 font-bold flex items-center gap-1 mt-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Statutory threshold satisfied
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Statutory eligibility grounds verified
                       </div>
                     </div>
                   </div>
@@ -598,19 +693,24 @@ export function SupervisorWorkbench() {
                     />
                     <button
                       onClick={handleSupervisoryApprove}
-                      disabled={actionInProgress || !selectedArtifact}
-                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-mono text-xs font-bold uppercase rounded-sm flex items-center justify-center gap-2 shadow-sm transition-colors"
+                      disabled={actionInProgress || (!selectedDraft && !selectedArtifact) || !canApproveCurrent}
+                      className="w-full py-2.5 bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed font-mono text-xs font-bold uppercase rounded-sm flex items-center justify-center gap-2 shadow-sm transition-colors"
                     >
                       {actionInProgress ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                       Approve Petition (Supervisory Approval)
                     </button>
+                    {!canApproveCurrent && (
+                      <p className="text-[10px] font-mono text-red-600 text-center">
+                        Approval blocked until all readiness errors are resolved.
+                      </p>
+                    )}
                     <p className="text-[10px] font-mono text-muted-foreground text-center">
                       Authorizes assigned defense counsel to record official court filing.
                     </p>
                   </div>
 
                   <div className="border-t border-border pt-3 space-y-2">
-                    <label className="block uppercase text-[11px] font-mono font-bold text-red-600">
+                    <label className="block uppercase text-[11px] font-mono font-bold text-muted-foreground">
                       Request Counsel Revisions (Alternative)
                     </label>
                     <textarea
@@ -618,7 +718,7 @@ export function SupervisorWorkbench() {
                       value={revisionNotes}
                       onChange={(e) => setRevisionNotes(e.target.value)}
                       placeholder="Specify missing grounds, calculation errors, or case law directives..."
-                      className="w-full p-2 bg-input border border-border rounded-sm text-xs font-mono focus:outline-none focus:border-red-600"
+                      className="w-full p-2 bg-input border border-border rounded-sm text-xs font-mono focus:outline-none focus:border-primary"
                     />
                     <button
                       onClick={handleRequestRevisions}
@@ -628,6 +728,9 @@ export function SupervisorWorkbench() {
                       {actionInProgress ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5 text-primary" />}
                       Request Revisions from Counsel
                     </button>
+                    <p className="text-[10px] font-mono text-muted-foreground text-center">
+                      Preserves current draft version and assigns revision task to counsel.
+                    </p>
                   </div>
                 </div>
               </div>

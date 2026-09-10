@@ -23,6 +23,7 @@ from app.auth.user_store import AuthUser
 from app.workflow.state_machine import WorkflowStateMachine, TransitionRule
 from app.database import (
     get_db_connection,
+    get_case,
     get_case_version,
     execute_case_transition_tx,
     store_matter_approval,
@@ -212,6 +213,41 @@ class WorkflowService:
 
         # Specific check: SUPERVISORY_APPROVE (by SUPERVISING_LEGAL_OFFICER)
         if action == "SUPERVISORY_APPROVE":
+            # 1. Organization & District Check
+            case_obj = get_case(case_id)
+            if case_obj:
+                case_org = getattr(case_obj, "organization_id", None) or "org_dlsa_central"
+                user_org = getattr(actor, "org_id", "org_dlsa_central")
+                user_dist = (getattr(actor, "district", "") or "").lower()
+                if (
+                    case_org and user_org and case_org != "GLOBAL_DEFAULT"
+                    and user_org != "GLOBAL_DEFAULT" and case_org != user_org
+                    and "statewide" not in user_dist
+                ):
+                    raise PermissionError(f"Forbidden: Case '{case_id}' belongs to organization '{case_org}' which is outside your organization '{user_org}'.")
+                
+                auth_dists = [d.strip().lower() for d in (getattr(actor, "authorized_district_ids", None) or []) if d]
+                if user_dist and user_dist not in ("all", "all (statewide)") and user_dist not in auth_dists:
+                    auth_dists.append(user_dist)
+                case_dist = (getattr(case_obj, "district", None) or "").strip().lower()
+                if case_dist and auth_dists and "all" not in auth_dists and "all (statewide)" not in auth_dists:
+                    if not any(ad in case_dist or case_dist in ad for ad in auth_dists):
+                        raise PermissionError(f"Forbidden: Case '{case_id}' is outside your authorized supervisory district jurisdiction.")
+
+            # 2. Verify Readiness Check if Legal Document Draft exists
+            from app.database import list_legal_document_drafts_for_case, get_document_template_by_id, update_legal_document_draft
+            from app.services.document_validation import DocumentReadinessChecker
+            drafts = list_legal_document_drafts_for_case(case_id)
+            if drafts:
+                active_draft = drafts[-1]
+                template = get_document_template_by_id(active_draft.get("template_id", ""))
+                readiness = DocumentReadinessChecker.validate_draft(active_draft, active_draft.get("exact_case_facts"), template)
+                if not readiness.get("can_approve"):
+                    raise ValueError(
+                        f"Supervisory Approval Blocked: Draft petition has {readiness.get('total_blocking_issues')} blocking issues. "
+                        f"Issues: {readiness.get('blocking_issues')}"
+                    )
+
             if not artifact_version_id:
                 # Look up active artifact version if not explicitly passed
                 active_art = get_active_matter_artifact(case_id, payload.get("artifact_type", "BAIL_APPLICATION"))
@@ -241,6 +277,17 @@ class WorkflowService:
                         "provenance_tag": "OFFICIAL_PETITION",
                     })
             
+            # Lock active legal draft immutably
+            if drafts:
+                active_draft = drafts[-1]
+                update_legal_document_draft(active_draft["draft_id"], {
+                    "status": "APPROVED",
+                    "is_immutable": True,
+                    "approved_by": actor.full_name or actor.id,
+                    "approved_by_role": actor.role.value,
+                    "approved_at": datetime.datetime.utcnow().isoformat(),
+                })
+
             # Store Supervisory Approval (Level 2)
             store_matter_approval({
                 "approval_id": f"app_{uuid.uuid4().hex[:12]}",
@@ -260,6 +307,82 @@ class WorkflowService:
                 "is_valid": 1,
                 "metadata": {"action": action, "approved_by": actor.full_name},
             })
+
+        # Specific check: REQUEST_REVISIONS (by SUPERVISING_LEGAL_OFFICER)
+        if action == "REQUEST_REVISIONS":
+            if not comment or not comment.strip():
+                raise ValueError("Supervisory revision directives/comment are mandatory when requesting revisions.")
+            
+            # Store Supervisory Decision (CHANGES_REQUESTED)
+            store_matter_approval({
+                "approval_id": f"app_{uuid.uuid4().hex[:12]}",
+                "matter_id": case_id,
+                "actor_id": actor.id,
+                "actor_role": actor.role.value,
+                "organization_id": actor.org_id,
+                "created_at": datetime.datetime.utcnow().isoformat(),
+                "decided_at": datetime.datetime.utcnow().isoformat(),
+                "artifact_id": artifact_id or f"art_{case_id}_bail",
+                "artifact_version_id": artifact_version_id or f"ver_{case_id}",
+                "artifact_type": payload.get("artifact_type", "BAIL_APPLICATION"),
+                "decision": "CHANGES_REQUESTED",
+                "comment": comment,
+                "approval_level": 2,
+                "required_level": 2,
+                "is_valid": 1,
+                "metadata": {"action": action, "requested_by": actor.full_name},
+            })
+
+            # Update draft status if legal draft exists, preserving existing content
+            from app.database import list_legal_document_drafts_for_case, update_legal_document_draft
+            drafts = list_legal_document_drafts_for_case(case_id)
+            if drafts:
+                active_draft = drafts[-1]
+                comments = active_draft.get("reviewer_comments", [])
+                comments.append({
+                    "id": f"comment_{uuid.uuid4().hex[:8]}",
+                    "author_id": actor.id,
+                    "author_name": actor.full_name or actor.id,
+                    "role": actor.role.value,
+                    "comment": f"[SUPERVISORY REVISION DIRECTIVE]: {comment}",
+                    "created_at": datetime.datetime.utcnow().isoformat(),
+                })
+                update_legal_document_draft(active_draft["draft_id"], {
+                    "status": "REVISIONS_REQUESTED",
+                    "reviewer_comments": comments,
+                })
+
+            # Route operational revision task to assigned counsel in UniversalTaskQueue
+            try:
+                from app.repositories.task_repository import get_task_repository
+                repo = get_task_repository()
+                case_obj = get_case(case_id)
+                counsel_id = getattr(case_obj, "assigned_lawyer_id", None) or getattr(case_obj, "assigned_advocate_id", None)
+                counsel_name = getattr(case_obj, "assigned_lawyer", None) or getattr(case_obj, "assigned_advocate_name", None) or "Assigned Defense Counsel"
+                task_id = f"TASK-REV-{case_id}-{uuid.uuid4().hex[:6]}"
+                task_data = {
+                    "id": task_id,
+                    "case_id": case_id,
+                    "accused_name": getattr(case_obj, "name", case_id),
+                    "task_type": "REVISE_PETITION",
+                    "title": f"Revision Directives for {getattr(case_obj, 'name', case_id)}: {comment[:50]}",
+                    "description": f"Supervisory Revision Notes: {comment}",
+                    "owner_role": "DEFENSE_ADVOCATE",
+                    "owner_user_id": counsel_id or "demo_advocate",
+                    "owner_name": counsel_name,
+                    "priority": "HIGH",
+                    "due_date": (datetime.date.today() + datetime.timedelta(days=1)).isoformat(),
+                    "source": "SUPERVISORY_DIRECTIVE",
+                    "reason": comment,
+                    "status": "NEW",
+                    "escalation_path": "SUPERVISING_LEGAL_OFFICER",
+                    "facility": getattr(case_obj, "jail_location", ""),
+                    "district": getattr(case_obj, "district", ""),
+                    "custody_duration_days": getattr(case_obj, "custody_days", 0),
+                }
+                repo.upsert_task(task_data)
+            except Exception as e:
+                logger.warning(f"Could not persist revision task in task_repository: {e}")
 
         # Specific check: RECORD_FILING
         if action == "RECORD_FILING":
@@ -898,7 +1021,7 @@ class WorkflowService:
     def get_matter_timeline(cls, case_id: str) -> List[Dict[str, Any]]:
         """
         Retrieve unified chronological timeline with authoritative provenance badges:
-        👤 USER, ⚙️ SYSTEM, 🤖 AI, 🔄 EXTERNAL_SYNC
+        [USER], [SYSTEM], [AI], [EXTERNAL_SYNC]
         """
         conn = get_db_connection()
         cursor = conn.cursor()

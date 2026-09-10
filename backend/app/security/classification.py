@@ -59,6 +59,7 @@ ROLES_WITH_FULL_PII_ACCESS: Set[Role] = {
     Role.DEFENSE_ADVOCATE,
     Role.ACCUSED_USER,
     Role.FAMILY_GUARDIAN,
+    Role.JAIL_OFFICER,
 }
 
 ROLES_WITH_WORK_PRODUCT_ACCESS: Set[Role] = {
@@ -74,6 +75,8 @@ FORBIDDEN_WORK_PRODUCT_ROLES: Set[Role] = {
     Role.READ_ONLY_AUDITOR,
     Role.POLICE_OFFICER,
     Role.JAIL_OFFICER,
+    Role.ACCUSED_USER,
+    Role.FAMILY_GUARDIAN,
 }
 
 
@@ -92,6 +95,12 @@ def has_pii_clearance(user: AuthUser, case: Optional[Any] = None) -> bool:
     """Evaluate whether caller possesses Tier 2 Identity/Contact PII Clearance."""
     if user.role in (Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER):
         return True
+    if user.role == Role.JAIL_OFFICER:
+        if not case:
+            return True
+        from app.auth.policy import _facility_match
+        c_dict = case if isinstance(case, dict) else (case.model_dump() if hasattr(case, "model_dump") else dict(getattr(case, "__dict__", {})))
+        return _facility_match(user, c_dict)
     if user.role in (Role.ACCUSED_USER, Role.FAMILY_GUARDIAN) and case:
         case_id = getattr(case, "case_id", None) or (case.get("case_id") if isinstance(case, dict) else None)
         if user.linked_case_id and case_id and user.linked_case_id.lower() == str(case_id).lower():
@@ -128,12 +137,19 @@ def get_field_access_decision(role_or_user: Any, field_name: str) -> FieldDecisi
     f_lower = field_name.lower()
     # 1. Tier 1: Medical & Biometric
     if any(k in f_lower for k in ["medical", "health", "psychiatric", "biometric"]):
-        allowed = role in (Role.JAIL_OFFICER, Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER, Role.ACCUSED_USER)
+        if role == Role.JAIL_OFFICER:
+            return FieldDecision(
+                allowed=True,
+                tier=DataClassificationTier.TIER_1_MEDICAL_BIOMETRIC,
+                mask_required=True,
+                reason="Medical details are field-level restricted for custody desk; only operational flags available.",
+            )
+        allowed = role in (Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER, Role.ACCUSED_USER)
         return FieldDecision(
             allowed=allowed,
             tier=DataClassificationTier.TIER_1_MEDICAL_BIOMETRIC,
-            mask_required=False,
-            reason="Medical privacy protected; restricted to facility and primary legal officers.",
+            mask_required=not allowed,
+            reason="Medical privacy protected; restricted to primary legal aid and supervisory officers.",
         )
 
     # 2. Tier 2: Sensitive Identity PII & Family Contacts

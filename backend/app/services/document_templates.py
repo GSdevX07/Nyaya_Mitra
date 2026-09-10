@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 # Roles authorized to create or edit organization templates
 TEMPLATE_MAINTAINER_ROLES = {
-    Role.PLATFORM_ADMIN,
     Role.GOV_ADMIN,
     Role.SUPERVISING_LEGAL_OFFICER,
 }

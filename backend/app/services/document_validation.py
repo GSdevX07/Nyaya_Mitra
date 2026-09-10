@@ -60,7 +60,13 @@ class DocumentReadinessChecker:
         warnings.extend(factual_findings["warnings"])
 
         # 3. Uncited Legal Assertions Check
-        legal_findings = cls._check_uncited_legal_assertions(content_text, retrieved_sources, template, exact_case_facts)
+        legal_findings = cls._check_uncited_legal_assertions(
+            content_text,
+            retrieved_sources,
+            template,
+            exact_case_facts,
+            draft_dict.get("source_citations"),
+        )
         blocking_issues.extend(legal_findings["issues"])
         warnings.extend(legal_findings["warnings"])
 
@@ -213,6 +219,7 @@ class DocumentReadinessChecker:
         retrieved_sources: List[Dict[str, Any]],
         template: Optional[Dict[str, Any]],
         case_facts: Optional[Dict[str, Any]] = None,
+        source_citations: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Detect legal citations in draft that have no grounding in retrieved authorities or case facts."""
         issues: List[Dict[str, Any]] = []
@@ -242,26 +249,29 @@ class DocumentReadinessChecker:
         if template and template.get("statutory_ground"):
             corpus += " " + template["statutory_ground"].lower()
 
+        # Add source citations if present
+        if source_citations:
+            for sc in source_citations:
+                if isinstance(sc, dict):
+                    corpus += " " + str(sc.get("section", "")).lower() + " " + str(sc.get("statute", "")).lower()
+
         # Add offense sections from case facts
         if case_facts and case_facts.get("offense_sections"):
-            for sec_str in case_facts["offense_sections"]:
-                corpus += " " + str(sec_str).lower()
-
-        # Known fundamental statutory baselines always permitted without external citation chunk
-        COMMON_STATUTES = {
-            "479", "21", "22", "14", "19", "32", "226",  # Constitutional & Mandatory Bail baselines
-            "436", "436A", "437", "438", "439", "167", "187", "482", "528",  # Bail & Remand procedures
-            "379", "115", "302", "307", "420", "34", "120B",  # Canonical Indian criminal offences
-        }
+            off_sec = case_facts["offense_sections"]
+            if isinstance(off_sec, list):
+                for sec_str in off_sec:
+                    corpus += " " + str(sec_str).lower()
+            else:
+                corpus += " " + str(off_sec).lower()
 
         for sec in cited_sections:
             sec_clean = sec.strip()
-            if sec_clean not in COMMON_STATUTES and sec_clean.lower() not in corpus:
+            if sec_clean.lower() not in corpus:
                 issues.append({
                     "category": "UNCITED_LEGAL_ASSERTION",
                     "severity": "BLOCKING",
-                    "citation": f"Section {sec}",
-                    "message": f"Section/Article {sec} is cited in the draft but is not grounded in any retrieved legal source or statutory baseline.",
+                    "citation": f"Section/Article {sec}",
+                    "message": f"Section/Article {sec} is cited in the draft but is not grounded in any retrieved legal source, template statutory ground, or charged case offense.",
                 })
 
         return {"issues": issues, "warnings": warnings}

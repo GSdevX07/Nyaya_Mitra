@@ -16,13 +16,19 @@ import {
   ChevronRight,
   Shield,
   FileQuestion,
+  Send,
+  KeyRound,
+  Check,
 } from "lucide-react";
 import {
   fetchCases,
   fetchEligibleCounselApi,
   assignCounselToCaseApi,
   expediteCoordinationApi,
+  fetchMyActiveDelegationApi,
+  requestDocumentPreparationApi,
   type CaseRecord,
+  type InstitutionalDelegation,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { UniversalTaskQueue } from "../components/UniversalTaskQueue";
@@ -85,7 +91,7 @@ export function DlsaWorkspace() {
   const [loading, setLoading] = useState(true);
   const [cases, setCases] = useState<CaseRecord[]>([]);
   const [activeTab, setActiveTab] = useState<
-    "queue" | "assignment" | "tracking" | "missing_docs" | "hearings" | "overdue"
+    "queue" | "assignment" | "tracking" | "missing_docs" | "doc_prep" | "hearings" | "overdue"
   >("queue");
 
   // Search, Filters & Pagination
@@ -113,6 +119,17 @@ export function DlsaWorkspace() {
   const [coordCase, setCoordCase] = useState<CaseRecord | null>(null);
   const [coordNotes, setCoordNotes] = useState("");
   const [coordinating, setCoordinating] = useState(false);
+
+  // Document Preparation Requisition Modal State
+  const [showReqModal, setShowReqModal] = useState(false);
+  const [reqCase, setReqCase] = useState<CaseRecord | null>(null);
+  const [reqTemplateId, setReqTemplateId] = useState<string>("tmpl_bnss_479_bail_v1");
+  const [reqUrgency, setReqUrgency] = useState<"NORMAL" | "URGENT" | "CRITICAL_479">("NORMAL");
+  const [reqReason, setReqReason] = useState<string>("");
+  const [reqSending, setReqSending] = useState(false);
+  const [delegationInfo, setDelegationInfo] = useState<InstitutionalDelegation | null>(null);
+  const [delegationLoading, setDelegationLoading] = useState(false);
+
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -253,6 +270,92 @@ export function DlsaWorkspace() {
       (c.district || "").toLowerCase() === filterDistrict.toLowerCase();
     return matchesSearch && matchesDistrict;
   });
+
+  const docPrepCases = cases.filter(
+    (c) =>
+      c.status !== "DISCHARGED" &&
+      c.status !== "RELEASE_CONFIRMED" &&
+      (c.custody_days > 60 || isSec479Eligible(c) || !!c.assigned_lawyer || c.status === "LEGAL_AID_REQUIRED" || c.status === "COUNSEL_ASSIGNED")
+  );
+
+  const filteredDocPrep = docPrepCases.filter((c) => {
+    const q = search.toLowerCase();
+    const matchesSearch =
+      !q ||
+      c.name.toLowerCase().includes(q) ||
+      c.case_id.toLowerCase().includes(q) ||
+      (c.assigned_lawyer && c.assigned_lawyer.toLowerCase().includes(q)) ||
+      (c.fir_number && c.fir_number.toLowerCase().includes(q));
+    const matchesDistrict =
+      !filterDistrict ||
+      (c.district || "").toLowerCase() === filterDistrict.toLowerCase();
+    return matchesSearch && matchesDistrict;
+  });
+
+  const handleOpenReqModal = async (c: CaseRecord) => {
+    setReqCase(c);
+    setReqTemplateId("tmpl_bnss_479_bail_v1");
+    setReqUrgency(isSec479Eligible(c) ? "CRITICAL_479" : c.custody_days > 120 ? "URGENT" : "NORMAL");
+    setReqReason(
+      isSec479Eligible(c)
+        ? `Accused has completed ${c.custody_days} days in detention. Meets statutory threshold under Section 479 BNSS, 2023. Urgent bail petition required.`
+        : `Formal legal aid petition drafting requisitioned by DLSA Officer for ${c.case_id}.`
+    );
+    setShowReqModal(true);
+    setDelegationLoading(true);
+    setDelegationInfo(null);
+    try {
+      const res = await fetchMyActiveDelegationApi({
+        case_id: c.case_id,
+        capability: "CAN_INITIATE_DOCUMENT_DRAFT",
+        document_type: "tmpl_bnss_479_bail_v1",
+      });
+      if (res.is_delegated && res.delegation) {
+        setDelegationInfo(res.delegation);
+      }
+    } catch (err) {
+      console.error("Failed to check delegation state:", err);
+    } finally {
+      setDelegationLoading(false);
+    }
+  };
+
+  const handleConfirmRequisition = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reqCase) return;
+    setReqSending(true);
+    try {
+      const missingList: string[] = [];
+      if (!hasChargeSheet(reqCase)) missingList.push("charge_sheet");
+      if (!hasCustodyCertificate(reqCase)) missingList.push("custody_certificate");
+
+      const res = await requestDocumentPreparationApi({
+        case_id: reqCase.case_id,
+        template_id: reqTemplateId,
+        document_type: reqTemplateId.includes("bail") ? "BAIL_APPLICATION" : reqTemplateId.includes("remand") ? "REMAND_OBJECTION" : "CUSTODY_CERTIFICATE_AFFIDAVIT",
+        urgency: reqUrgency,
+        reason: reqReason,
+        missing_prerequisites: missingList,
+        assigned_counsel_id: reqCase.assigned_lawyer || undefined,
+        assigned_counsel_name: reqCase.assigned_lawyer || undefined,
+      });
+
+      setShowReqModal(false);
+      setActionNotice({
+        type: "success",
+        message: res.message || `Document preparation requisition routed to assigned counsel for ${reqCase.case_id}. Task created.`,
+      });
+      loadData();
+    } catch (err: any) {
+      setActionNotice({
+        type: "error",
+        message: err.message || "Failed to dispatch document preparation request.",
+      });
+    } finally {
+      setReqSending(false);
+    }
+  };
+
 
   const handleOpenAssignModal = async (c: CaseRecord) => {
     if (c.status !== "LEGAL_AID_REQUIRED") {
@@ -536,6 +639,21 @@ export function DlsaWorkspace() {
         >
           <FileQuestion className="w-3.5 h-3.5" />
           Missing-Doc Coordination ({missingDocCases.length})
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab("doc_prep");
+            setCurrentPage(1);
+          }}
+          className={`px-4 py-2 border-b-2 font-bold transition-colors flex items-center gap-1.5 ${
+            activeTab === "doc_prep"
+              ? "border-foreground text-foreground bg-secondary/30"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Send className="w-3.5 h-3.5" />
+          Document Routing Desk ({docPrepCases.length})
         </button>
 
         <button
@@ -964,7 +1082,147 @@ export function DlsaWorkspace() {
         </div>
       )}
 
-      {/* TAB 5: Hearings Follow-Up */}
+      {/* TAB 5: Document Preparation & Routing Desk */}
+      {activeTab === "doc_prep" && (
+        <div className="space-y-4">
+          <div className="p-3.5 bg-card border border-border rounded-sm text-xs font-mono text-muted-foreground flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Send className="w-4 h-4 text-foreground" />
+              <span>
+                Requisition and route legal drafting requirements to assigned defense counsel. Direct drafting requires explicit institutional delegation.
+              </span>
+            </div>
+            <span className="font-bold text-foreground">{docPrepCases.length} Matters in Drafting Scope</span>
+          </div>
+
+          <div className="border border-border rounded-sm overflow-hidden bg-card">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-secondary/60 border-b border-border text-[11px] font-mono uppercase text-muted-foreground">
+                  <th className="p-3">Accused & Case ID</th>
+                  <th className="p-3">Document Needed</th>
+                  <th className="p-3">Assigned Defense Counsel</th>
+                  <th className="p-3">Prerequisites Status</th>
+                  <th className="p-3">Custody Days</th>
+                  <th className="p-3 text-right">Requisition Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filteredDocPrep.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-muted-foreground font-mono text-xs">
+                      No matters currently requiring document drafting matching filter criteria.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredDocPrep
+                    .slice((currentPage - 1) * pageSize, currentPage * pageSize)
+                    .map((c) => (
+                    <tr key={c.case_id} className="hover:bg-secondary/20 transition-colors">
+                      <td className="p-3">
+                        <Link
+                          to={`/case/${c.case_id}`}
+                          className="font-serif font-bold text-sm text-foreground hover:underline"
+                        >
+                          {c.name}
+                        </Link>
+                        <div className="font-mono text-[10px] text-muted-foreground mt-0.5">
+                          {c.case_id} {c.fir_number && `• FIR: ${c.fir_number}`}
+                        </div>
+                      </td>
+
+                      <td className="p-3 font-mono text-xs">
+                        <div className="font-bold text-foreground">
+                          {isSec479Eligible(c)
+                            ? "Formal Bail Application (§479 BNSS)"
+                            : "Regular Bail Petition"}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {isSec479Eligible(c) ? "Statutory Threshold Reached" : "Standard Legal Aid Drafting"}
+                        </div>
+                      </td>
+
+                      <td className="p-3">
+                        {c.assigned_lawyer ? (
+                          <div>
+                            <div className="font-bold text-foreground font-sans">{c.assigned_lawyer}</div>
+                            <div className="text-[10px] font-mono text-muted-foreground">Assigned Panel Counsel</div>
+                          </div>
+                        ) : (
+                          <div>
+                            <span className="text-red-600 font-mono font-bold">Unassigned</span>
+                            <div className="text-[10px] font-mono text-muted-foreground">Counsel Required First</div>
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="p-3 font-mono text-[10px] space-y-0.5">
+                        <div className="flex items-center gap-1">
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span>FIR Record</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {hasChargeSheet(c) ? (
+                            <Check className="w-3 h-3 text-emerald-600" />
+                          ) : (
+                            <AlertTriangle className="w-3 h-3 text-red-600" />
+                          )}
+                          <span className={!hasChargeSheet(c) ? "text-red-600 font-bold" : ""}>
+                            Charge Sheet {hasChargeSheet(c) ? "" : "(Pending)"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {hasCustodyCertificate(c) ? (
+                            <Check className="w-3 h-3 text-emerald-600" />
+                          ) : (
+                            <AlertTriangle className="w-3 h-3 text-red-600" />
+                          )}
+                          <span className={!hasCustodyCertificate(c) ? "text-red-600 font-bold" : ""}>
+                            Custody Cert {hasCustodyCertificate(c) ? "" : "(Missing)"}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="p-3 font-mono">
+                        <div className="font-bold text-foreground">{c.custody_days} days</div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {c.jail_location || "Custody"}
+                        </div>
+                      </td>
+
+                      <td className="p-3 text-right">
+                        {c.assigned_lawyer ? (
+                          <button
+                            onClick={() => handleOpenReqModal(c)}
+                            className="px-3 py-1.5 bg-primary text-primary-foreground font-mono text-xs font-bold rounded-sm inline-flex items-center gap-1.5 hover:opacity-90 shadow-sm"
+                          >
+                            <Send className="w-3.5 h-3.5" /> Send to Assigned Counsel
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleOpenAssignModal(c)}
+                            className="px-3 py-1.5 bg-secondary text-foreground border border-border font-mono text-xs font-bold rounded-sm inline-flex items-center gap-1.5 hover:bg-secondary/80"
+                          >
+                            <UserPlus className="w-3.5 h-3.5" /> Assign Counsel First
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+            <PaginationBar
+              currentPage={currentPage}
+              totalItems={filteredDocPrep.length}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* TAB 6: Hearings Follow-Up */}
       {activeTab === "hearings" && (
         <div className="space-y-4">
           <div className="border border-border rounded-sm overflow-hidden bg-card">
@@ -1318,6 +1576,181 @@ export function DlsaWorkspace() {
           </div>
         </div>
       )}
+
+      {/* DOCUMENT PREPARATION REQUISITION MODAL */}
+      {showReqModal && reqCase && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-card border-2 border-border p-6 rounded-sm max-w-lg w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2 text-foreground">
+                <Send className="w-5 h-5 text-primary" />
+                <h3 className="text-base font-serif font-bold">
+                  Document Preparation Request
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowReqModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-secondary/30 rounded-sm border border-border text-xs font-mono space-y-1">
+              <div>
+                <strong>Case:</strong> {reqCase.case_id} — {reqCase.name}
+              </div>
+              <div>
+                <strong>Custody:</strong> {reqCase.custody_days} days ({reqCase.jail_location || "Facility"})
+              </div>
+              <div>
+                <strong>Assigned Counsel:</strong>{" "}
+                {reqCase.assigned_lawyer ? (
+                  <span className="font-bold text-foreground">{reqCase.assigned_lawyer}</span>
+                ) : (
+                  <span className="text-red-600 font-bold">Unassigned (will route to panel supervisory queue)</span>
+                )}
+              </div>
+            </div>
+
+            {/* Prerequisites Status Checklist */}
+            <div className="p-3 border border-border rounded-sm bg-card space-y-1.5 text-xs font-mono">
+              <div className="text-[11px] uppercase font-bold text-muted-foreground">Required Operational Prerequisites:</div>
+              <div className="grid grid-cols-3 gap-2 pt-1 text-[11px]">
+                <div className="flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>FIR Verified</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {hasChargeSheet(reqCase) ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                  )}
+                  <span className={!hasChargeSheet(reqCase) ? "text-red-600 font-bold" : ""}>
+                    Charge Sheet {hasChargeSheet(reqCase) ? "(Available)" : "Pending"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {hasCustodyCertificate(reqCase) ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                  )}
+                  <span className={!hasCustodyCertificate(reqCase) ? "text-red-600 font-bold" : ""}>
+                    Custody Cert {hasCustodyCertificate(reqCase) ? "(Available)" : "Missing"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Active Delegation Metadata Well if Present */}
+            {delegationLoading ? (
+              <div className="p-2 text-center text-xs font-mono text-muted-foreground flex items-center justify-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" /> Verifying institutional delegation state...
+              </div>
+            ) : delegationInfo ? (
+              <div className="p-3 border-2 border-primary/40 bg-primary/5 rounded-sm text-xs font-mono space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-bold text-foreground">
+                    <KeyRound className="w-3.5 h-3.5 text-primary" />
+                    <span>Institutional Delegation: ACTIVE</span>
+                  </div>
+                  <span className="px-1.5 py-0.5 rounded bg-primary/20 text-primary text-[10px] font-bold">
+                    CAN_INITIATE_DOCUMENT_DRAFT
+                  </span>
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  Valid Until: <strong>{delegationInfo.valid_until.substring(0, 10)}</strong> • Scope: <strong>{delegationInfo.allowed_case_scope.join(", ")}</strong>
+                </div>
+                <div className="pt-1">
+                  <Link
+                    to={`/workspace/documents?case_id=${reqCase.case_id}&template_id=${reqTemplateId}`}
+                    className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline"
+                  >
+                    Open Directly in Drafting Workspace (Delegated Mode) <ChevronRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
+            ) : null}
+
+            <form onSubmit={handleConfirmRequisition} className="space-y-4 text-xs font-mono">
+              <div>
+                <label className="block uppercase text-muted-foreground mb-1 font-bold">
+                  Document Type Needed *
+                </label>
+                <select
+                  value={reqTemplateId}
+                  onChange={(e) => setReqTemplateId(e.target.value)}
+                  className="w-full p-2 bg-input border border-border rounded-sm font-mono text-xs text-foreground"
+                >
+                  <option value="tmpl_bnss_479_bail_v1">
+                    Formal Bail Application under Section 479 BNSS, 2023
+                  </option>
+                  <option value="tmpl_remand_objection_v1">
+                    Formal Objection to Police Custody Remand Application
+                  </option>
+                  <option value="tmpl_custody_cert_affidavit_v1">
+                    Affidavit in Support of Custody Certificate Verification
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block uppercase text-muted-foreground mb-1 font-bold">
+                  Urgency / Priority *
+                </label>
+                <select
+                  value={reqUrgency}
+                  onChange={(e) => setReqUrgency(e.target.value as any)}
+                  className="w-full p-2 bg-input border border-border rounded-sm font-mono text-xs text-foreground"
+                >
+                  <option value="NORMAL">Normal (Standard Case Queue)</option>
+                  <option value="URGENT">Urgent (Upcoming Production / Hearing)</option>
+                  <option value="CRITICAL_479">Critical (Section 479 Statutory Threshold Exceeded)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block uppercase text-muted-foreground mb-1 font-bold">
+                  Requisition Directions &amp; Legal Aid Grounds *
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  value={reqReason}
+                  onChange={(e) => setReqReason(e.target.value)}
+                  placeholder="State specific legal aid grounds, statutory duration calculations, or instructions for counsel..."
+                  className="w-full p-2 bg-input border border-border rounded-sm font-mono text-xs"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setShowReqModal(false)}
+                  className="px-4 py-2 border border-border rounded-sm hover:bg-secondary transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={reqSending}
+                  className="px-4 py-2 bg-primary text-primary-foreground font-bold rounded-sm flex items-center gap-1.5 hover:opacity-90 disabled:opacity-50 shadow-sm"
+                >
+                  {reqSending ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Send className="w-3.5 h-3.5" />
+                  )}
+                  Send to Assigned Counsel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

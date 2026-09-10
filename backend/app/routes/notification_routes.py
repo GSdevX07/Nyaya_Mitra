@@ -225,6 +225,11 @@ def dispatch_notification_endpoint(
     Dispatches an event notification through the governed notification engine.
     Applies idempotency check, quiet-hours rules, and adapter execution.
     """
+    if current_user.role == Role.READ_ONLY_AUDITOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Read-Only Auditor cannot dispatch notifications.",
+        )
     return NotificationService.dispatch(
         event_type=req.event_type,
         payload=req.payload,

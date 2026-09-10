@@ -8,6 +8,7 @@ Strictly enforces server-side role and jurisdictional boundaries.
 
 from __future__ import annotations
 import sqlite3
+import json
 import datetime
 import logging
 import uuid
@@ -31,6 +32,8 @@ from app.models.tasks import (
     CustodyEventRequest,
     AccusedProfileUpdateRequest,
     PrisonReleaseConfirmationRequest,
+    FIRRecordIntakeRequest,
+    FIRRecordUpdateRequest,
 )
 from app.repositories.task_repository import get_task_repository
 
@@ -371,7 +374,41 @@ class TaskService:
                         "is_consequential": 1,
                     })
 
-                # 9. DLSA: Hearing Follow-up & Court Production
+                # 9. Police Officer: Investigation Final Report & Remand Management
+                has_charge_sheet = any("charge" in d.lower() for d in present_docs)
+                if not has_charge_sheet and status not in ("CLOSED", "POST_RELEASE_FOLLOW_UP", "RELEASED", "POST_RELEASE_PRESERVED"):
+                    due_date = (today + datetime.timedelta(days=7)).isoformat()
+                    station_name = getattr(case, "police_station", None) or "Designated Police Station"
+                    st_id = getattr(case, "police_station_id", None)
+                    tasks_to_sync.append({
+                        "id": f"TASK-{cid}-POLICE-INVESTIGATION",
+                        "case_id": cid,
+                        "accused_name": cname,
+                        "task_type": "SUBMIT_CHARGE_SHEET",
+                        "title": f"Submit Investigation Final Report: {cname}",
+                        "description": f"Submit final investigation report / charge sheet under Sec 193 BNSS / 173 CrPC for FIR {getattr(case, 'fir_number', 'Record')}.",
+                        "owner_role": "POLICE_OFFICER",
+                        "owner_user_id": None,
+                        "owner_name": f"{station_name} IO",
+                        "priority": "HIGH" if custody_days > 60 else "MEDIUM",
+                        "due_date": due_date,
+                        "source": "POLICE_INVESTIGATION_DESK",
+                        "reason": f"Investigation in progress for FIR {getattr(case, 'fir_number', cid)}. Section 193 BNSS charge sheet submission required.",
+                        "status": "PENDING_ACTION",
+                        "escalation_path": "Investigating Officer -> Station House Officer -> ACP",
+                        "facility": station_name,
+                        "district": district,
+                        "custody_duration_days": custody_days,
+                        "document_completeness_pct": completeness_pct,
+                        "has_data_conflict": has_conflict,
+                        "legal_aid_need": legal_aid_need,
+                        "assignment_status": assignment_status,
+                        "matter_status": status,
+                        "hearing_date": hearing_date,
+                        "is_consequential": 0,
+                    })
+
+                # 10. DLSA: Hearing Follow-up & Court Production
                 if hearing_date and status in ("FILED", "HEARING_SCHEDULED", "ORDER_RECEIVED"):
                     tasks_to_sync.append({
                         "id": f"TASK-{cid}-HEARING-FOLLOWUP",
@@ -497,8 +534,9 @@ class TaskService:
         """Update task status, priority, or owner for safe, non-consequential workflow adjustments."""
         repo = get_task_repository()
         task = repo.get_task_by_id(task_id)
-        if not task:
-            raise LookupError(f"Task '{task_id}' not found.")
+        # Read-Only Auditor cannot mutate tasks
+        if current_user.role == Role.READ_ONLY_AUDITOR:
+            raise PermissionError("Forbidden: Read-Only Auditor cannot mutate operational tasks.")
 
         # Prohibit mutating consequential tasks through generic task update
         if task.get("is_consequential") and updates.get("status") in ("COMPLETED", "APPROVED", "FILED", "RELEASED"):
@@ -544,6 +582,9 @@ class TaskService:
         STRICT GUARANTEE: Legally consequential actions (approvals, filings, releases, closures)
         are unconditionally REJECTED with HTTP 400.
         """
+        if current_user.role == Role.READ_ONLY_AUDITOR:
+            raise PermissionError("Forbidden: Read-Only Auditor cannot execute operational task bulk actions.")
+
         consequential_actions = {
             "SUPERVISORY_APPROVE", "APPROVE", "APPROVE_DRAFT",
             "RECORD_FILING", "FILE_IN_COURT", "FILE",
@@ -621,10 +662,10 @@ class TaskService:
         if current_user.role != Role.JAIL_OFFICER:
             raise PermissionError("Forbidden: Only authorized Jail Officers can intake custody records.")
 
-        user_facs = getattr(current_user, "facility_ids", []) or []
-        if user_facs and data.facility_id not in user_facs and not any(f in data.facility_id for f in user_facs):
+        from app.auth.policy import _facility_match
+        if not _facility_match(current_user, {"facility_id": data.facility_id}):
             raise PermissionError(
-                f"Forbidden: Facility '{data.facility_id}' is outside your authorized correctional facilities: {user_facs}."
+                f"Forbidden: Facility '{data.facility_id}' is outside your authorized correctional facilities: {getattr(current_user, 'facility_ids', [])}."
             )
 
         conn = get_db_connection()
@@ -810,10 +851,10 @@ class TaskService:
         if not case:
             raise LookupError(f"Case '{case_id}' not found.")
 
-        user_facs = getattr(current_user, "facility_ids", []) or []
-        case_fac = getattr(case, "jail_location", "") or getattr(case, "facility_id", "")
-        if user_facs and case_fac and not any(f in case_fac for f in user_facs):
-            raise PermissionError(f"Forbidden: Case '{case_id}' is outside your authorized facility.")
+        from app.auth.policy import _facility_match
+        c_dict = case.model_dump() if hasattr(case, "model_dump") else (case if isinstance(case, dict) else dict(getattr(case, "__dict__", {})))
+        if not _facility_match(current_user, c_dict):
+            raise PermissionError(f"Forbidden: Case '{case_id}' is outside your authorized facility jurisdiction.")
 
         import time
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -852,16 +893,37 @@ class TaskService:
         if current_user.role not in (Role.JAIL_OFFICER, Role.DLSA_OFFICER, Role.PLATFORM_ADMIN):
             raise PermissionError("Forbidden: You are not authorized to update accused profile records.")
 
+        if current_user.role == Role.JAIL_OFFICER:
+            case = get_case(case_id)
+            if case:
+                from app.auth.policy import _facility_match
+                c_dict = case.model_dump() if hasattr(case, "model_dump") else (case if isinstance(case, dict) else dict(getattr(case, "__dict__", {})))
+                if not _facility_match(current_user, c_dict):
+                    raise PermissionError(f"Forbidden: Accused person '{case_id}' is detained outside your authorized facility jurisdiction.")
+
         conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         try:
             cursor = conn.cursor()
 
             acc_id_slug = f"acc_{case_id.lower().replace('-', '_')}"
-            accused = cursor.execute("SELECT * FROM accused_persons WHERE id = ? OR id = ?", (case_id, acc_id_slug)).fetchone()
+            acc_id_raw = f"acc_{case_id.lower()}"
+            accused = cursor.execute(
+                "SELECT * FROM accused_persons WHERE id = ? OR id = ? OR id = ? OR id IN (SELECT accused_id FROM court_cases WHERE id = ?)",
+                (case_id, acc_id_slug, acc_id_raw, case_id),
+            ).fetchone()
             if not accused:
-                raise LookupError(f"Accused record '{case_id}' not found.")
-            real_acc_id = accused["id"]
+                case = get_case(case_id)
+                if not case:
+                    raise LookupError(f"Accused record '{case_id}' not found.")
+                real_acc_id = acc_id_slug
+                cursor.execute(
+                    "INSERT INTO accused_persons (id, full_name, gender, permanent_address) VALUES (?, ?, ?, ?)",
+                    (real_acc_id, case.name, "Male", case.permanent_address or "Delhi"),
+                )
+                conn.commit()
+            else:
+                real_acc_id = accused["id"]
 
             fields = []
             vals = []
@@ -983,11 +1045,16 @@ class TaskService:
         if not case:
             raise LookupError(f"Case '{case_id}' not found.")
 
+        if not data.gate_pass_number or not data.gate_pass_number.strip():
+            raise ValueError("Gate Pass / Discharge Memo reference is mandatory.")
+        if not data.release_date or not data.release_date.strip():
+            raise ValueError("Release date is mandatory.")
+
         # Facility check
-        user_facs = getattr(current_user, "facility_ids", []) or []
-        case_fac = getattr(case, "jail_location", "") or getattr(case, "facility_id", "")
-        if user_facs and case_fac and not any(f in case_fac for f in user_facs):
-            raise PermissionError(f"Forbidden: Case '{case_id}' is outside your authorized facility.")
+        from app.auth.policy import _facility_match
+        c_dict = case.model_dump() if hasattr(case, "model_dump") else (case if isinstance(case, dict) else dict(getattr(case, "__dict__", {})))
+        if not _facility_match(current_user, c_dict):
+            raise PermissionError(f"Forbidden: Case '{case_id}' is outside your authorized facility jurisdiction.")
 
         from app.workflow.service import WorkflowService
         result = WorkflowService.execute_transition(
@@ -1033,7 +1100,7 @@ class TaskService:
             "case_id": case_id,
             "gate_pass_number": data.gate_pass_number,
             "release_date": data.release_date,
-            "canonical_state": result["canonical_state"],
+            "canonical_state": result.get("target_state") or result.get("current_state") or "POST_RELEASE_FOLLOW_UP",
             "message": f"Inmate physical discharge confirmed. Case '{case_id}' transitioned to post-release follow-up.",
         }
 
@@ -1156,4 +1223,266 @@ class TaskService:
             "task_id": task_id,
             "case_id": case.case_id,
             "message": f"Institutional coordination notice logged for Case {case.case_id}. Police Station and Jail Superintendent alerted.",
+        }
+
+    @classmethod
+    def intake_new_fir_record(
+        cls,
+        data: FIRRecordIntakeRequest,
+        current_user: AuthUser,
+    ) -> Dict[str, Any]:
+        """
+        Record a newly registered police FIR docket.
+        Strictly restricted to POLICE_OFFICER within their authorized station, district, and organization.
+        """
+        if current_user.role != Role.POLICE_OFFICER:
+            raise PermissionError("Forbidden: Only authorized Police Officers can register FIR records.")
+
+        from app.auth.policy import _police_scope_match
+        resource_check = {
+            "police_station_id": data.police_station_id or getattr(current_user, "police_station_id", ""),
+            "police_station": data.police_station,
+            "district": data.district,
+            "org_id": getattr(current_user, "org_id", ""),
+        }
+        if not _police_scope_match(current_user, resource_check):
+            raise PermissionError(
+                f"Forbidden: Station '{data.police_station}' / District '{data.district}' is outside your authorized jurisdiction."
+            )
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+
+            import time
+            cid = f"UTP-P{int(time.time()) % 10000:04d}"
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            today_iso = datetime.date.today().isoformat()
+            fir_id = f"FIR-{cid}"
+
+            station_id = data.police_station_id or getattr(current_user, "police_station_id", "") or "ps_station"
+
+            # 1. Insert into accused_persons
+            cursor.execute("""
+                INSERT INTO accused_persons (
+                    id, full_name, permanent_address, created_at, updated_at
+                ) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """, (
+                cid, data.accused_name, data.district
+            ))
+
+            # 2. Insert into firs
+            cursor.execute("""
+                INSERT INTO firs (
+                    id, fir_number, police_station, police_station_id, district, state, filing_date, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (
+                fir_id, data.fir_number, data.police_station, station_id, data.district, data.state or "Delhi", data.filing_date or today_iso
+            ))
+
+            # 3. Insert into court_cases
+            cursor.execute("""
+                INSERT INTO court_cases (
+                    id, case_number, accused_id, fir_id, organization_id, court_name,
+                    police_station_id, district, state, legal_code, current_status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """, (
+                f"CC-{cid}", data.fir_number, cid, fir_id, getattr(current_user, "org_id", "org_dlsa_central"),
+                data.court_name or "Competent Remand Court", station_id, data.district,
+                data.state or "Delhi", "BNS_2023", "INTAKE_PENDING"
+            ))
+
+            # 4. Insert into cases
+            case_dict = {
+                "case_id": cid,
+                "name": data.accused_name,
+                "accused_name": data.accused_name,
+                "fir_number": data.fir_number,
+                "police_station": data.police_station,
+                "police_station_id": station_id,
+                "offense_sections": data.offense_sections or ["BNS 303"],
+                "arrest_date": data.arrest_date or data.filing_date or today_iso,
+                "custody_days": 1 if data.arrest_date else 0,
+                "max_sentence_days_for_offense": 1095,
+                "court_name": data.court_name or "Competent Remand Court",
+                "district": data.district,
+                "state": data.state or "Delhi",
+                "jail_location": "Central Jail, Under Undertrial Remand",
+                "assignment_status": "AVAILABLE",
+                "assigned_lawyer": None,
+                "assigned_lawyer_id": None,
+                "status": "INTAKE",
+                "current_status": "INTAKE",
+                "legal_code": "BNS_2023",
+                "missing_docs": ["Charge Sheet", "Remand Sheet"],
+                "present_docs": ["FIR"],
+                "charge_sheet_status": data.charge_sheet_status or "PENDING_INVESTIGATION",
+                "remand_status": data.remand_status or "INITIAL_REMAND",
+                "investigating_officer": data.investigating_officer or current_user.full_name or "Station IO",
+                "incident_details": data.incident_details or "Registered at station desk.",
+                "timeline": [
+                    {
+                        "id": f"EV-{cid}-01",
+                        "timestamp": now_iso,
+                        "event_type": "POLICE_FIR_INTAKE",
+                        "title": f"FIR Registered: {data.fir_number}",
+                        "description": f"FIR registered at {data.police_station} under sections {', '.join(data.offense_sections or [])}.",
+                        "actor": current_user.full_name or "Police Officer",
+                        "actor_role": "Police Officer",
+                        "source": "Station FIR Register",
+                        "is_human_verified": True,
+                    }
+                ],
+                "data_provenance": {
+                    "fir": {
+                        "source": f"{data.police_station} Station Register",
+                        "type": "INSTITUTIONAL_ENTRY",
+                        "authoritative": True,
+                        "verification_state": "PENDING_VERIFICATION",
+                        "registered_by": current_user.id,
+                        "timestamp": now_iso,
+                    }
+                },
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            }
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO cases (case_id, data, status, assignment_status, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (cid, json.dumps(case_dict), "INTAKE", "AVAILABLE"))
+
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Notify DLSA of newly registered FIR docket
+        try:
+            add_notification(
+                case_id=cid,
+                title=f"New FIR Registered: {data.fir_number} ({data.police_station})",
+                message=f"Station {data.police_station} registered FIR {data.fir_number} for {data.accused_name}. Sections: {', '.join(data.offense_sections or [])}.",
+                notif_type="new_case",
+                target_role="DLSA_OFFICER",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send DLSA notification for FIR intake: {e}")
+
+        return {
+            "status": "SUCCESS",
+            "case_id": cid,
+            "fir_id": fir_id,
+            "fir_number": data.fir_number,
+            "police_station": data.police_station,
+            "police_station_id": station_id,
+            "district": data.district,
+            "accused_name": data.accused_name,
+            "message": f"FIR {data.fir_number} registered successfully in station docket.",
+        }
+
+    @classmethod
+    def update_fir_record(
+        cls,
+        case_id: str,
+        data: FIRRecordUpdateRequest,
+        current_user: AuthUser,
+    ) -> Dict[str, Any]:
+        """
+        Update an authorized police FIR record and investigation status.
+        Strictly validated against police station, district, and organization boundaries.
+        """
+        if current_user.role != Role.POLICE_OFFICER:
+            raise PermissionError("Forbidden: Only authorized Police Officers can update FIR records.")
+
+        case = get_case(case_id)
+        if not case:
+            raise LookupError(f"Case '{case_id}' not found.")
+
+        from app.main import _check_police_jurisdiction
+        if not _check_police_jurisdiction(case, current_user):
+            raise PermissionError(
+                f"Forbidden: Case '{case_id}' does not belong to your authorized police station jurisdiction."
+            )
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+            # Retrieve existing case JSON
+            cursor.execute("SELECT data FROM cases WHERE case_id = ?", (case_id,))
+            row = cursor.fetchone()
+            c_dict = json.loads(row[0]) if row and row[0] else {}
+
+            updated_fields = []
+            if data.fir_number:
+                c_dict["fir_number"] = data.fir_number
+                updated_fields.append("fir_number")
+                # Also update firs table if present
+                cursor.execute(
+                    "UPDATE firs SET fir_number = ? WHERE fir_number = ? OR id = ?",
+                    (data.fir_number, getattr(case, "fir_number", ""), f"FIR-{case_id}")
+                )
+
+            if data.offense_sections is not None:
+                c_dict["offense_sections"] = data.offense_sections
+                updated_fields.append("offense_sections")
+
+            if data.charge_sheet_status:
+                c_dict["charge_sheet_status"] = data.charge_sheet_status
+                updated_fields.append("charge_sheet_status")
+
+            if data.remand_status:
+                c_dict["remand_status"] = data.remand_status
+                updated_fields.append("remand_status")
+
+            if data.court_name:
+                c_dict["court_name"] = data.court_name
+                updated_fields.append("court_name")
+
+            if data.investigating_officer:
+                c_dict["investigating_officer"] = data.investigating_officer
+                updated_fields.append("investigating_officer")
+
+            c_dict["updated_at"] = now_iso
+
+            # Append timeline event
+            ev_desc = f"Investigation record updated by {current_user.full_name or 'Station IO'}."
+            if data.investigation_notes:
+                ev_desc += f" Notes: {data.investigation_notes}"
+            if updated_fields:
+                ev_desc += f" Updated: {', '.join(updated_fields)}."
+
+            cursor.execute("""
+                UPDATE cases SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE case_id = ?
+            """, (json.dumps(c_dict), case_id))
+
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Update in-memory case and persist timeline event across all stores
+        if data.offense_sections is not None and hasattr(case, "offense_sections"):
+            case.offense_sections = data.offense_sections
+        if data.fir_number and hasattr(case, "fir_number"):
+            case.fir_number = data.fir_number
+
+        ev = TimelineEvent(
+            id=f"EV-UPD-{case_id}-{uuid.uuid4().hex[:6]}",
+            timestamp=now_iso,
+            event_type="POLICE_FIR_UPDATE",
+            title="Station FIR / Investigation Record Updated",
+            description=ev_desc,
+            actor=current_user.full_name or "Police Officer",
+            actor_role="Police Officer",
+            source="Station Investigation Log",
+            is_human_verified=True,
+        )
+        append_case_timeline_event(case_id, ev)
+
+        return {
+            "status": "SUCCESS",
+            "case_id": case_id,
+            "updated_fields": updated_fields,
+            "message": f"FIR record for Case {case_id} updated successfully.",
         }

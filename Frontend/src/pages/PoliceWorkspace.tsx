@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   ShieldAlert, AlertTriangle, CheckCircle2,
   Search, Plus, ChevronRight, FileText, UserCheck, Check,
-  Clock, Send, X, Inbox, Loader2
+  Clock, Send, X, Inbox, Loader2, Edit3
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
@@ -13,6 +13,8 @@ import {
   completePoliceAction,
   uploadDocumentFile,
   fetchEvidenceChain,
+  intakeFIRRecord,
+  updateFIRRecord,
   type PoliceCaseSummary,
   type PoliceActionItem
 } from "../lib/api";
@@ -47,6 +49,107 @@ export function PoliceWorkspace() {
   const [linkedActionId, setLinkedActionId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
+
+  // FIR Intake Modal State
+  const [showFIRIntakeModal, setShowFIRIntakeModal] = useState(false);
+  const [firForm, setFirForm] = useState({
+    fir_number: "",
+    accused_name: "",
+    offense_sections: "BNS 303(2)",
+    filing_date: new Date().toISOString().split("T")[0],
+    arrest_date: new Date().toISOString().split("T")[0],
+    court_name: "Chief Metropolitan Magistrate Court",
+    incident_details: "",
+    investigating_officer: "",
+  });
+  const [firSubmitting, setFirSubmitting] = useState(false);
+  const [firMsg, setFirMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
+
+  // FIR Update Modal State
+  const [showFIRUpdateModal, setShowFIRUpdateModal] = useState(false);
+  const [updateCaseTarget, setUpdateCaseTarget] = useState<PoliceCaseSummary | null>(null);
+  const [updateForm, setUpdateForm] = useState({
+    offense_sections: "",
+    charge_sheet_status: "PENDING_INVESTIGATION",
+    remand_status: "INITIAL_REMAND",
+    court_name: "",
+    investigating_officer: "",
+    investigation_notes: "",
+  });
+  const [updateSubmitting, setUpdateSubmitting] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
+
+  const handleOpenUpdateModal = (c: PoliceCaseSummary) => {
+    setUpdateCaseTarget(c);
+    setUpdateForm({
+      offense_sections: (c.offense_sections || []).join(", "),
+      charge_sheet_status: c.charge_sheet_present ? "SUBMITTED_TO_COURT" : "PENDING_INVESTIGATION",
+      remand_status: c.remand_order_present ? "AVAILABLE_ON_RECORD" : "INITIAL_REMAND",
+      court_name: c.court_name || "",
+      investigating_officer: "",
+      investigation_notes: "",
+    });
+    setUpdateMsg(null);
+    setShowFIRUpdateModal(true);
+  };
+
+  const handleFIRIntakeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!firForm.fir_number.trim() || !firForm.accused_name.trim()) {
+      setFirMsg({ text: "FIR number and accused name are required.", type: "error" });
+      return;
+    }
+    setFirSubmitting(true);
+    setFirMsg(null);
+    try {
+      const sections = firForm.offense_sections.split(",").map((s) => s.trim()).filter(Boolean);
+      await intakeFIRRecord({
+        fir_number: firForm.fir_number.trim(),
+        accused_name: firForm.accused_name.trim(),
+        police_station: user?.police_station || "Kotwali Police Station",
+        police_station_id: user?.police_station_id || "ps_kotwali_central",
+        district: user?.district || "Central Delhi",
+        offense_sections: sections.length > 0 ? sections : ["BNS 303"],
+        filing_date: firForm.filing_date,
+        arrest_date: firForm.arrest_date,
+        court_name: firForm.court_name,
+        incident_details: firForm.incident_details,
+        investigating_officer: firForm.investigating_officer,
+      });
+      setFirMsg({ text: "FIR docket registered successfully in station records.", type: "success" });
+      await loadData();
+      setTimeout(() => setShowFIRIntakeModal(false), 1400);
+    } catch (err: any) {
+      setFirMsg({ text: "Registration failed: " + (err.message || String(err)), type: "error" });
+    } finally {
+      setFirSubmitting(false);
+    }
+  };
+
+  const handleFIRUpdateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!updateCaseTarget) return;
+    setUpdateSubmitting(true);
+    setUpdateMsg(null);
+    try {
+      const sections = updateForm.offense_sections.split(",").map((s) => s.trim()).filter(Boolean);
+      await updateFIRRecord(updateCaseTarget.case_id, {
+        offense_sections: sections.length > 0 ? sections : undefined,
+        charge_sheet_status: updateForm.charge_sheet_status,
+        remand_status: updateForm.remand_status,
+        court_name: updateForm.court_name || undefined,
+        investigating_officer: updateForm.investigating_officer || undefined,
+        investigation_notes: updateForm.investigation_notes || undefined,
+      });
+      setUpdateMsg({ text: "Station investigation record updated successfully.", type: "success" });
+      await loadData();
+      setTimeout(() => setShowFIRUpdateModal(false), 1400);
+    } catch (err: any) {
+      setUpdateMsg({ text: "Update failed: " + (err.message || String(err)), type: "error" });
+    } finally {
+      setUpdateSubmitting(false);
+    }
+  };
 
   // Provenance Modal State
   const [provenanceModalCaseId, setProvenanceModalCaseId] = useState<string | null>(null);
@@ -188,8 +291,14 @@ export function PoliceWorkspace() {
 
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={() => openUploadModal()}
+            onClick={() => { setFirMsg(null); setShowFIRIntakeModal(true); }}
             className="px-4 py-2 bg-primary text-primary-foreground font-mono text-xs font-bold uppercase rounded-sm flex items-center gap-1.5 hover:opacity-90 transition-opacity"
+          >
+            <Plus className="w-4 h-4" /> Register Station FIR
+          </button>
+          <button
+            onClick={() => openUploadModal()}
+            className="px-4 py-2 border border-border bg-secondary hover:bg-muted text-foreground font-mono text-xs font-bold uppercase rounded-sm flex items-center gap-1.5 transition-colors"
           >
             <Plus className="w-4 h-4" /> Upload Police Record
           </button>
@@ -328,6 +437,13 @@ export function PoliceWorkspace() {
                     </div>
 
                     <div className="flex items-center gap-2 self-end md:self-center shrink-0">
+                      <button
+                        onClick={() => handleOpenUpdateModal(c)}
+                        className="px-3 py-1.5 bg-secondary hover:bg-muted border border-border text-foreground font-mono text-xs font-semibold rounded-sm flex items-center gap-1"
+                        title="Update Station Investigation Record"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" /> Update Record
+                      </button>
                       <button
                         onClick={() => openUploadModal(c.case_id)}
                         className="px-3 py-1.5 bg-secondary hover:bg-muted border border-border text-foreground font-mono text-xs font-semibold rounded-sm flex items-center gap-1"
@@ -571,6 +687,322 @@ export function PoliceWorkspace() {
                   className="px-4 py-1.5 text-xs font-mono uppercase bg-primary text-primary-foreground font-bold hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
                 >
                   {uploading ? "Submitting..." : "Submit Record"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Register Station FIR Modal */}
+      {showFIRIntakeModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="bg-card border-2 border-border w-full max-w-lg rounded-sm shadow-xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-primary" />
+                <h3 className="text-sm font-serif font-bold uppercase text-foreground">
+                  Register Station FIR Docket
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowFIRIntakeModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleFIRIntakeSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                    FIR Number *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. FIR-2026-084"
+                    value={firForm.fir_number}
+                    onChange={(e) => setFirForm({ ...firForm, fir_number: e.target.value })}
+                    className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                    Accused Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Ramesh Kumar"
+                    value={firForm.accused_name}
+                    onChange={(e) => setFirForm({ ...firForm, accused_name: e.target.value })}
+                    className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                  Offense Sections (comma-separated)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. BNS 303(2), BNS 317(2)"
+                  value={firForm.offense_sections}
+                  onChange={(e) => setFirForm({ ...firForm, offense_sections: e.target.value })}
+                  className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                    Filing Date
+                  </label>
+                  <input
+                    type="date"
+                    value={firForm.filing_date}
+                    onChange={(e) => setFirForm({ ...firForm, filing_date: e.target.value })}
+                    className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                    Arrest Date
+                  </label>
+                  <input
+                    type="date"
+                    value={firForm.arrest_date}
+                    onChange={(e) => setFirForm({ ...firForm, arrest_date: e.target.value })}
+                    className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                    Producing Court
+                  </label>
+                  <input
+                    type="text"
+                    value={firForm.court_name}
+                    onChange={(e) => setFirForm({ ...firForm, court_name: e.target.value })}
+                    className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                    Investigating Officer
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. SI Vikram Singh"
+                    value={firForm.investigating_officer}
+                    onChange={(e) => setFirForm({ ...firForm, investigating_officer: e.target.value })}
+                    className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                  Incident Summary / Initial Log
+                </label>
+                <textarea
+                  rows={3}
+                  value={firForm.incident_details}
+                  onChange={(e) => setFirForm({ ...firForm, incident_details: e.target.value })}
+                  placeholder="Summary of allegations and station intake notes..."
+                  className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                />
+              </div>
+
+              <div className="bg-secondary/40 p-3 rounded-sm text-xs font-sans text-muted-foreground space-y-1">
+                <div>* Designated Station: <strong>{user?.police_station || "Kotwali Police Station"}</strong></div>
+                <div>* District Authority: <strong>{user?.district || "Central Delhi"}</strong></div>
+                <div>* Legal Notification: <strong>DLSA legal aid desk will be automatically notified upon intake</strong></div>
+              </div>
+
+              {firMsg && (
+                <div
+                  className={`p-3 rounded-sm text-xs font-mono ${
+                    firMsg.type === "success"
+                      ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                      : "bg-red-100 text-red-800 border border-red-300"
+                  }`}
+                >
+                  {firMsg.text}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setShowFIRIntakeModal(false)}
+                  className="px-3 py-1.5 text-xs font-mono uppercase border border-border bg-secondary hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={firSubmitting}
+                  className="px-4 py-1.5 text-xs font-mono uppercase bg-primary text-primary-foreground font-bold hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
+                >
+                  {firSubmitting ? "Registering..." : "Register FIR"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Update Investigation Record Modal */}
+      {showFIRUpdateModal && updateCaseTarget && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="bg-card border-2 border-border w-full max-w-lg rounded-sm shadow-xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-primary" />
+                <h3 className="text-sm font-serif font-bold uppercase text-foreground">
+                  Update Investigation Record // {updateCaseTarget.case_id}
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowFIRUpdateModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleFIRUpdateSubmit} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                  Accused / Matter
+                </label>
+                <div className="p-2 bg-secondary/50 border border-border text-xs font-mono rounded-sm">
+                  {updateCaseTarget.name} — FIR: {updateCaseTarget.fir_number || "Not Recorded"}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                  Amended Offense Sections (comma-separated)
+                </label>
+                <input
+                  type="text"
+                  value={updateForm.offense_sections}
+                  onChange={(e) => setUpdateForm({ ...updateForm, offense_sections: e.target.value })}
+                  className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                    Charge Sheet Status
+                  </label>
+                  <select
+                    value={updateForm.charge_sheet_status}
+                    onChange={(e) => setUpdateForm({ ...updateForm, charge_sheet_status: e.target.value })}
+                    className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                  >
+                    <option value="PENDING_INVESTIGATION">Pending Investigation</option>
+                    <option value="DRAFT_PREPARED">Draft Prepared</option>
+                    <option value="SUBMITTED_TO_COURT">Submitted to Court</option>
+                    <option value="FILED_IN_REGISTRY">Filed in Registry</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                    Remand Status
+                  </label>
+                  <select
+                    value={updateForm.remand_status}
+                    onChange={(e) => setUpdateForm({ ...updateForm, remand_status: e.target.value })}
+                    className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                  >
+                    <option value="INITIAL_REMAND">Initial Remand</option>
+                    <option value="EXTENDED_POLICE_CUSTODY">Extended Police Custody</option>
+                    <option value="TRANSFERRED_TO_JUDICIAL_CUSTODY">Transferred to Judicial Custody</option>
+                    <option value="AVAILABLE_ON_RECORD">Available on Record</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                    Competent Court
+                  </label>
+                  <input
+                    type="text"
+                    value={updateForm.court_name}
+                    onChange={(e) => setUpdateForm({ ...updateForm, court_name: e.target.value })}
+                    className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                    Investigating Officer
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Insp. Vikram Singh"
+                    value={updateForm.investigating_officer}
+                    onChange={(e) => setUpdateForm({ ...updateForm, investigating_officer: e.target.value })}
+                    className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono text-muted-foreground uppercase mb-1">
+                  Investigation Log / Case Diary Extract
+                </label>
+                <textarea
+                  rows={3}
+                  value={updateForm.investigation_notes}
+                  onChange={(e) => setUpdateForm({ ...updateForm, investigation_notes: e.target.value })}
+                  placeholder="Record formal case diary entry or investigation update..."
+                  className="w-full text-xs font-mono bg-background border border-border p-2 rounded-sm"
+                />
+              </div>
+
+              <div className="bg-secondary/40 p-3 rounded-sm text-xs font-sans text-muted-foreground space-y-1">
+                <div>* Provenance: <strong>Station Case Diary Update</strong></div>
+                <div>* Verification: <strong>Recorded with timestamp and officer attribution</strong></div>
+              </div>
+
+              {updateMsg && (
+                <div
+                  className={`p-3 rounded-sm text-xs font-mono ${
+                    updateMsg.type === "success"
+                      ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                      : "bg-red-100 text-red-800 border border-red-300"
+                  }`}
+                >
+                  {updateMsg.text}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setShowFIRUpdateModal(false)}
+                  className="px-3 py-1.5 text-xs font-mono uppercase border border-border bg-secondary hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updateSubmitting}
+                  className="px-4 py-1.5 text-xs font-mono uppercase bg-primary text-primary-foreground font-bold hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
+                >
+                  {updateSubmitting ? "Updating..." : "Update Record"}
                 </button>
               </div>
             </form>

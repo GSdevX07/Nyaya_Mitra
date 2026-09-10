@@ -247,7 +247,7 @@ TRANSITION_RULES: List[TransitionRule] = [
     # 14. RELEASE_WORKFLOW -> POST_RELEASE_FOLLOW_UP (Physical custody discharge by Prison)
     TransitionRule(
         action="CONFIRM_PRISON_RELEASE",
-        from_states=[MatterState.RELEASE_WORKFLOW],
+        from_states=[MatterState.RELEASE_WORKFLOW, MatterState.ORDER_RECEIVED],
         to_state=MatterState.POST_RELEASE_FOLLOW_UP,
         allowed_roles={Role.JAIL_OFFICER},  # Strict: Only Jail Superintendent discharges inmate from custody!
         description="Prison Superintendent confirms physical discharge and custody release of inmate.",
@@ -426,6 +426,17 @@ class WorkflowStateMachine:
         is_ai_agent: bool = False,
     ) -> TransitionRule:
         norm_action = cls.normalize_action(action)
+        matching_rules = [r for r in TRANSITION_RULES if r.action == norm_action]
+        if matching_rules:
+            all_allowed_roles = set()
+            for r in matching_rules:
+                all_allowed_roles.update(r.allowed_roles)
+            if actor_role not in all_allowed_roles:
+                raise PermissionError(
+                    f"Permission Denied: Role '{actor_role.value}' is not authorized for action '{action}'. "
+                    f"Permitted roles: {[r.value for r in all_allowed_roles]}."
+                )
+
         rule = cls.find_rule(current_state, norm_action)
         if not rule:
             raise ValueError(

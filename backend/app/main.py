@@ -81,6 +81,7 @@ from app.rag.vector_store import VectorStoreUnavailable, corpus_status
 from app.auth.dependencies import get_current_user, require_role
 from app.auth.roles import Role
 from app.auth.user_store import AuthUser
+from app.security.classification import FieldLevelAccessFilter
 
 
 # ── Reliability, Telemetry & Worker imports ───────────────────────────────────
@@ -419,26 +420,55 @@ def _check_jail_facility_match(case: Any, user: AuthUser) -> bool:
 def _check_police_jurisdiction(case: Any, user: AuthUser) -> bool:
     """
     Strict institutional jurisdiction verification for Police Officer.
-    Verifies exact authorized station/district IDs, not loose text similarity.
+    Validates the full 3-tier hierarchy: station -> district -> organization.
+    Fail-closed on any boundary mismatch.
     """
     if user.role != Role.POLICE_OFFICER:
         return True
+
+    # 1. Organization Tier
+    case_org = getattr(case, "organization_id", None) or getattr(case, "org_id", None) or ""
+    user_org = getattr(user, "org_id", "") or getattr(user, "organization_id", "") or ""
+    if (
+        case_org
+        and user_org
+        and case_org != "GLOBAL_DEFAULT"
+        and user_org != "GLOBAL_DEFAULT"
+        and case_org != "org_dlsa_central"
+        and user_org != case_org
+        and user_org != getattr(case, "police_station_id", "")
+    ):
+        return False
+
+    # 2. District Tier
+    case_dist = (getattr(case, "district", None) or "").strip().lower()
+    auth_dists = [d.strip().lower() for d in (getattr(user, "authorized_district_ids", None) or []) if d]
+    user_dist = (getattr(user, "district", None) or "").strip().lower()
+    if user_dist and user_dist not in auth_dists:
+        auth_dists.append(user_dist)
+    if case_dist and auth_dists and not any(ad in ("all", "all (statewide)") for ad in auth_dists):
+        if not any(ad in case_dist or case_dist in ad for ad in auth_dists):
+            return False
+
+    # 3. Station Tier
     user_station_id = (getattr(user, "police_station_id", None) or "").strip().lower()
     case_station_id = (getattr(case, "police_station_id", None) or "").strip().lower()
-    if user_station_id and case_station_id and user_station_id == case_station_id:
-        return True
-
-    user_jur_ids = [j.strip().lower() for j in (getattr(user, "jurisdiction_ids", []) or [])]
-    if case_station_id and case_station_id in user_jur_ids:
-        return True
+    user_jur_ids = [j.strip().lower() for j in (getattr(user, "jurisdiction_ids", []) or []) if j]
 
     user_station_name = (getattr(user, "police_station", None) or "").strip().lower()
     case_station_name = (getattr(case, "police_station", None) or "").strip().lower()
-    if user_station_name and case_station_name and user_station_name == case_station_name:
-        return True
 
-    if not case_station_id and user_station_name and case_station_name and user_station_name in case_station_name:
-        return True
+    if case_station_id:
+        if user_station_id and user_station_id == case_station_id:
+            return True
+        if case_station_id in user_jur_ids:
+            return True
+        return False
+
+    if case_station_name:
+        if user_station_name and (user_station_name == case_station_name or user_station_name in case_station_name or case_station_name in user_station_name):
+            return True
+        return False
 
     uid = (getattr(user, "id", "") or "").lower()
     uemail = (getattr(user, "email", "") or "").lower()
@@ -465,6 +495,43 @@ def _check_dlsa_district_match(case, user: AuthUser) -> bool:
     case_dist = (getattr(case, "district", None) or "").strip().lower()
     if not case_dist:
         return False
+    return any(ad in case_dist or case_dist in ad for ad in auth_dists)
+
+
+def _check_supervisor_jurisdiction_and_scope(case: Any, user: AuthUser) -> bool:
+    """
+    Validate that the case belongs to the supervising officer's organization and district.
+    Cross-org and cross-district access is strictly blocked.
+    """
+    # 1. Multi-tenant Organization Isolation
+    case_org = getattr(case, "organization_id", None) or "org_dlsa_central"
+    user_org = getattr(user, "org_id", "org_dlsa_central")
+    user_dist = (getattr(user, "district", "") or "").lower()
+    if (
+        case_org
+        and user_org
+        and case_org != "GLOBAL_DEFAULT"
+        and user_org != "GLOBAL_DEFAULT"
+        and case_org != user_org
+        and "statewide" not in user_dist
+    ):
+        return False
+
+    # 2. District Jurisdiction
+    auth_dists = [d.strip().lower() for d in (getattr(user, "authorized_district_ids", None) or []) if d]
+    if user_dist and user_dist not in ("all", "all (statewide)") and user_dist not in auth_dists:
+        auth_dists.append(user_dist)
+
+    if "all" in auth_dists or user_dist in ("all", "all (statewide)"):
+        return True
+
+    if not auth_dists:
+        return True
+
+    case_dist = (getattr(case, "district", None) or "").strip().lower()
+    if not case_dist:
+        return False
+
     return any(ad in case_dist or case_dist in ad for ad in auth_dists)
 
 
@@ -562,13 +629,7 @@ def get_cases(
             and _check_jail_facility_match(c, current_user)
         ]
     elif current_user.role == Role.SUPERVISING_LEGAL_OFFICER:
-        if current_user.district and current_user.district.lower() != "all":
-            dist = current_user.district.lower()
-            cases = [
-                c for c in cases
-                if (c.district and dist in c.district.lower())
-                or c.status in (CaseState.LAWYER_REVIEW, CaseState.APPROVED_READY_FOR_FILING, CaseState.MANUAL_REVIEW)
-            ]
+        cases = [c for c in cases if _check_supervisor_jurisdiction_and_scope(c, current_user)]
     elif current_user.role == Role.DLSA_OFFICER:
         cases = [c for c in cases if _check_dlsa_district_match(c, current_user)]
     elif current_user.role == Role.READ_ONLY_AUDITOR:
@@ -615,7 +676,7 @@ def get_cases(
     # Serialise CaseRecord objects to plain dicts for JSON response
     return [
         {
-            "case": entry["case"].model_dump(),
+            "case": FieldLevelAccessFilter.filter_case(entry["case"].model_dump(), current_user),
             "days_overdue": entry["days_overdue"],
             "urgency_score": entry["urgency_score"],
             "eligibility": entry.get("eligibility") or evaluate_eligibility(entry["case"]),
@@ -693,8 +754,10 @@ def get_jail_inmates(
     for c in facility_cases:
         missing = [d for d in c.required_docs if d not in c.present_docs]
         eligibility = evaluate_eligibility(c)
+        filtered_case = FieldLevelAccessFilter.filter_case(c.model_dump(), current_user)
+        filtered_urgency = filtered_case.get("urgency_flags") or {}
         inmates.append({
-            "case": c.model_dump(),
+            "case": filtered_case,
             "inmate_id": c.case_id,
             "name": c.name,
             "jail_location": c.jail_location,
@@ -712,7 +775,7 @@ def get_jail_inmates(
             "legal_code": c.legal_code,
             "offense_sections": c.offense_sections,
             "status": c.status.value,
-            "urgency_flags": c.urgency_flags.model_dump(),
+            "urgency_flags": filtered_urgency,
             "potential_479_eligible": eligibility.get("eligible", False),
         })
     return inmates
@@ -1002,11 +1065,37 @@ def get_case_by_id(
 
     # ── Record-Level Authorization ────────────────────────────────────────────
     if current_user.role in (Role.ACCUSED_USER, Role.FAMILY_GUARDIAN):
-        if current_user.linked_case_id != case.case_id:
+        if not current_user.linked_case_id or current_user.linked_case_id != case.case_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Forbidden: You are only authorized to access your own linked case record.",
             )
+        from app.services.citizen_service import get_citizen_overview
+        overview = get_citizen_overview(current_user, lang="en")
+        filtered_case = FieldLevelAccessFilter.filter_case(case.model_dump() if hasattr(case, "model_dump") else case, current_user)
+        return {
+            "case": filtered_case,
+            "citizen_authorized_view": True,
+            "case_id": case.case_id,
+            "current_status": case.status.value if hasattr(case.status, "value") else str(case.status),
+            "legal_aid_support": overview.get("legal_aid_support"),
+            "upcoming_known_events": overview.get("upcoming_known_events", []),
+            "approved_entitled_documents": overview.get("approved_entitled_documents", []),
+            "missing_documents_from_citizen": overview.get("missing_documents_from_citizen", []),
+            "ai_procedural_explanation": overview.get("ai_procedural_explanation"),
+            "support_helpline": "15100",
+            # Strictly redact internal drafts, legal strategy, reviewer comments, AI internal metadata, and internal audit notes
+            "draft": None,
+            "draft_ready": False,
+            "legal_strategy_notes": None,
+            "internal_strategy_notes": None,
+            "supervisory_review_notes": None,
+            "statutes": None,
+            "retrieval": None,
+            "agent_activity_log": [],
+            "urgency": None,
+            "evidence": [],
+        }
     elif current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
         if not _is_case_assigned_to_advocate(case, current_user):
             raise HTTPException(
@@ -1073,10 +1162,31 @@ def get_case_by_id(
         }
 
     elif current_user.role == Role.GOV_ADMIN:
+        # Verify organization tenancy boundary (SLSA oversees DLSA within same state/scope)
+        user_org = getattr(current_user, "org_id", "GLOBAL_DEFAULT")
+        case_org = getattr(case, "organization_id", None) or "GLOBAL_DEFAULT"
+        user_state = (getattr(current_user, "state", "") or "").lower()
+        case_state = (getattr(case, "state", "") or "").lower()
+        if user_state and case_state and user_state != case_state and "statewide" not in user_state and current_user.role != Role.PLATFORM_ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Case '{case.case_id}' belongs to state '{case.state}' outside your state jurisdiction '{current_user.state}'.",
+            )
+        if (
+            case_org != "GLOBAL_DEFAULT"
+            and user_org != "GLOBAL_DEFAULT"
+            and case_org != user_org
+            and current_user.role != Role.PLATFORM_ADMIN
+            and not ("slsa" in user_org and "dlsa" in case_org and (not user_state or not case_state or user_state == case_state))
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Case '{case.case_id}' belongs to organization '{case_org}' which is outside your authorized organization '{user_org}'.",
+            )
         # Verify state/regional district scope if configured
         if getattr(current_user, "authorized_district_ids", None) and case.district:
             auth_dists = [d.strip().lower() for d in current_user.authorized_district_ids]
-            if case.district.strip().lower() not in auth_dists and "all" not in auth_dists:
+            if case.district.strip().lower() not in auth_dists and "all" not in auth_dists and "all (statewide)" not in auth_dists:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Forbidden: Case district '{case.district}' is outside your authorized state/regional oversight scope.",
@@ -1173,7 +1283,10 @@ def get_case_by_id(
                 "relative_phone": case.relative_phone,
                 "permanent_address": case.permanent_address,
                 "timeline": getattr(case, "timeline", []),
-                "urgency_flags": case.urgency_flags,
+                "urgency_flags": {
+                    **(case.urgency_flags.model_dump() if hasattr(case.urgency_flags, "model_dump") else (case.urgency_flags if isinstance(case.urgency_flags, dict) else dict(getattr(case.urgency_flags, "__dict__", {})))),
+                    "medical_notes": "[RESTRICTED - MEDICAL PRIVACY]",
+                },
             },
             "jail_authorized_view": True,
             "status_record": None,
@@ -1202,15 +1315,11 @@ def get_case_by_id(
                 detail=f"Forbidden: Case '{case_id}' belongs to district '{case.district}', outside your authorized DLSA district '{current_user.district}'.",
             )
     elif current_user.role == Role.SUPERVISING_LEGAL_OFFICER:
-        if current_user.district and current_user.district.lower() != "all":
-            dist = current_user.district.lower()
-            case_dist = (case.district or "").lower()
-            is_supervisory_case = case.status in (CaseState.LAWYER_REVIEW, CaseState.APPROVED_READY_FOR_FILING, CaseState.MANUAL_REVIEW)
-            if not (dist in case_dist or is_supervisory_case):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Forbidden: Case belongs to district '{case.district}', outside your supervisory jurisdiction '{current_user.district}'.",
-                )
+        if not _check_supervisor_jurisdiction_and_scope(case, current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Case belongs to district '{case.district}' or organization '{getattr(case, 'organization_id', 'unknown')}', outside your authorized supervisory jurisdiction '{current_user.district}'.",
+            )
     elif current_user.role == Role.READ_ONLY_AUDITOR:
         if getattr(current_user, "authorized_district_ids", None) and case.district:
             auth_dists = [d.strip().lower() for d in current_user.authorized_district_ids]
@@ -1411,7 +1520,6 @@ def get_case_by_id(
 
     # Enforce field-level data classification & privacy redactions
     if "case" in res and isinstance(res["case"], dict):
-        from app.security.classification import FieldLevelAccessFilter
         res["case"] = FieldLevelAccessFilter.filter_case_record(res["case"], current_user.role)
 
     return res
@@ -1882,6 +1990,45 @@ def approve_case(
         )
 
 
+class AssignLawyerRequest(BaseModel):
+    lawyer_id: Optional[str] = None
+    assigned_advocate_id: Optional[str] = None
+    assigned_advocate_name: Optional[str] = None
+    comment: Optional[str] = None
+
+
+@app.post("/cases/{case_id}/assign-lawyer", tags=["Cases"])
+@app.post("/cases/{case_id}/assign", tags=["Cases"])
+def assign_lawyer_endpoint(
+    case_id: str,
+    payload: AssignLawyerRequest,
+    current_user: AuthUser = Depends(require_role(
+        Role.DLSA_OFFICER, Role.SUPERVISING_LEGAL_OFFICER, Role.PLATFORM_ADMIN,
+    )),
+):
+    """
+    Assign legal-aid counsel to an undertrial matter.
+    Restricted strictly to authorized DLSA / Supervisory officers.
+    Police, Accused, and external parties are strictly forbidden.
+    """
+    from app.workflow.service import WorkflowService
+    adv_id = payload.lawyer_id or payload.assigned_advocate_id or "demo_advocate"
+    adv_name = payload.assigned_advocate_name or adv_id
+    try:
+        res = WorkflowService.execute_transition(
+            case_id=case_id,
+            action="ASSIGN_COUNSEL",
+            actor=current_user,
+            payload={"assigned_advocate_id": adv_id, "assigned_advocate_name": adv_name},
+            comment=payload.comment or f"Counsel {adv_name} assigned by DLSA.",
+        )
+        return res
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
 class CaseCommentRequest(BaseModel):
     comment: str
     target_role: Optional[str] = "DEFENSE_ADVOCATE"
@@ -1957,6 +2104,7 @@ def add_case_comment(
 
 
 @app.post("/cases/{case_id}/file", tags=["Cases"])
+@app.post("/cases/{case_id}/file-in-court", tags=["Cases"])
 def file_case_in_court(
     case_id: str,
     filing_reference: Optional[str] = None,
@@ -3366,6 +3514,7 @@ async def upload_document(
         "status": "success",
         "message": f"Document '{document_type}' uploaded and persisted for case {case_id}.",
         "document_id": stable_id,
+        "document_type": document_type,
         "document_status": doc_status,
         "version_number": version_num,
         "present_docs": updated_docs,
@@ -3632,7 +3781,6 @@ def get_document_evidence_chain(
         Role.SUPERVISING_LEGAL_OFFICER, Role.DLSA_OFFICER, Role.READ_ONLY_AUDITOR,
         Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE, Role.GOV_ADMIN,
         Role.PLATFORM_ADMIN, Role.JAIL_OFFICER, Role.POLICE_OFFICER,
-        Role.ACCUSED_USER, Role.FAMILY_GUARDIAN,
     )),
 ):
     """
@@ -4827,18 +4975,7 @@ def get_actions(
     elif current_user.role in (Role.DEFENSE_ADVOCATE, Role.CONTROLLED_EXTERNAL_ADVOCATE):
         cases = [c for c in cases if _is_case_assigned_to_advocate(c, current_user)]
     elif current_user.role == Role.POLICE_OFFICER:
-        st_id = getattr(current_user, "police_station_id", "") or ""
-        dist = (current_user.district or "").lower()
-        if st_id and dist and dist != "all":
-            cases = [
-                c for c in cases
-                if getattr(c, "police_station_id", "") == st_id
-                or (not getattr(c, "police_station_id", None) and c.district and dist in c.district.lower())
-            ]
-        elif st_id:
-            cases = [c for c in cases if getattr(c, "police_station_id", "") == st_id]
-        elif dist and dist != "all":
-            cases = [c for c in cases if c.district and dist in c.district.lower()]
+        cases = [c for c in cases if _check_police_jurisdiction(c, current_user)]
     elif current_user.role == Role.JAIL_OFFICER:
         cases = [c for c in cases if _check_jail_facility_match(c, current_user)]
 
@@ -5555,6 +5692,11 @@ def clear_notifications_endpoint(
     """
     Clear all or a specific notification visible to the authenticated user from database and Supabase.
     """
+    if current_user.role in (Role.READ_ONLY_AUDITOR, Role.ACCUSED_USER, Role.FAMILY_GUARDIAN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: Role '{current_user.role.value}' cannot clear or delete notifications.",
+        )
     from app.database import clear_notifications_for_user
     role_val = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
     cleared_count = clear_notifications_for_user(
@@ -5578,6 +5720,11 @@ def clear_notifications_post_endpoint(
     """
     POST alternative to clear all or a specific notification for the authenticated user.
     """
+    if current_user.role in (Role.READ_ONLY_AUDITOR, Role.ACCUSED_USER, Role.FAMILY_GUARDIAN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: Role '{current_user.role.value}' cannot clear or delete notifications.",
+        )
     from app.database import clear_notifications_for_user
     role_val = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
     notif_id = (payload or {}).get("id")

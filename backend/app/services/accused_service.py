@@ -643,7 +643,20 @@ def get_accused_timeline(accused_id: str, user: AuthUser) -> List[Dict[str, Any]
         idx += 1
 
     timeline.sort(key=lambda x: x.get("event_date", ""), reverse=True)
-    if user.role == Role.POLICE_OFFICER:
+    if user.role in (Role.ACCUSED_USER, Role.FAMILY_GUARDIAN):
+        EXCLUDED_CATEGORIES = {
+            EventCategory.EVIDENCE_INTEGRITY.value,
+            "EVIDENCE_INTEGRITY",
+            "SECURITY_ALERT",
+            "SYSTEM_INTERNAL",
+        }
+        timeline = [
+            t for t in timeline
+            if t.get("category") not in EXCLUDED_CATEGORIES
+            and not t.get("title", "").startswith("Audit:")
+            and t.get("item_type") != TimelineItemType.SYSTEM_INTERPRETATION.value
+        ]
+    elif user.role == Role.POLICE_OFFICER:
         timeline = [
             t for t in timeline
             if t.get("category") in (EventCategory.ARREST_REMAND.value, EventCategory.CUSTODY_DETENTION.value, EventCategory.EVIDENCE_INTEGRITY.value)

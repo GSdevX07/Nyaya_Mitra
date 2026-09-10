@@ -280,6 +280,7 @@ class CaseRecord(BaseModel):
     court_name: Optional[str] = Field(default=None, description="Jurisdictional court, e.g. 'Chief Judicial Magistrate, Central'.")
     district: Optional[str] = Field(default=None, description="District, e.g. 'South Delhi'.")
     state: Optional[str] = Field(default="Delhi", description="State / UT, e.g. 'Delhi'.")
+    organization_id: Optional[str] = Field(default="org_dlsa_central", description="Tenant organization identifier.")
     dlsa_reference_number: Optional[str] = Field(default=None, description="DLSA Legal Aid Reference Number, e.g. 'DLSA-SD-2024-419'.")
 
     # Custody & Statutory Metrics

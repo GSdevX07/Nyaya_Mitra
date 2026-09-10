@@ -2038,6 +2038,7 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
             draft_id TEXT PRIMARY KEY,
             case_id TEXT NOT NULL,
             artifact_id TEXT NOT NULL DEFAULT 'bail_draft_01',
+            organization_id TEXT NOT NULL DEFAULT 'GLOBAL_DEFAULT',
             template_id TEXT,
             template_version INTEGER DEFAULT 1,
             version_number INTEGER NOT NULL DEFAULT 1,
@@ -2069,9 +2070,65 @@ def _init_sqlite_tables(conn: sqlite3.Connection):
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    try:
+        cursor.execute("ALTER TABLE legal_document_drafts ADD COLUMN organization_id TEXT DEFAULT 'GLOBAL_DEFAULT'")
+    except Exception:
+        pass
+
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_drafts_case ON legal_document_drafts(case_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_drafts_status ON legal_document_drafts(status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_drafts_artifact ON legal_document_drafts(artifact_id, version_number)")
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_draft_case_artifact_version ON legal_document_drafts(case_id, artifact_id, version_number)")
+
+    # 16. Institutional Delegations & Document Preparation Requisitions
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS institutional_delegations (
+            delegation_id TEXT PRIMARY KEY,
+            granted_to_user_id TEXT NOT NULL,
+            granted_to_role TEXT NOT NULL,
+            granted_by_user_id TEXT NOT NULL,
+            granted_by_role TEXT NOT NULL,
+            organization_id TEXT NOT NULL DEFAULT 'GLOBAL_DEFAULT',
+            jurisdiction TEXT DEFAULT 'National / BNSS 2023',
+            capability TEXT NOT NULL,
+            allowed_document_types_json TEXT NOT NULL DEFAULT '["*"]',
+            allowed_case_scope_json TEXT NOT NULL DEFAULT '["*"]',
+            valid_from TIMESTAMP NOT NULL,
+            valid_until TIMESTAMP NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ACTIVE',
+            reason TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            revoked_at TIMESTAMP,
+            revoked_by_user_id TEXT,
+            audit_reference TEXT
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_delegations_user ON institutional_delegations(granted_to_user_id, status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_delegations_org ON institutional_delegations(organization_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_delegations_capability ON institutional_delegations(capability)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS document_preparation_requisitions (
+            requisition_id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL,
+            template_id TEXT NOT NULL,
+            document_type TEXT NOT NULL,
+            requested_by_user_id TEXT NOT NULL,
+            requested_by_role TEXT NOT NULL,
+            assigned_counsel_id TEXT,
+            assigned_counsel_name TEXT,
+            urgency TEXT NOT NULL DEFAULT 'NORMAL',
+            reason TEXT NOT NULL,
+            missing_prerequisites_json TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'DOCUMENT_PREPARATION_REQUESTED',
+            task_id TEXT,
+            organization_id TEXT NOT NULL DEFAULT 'GLOBAL_DEFAULT',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_requisitions_case ON document_preparation_requisitions(case_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_requisitions_counsel ON document_preparation_requisitions(assigned_counsel_id)")
 
     conn.commit()
 
@@ -2298,6 +2355,11 @@ def init_db():
             cursor.execute("DELETE FROM matter_handoffs WHERE matter_id LIKE ?", (pat,))
             cursor.execute("DELETE FROM task_queue WHERE case_id LIKE ?", (pat,))
             cursor.execute("DELETE FROM notifications WHERE case_id LIKE ? OR id LIKE ?", (pat, pat))
+
+        # Reset document workspace ephemeral data across test runs
+        cursor.execute("DELETE FROM institutional_delegations")
+        cursor.execute("DELETE FROM document_preparation_requisitions")
+        cursor.execute("DELETE FROM legal_document_drafts")
 
         # Strict orphan notification cleanup: remove any notifications referencing cases not in cases table
         cursor.execute("""
@@ -3984,23 +4046,22 @@ def _safe_parse_case_record(data_val: Any) -> Optional[CaseRecord]:
 
 
 def get_all_cases() -> List[CaseRecord]:
-    """Retrieve all case records — Supabase (production) with SQLite fallback."""
+    """Retrieve all case records — Supabase (production) merged with SQLite / local memory."""
+    cases_map: Dict[str, CaseRecord] = {}
+
     from app.supabase_adapter import supa_get_all_legacy_cases, is_supabase_active
     if is_supabase_active():
         try:
             raw_cases = supa_get_all_legacy_cases()
             if raw_cases:
-                results = []
                 for d in raw_cases:
                     rec = _safe_parse_case_record(d)
                     if rec:
-                        results.append(rec)
-                if results:
-                    return results
+                        cases_map[rec.case_id] = rec
         except Exception as e:
             logger.warning(f"Supabase get_all_cases error: {e}. Falling back to SQLite.")
 
-    # SQLite fallback
+    # Merge SQLite records (for test isolation, local overrides and newly inserted records)
     conn = None
     try:
         conn = get_db_connection()
@@ -4008,20 +4069,22 @@ def get_all_cases() -> List[CaseRecord]:
         cursor.execute("SELECT data FROM cases")
         rows = cursor.fetchall()
         if rows:
-            results = []
             for r in rows:
                 rec = _safe_parse_case_record(r[0])
                 if rec:
-                    results.append(rec)
-            if results:
-                return results
+                    cases_map[rec.case_id] = rec
     except Exception as e:
         logger.warning(f"SQLite get_all_cases error: {e}")
     finally:
         if conn:
             conn.close()
 
-    return list(_MEMORY_CASES.values())
+    # Merge in-memory fallback
+    for cid, mem_rec in _MEMORY_CASES.items():
+        if cid not in cases_map:
+            cases_map[cid] = mem_rec
+
+    return list(cases_map.values())
 
 
 
@@ -7446,32 +7509,80 @@ def get_document_template_by_id(template_id: str) -> Optional[Dict[str, Any]]:
         conn.close()
 
 
+def allocate_next_draft_version(case_id: str, artifact_id: str = "bail_draft_01") -> int:
+    """
+    Concurrency-safe atomic version allocation for legal document drafts.
+    Uses an immediate database transaction to query MAX(version_number) + 1.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute(
+            "SELECT COALESCE(MAX(version_number), 0) + 1 FROM legal_document_drafts WHERE case_id = ? AND artifact_id = ?",
+            (case_id, artifact_id),
+        )
+        row = cursor.fetchone()
+        next_ver = int(row[0]) if row and row[0] is not None else 1
+        conn.commit()
+        return next_ver
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COALESCE(MAX(version_number), 0) + 1 FROM legal_document_drafts WHERE case_id = ? AND artifact_id = ?",
+                (case_id, artifact_id),
+            )
+            row = cursor.fetchone()
+            return int(row[0]) if row and row[0] is not None else 1
+        except Exception:
+            return 1
+    finally:
+        conn.close()
+
+
 def store_legal_document_draft(draft: Dict[str, Any]) -> bool:
     """Store or insert a legal document draft with complete snapshot and audit associations."""
+    # Pre-check immutability to prevent overwriting approved documents
+    draft_id = draft.get("draft_id")
+    if draft_id:
+        existing = get_legal_document_draft(draft_id)
+        if existing and existing.get("is_immutable"):
+            if draft.get("content_text") != existing.get("content_text"):
+                raise PermissionError(
+                    f"Draft '{draft_id}' is permanently immutable because it has received formal legal sign-off. "
+                    f"Please initiate a new revision workflow to create Version {existing.get('version_number', 1) + 1}."
+                )
+
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         cursor.execute("""
             INSERT OR REPLACE INTO legal_document_drafts (
-                draft_id, case_id, artifact_id, template_id, template_version, version_number,
+                draft_id, case_id, artifact_id, organization_id, template_id, template_version, version_number,
                 status, original_ai_text, content_text, exact_case_facts_json, source_documents_json,
                 legal_rule_result_json, retrieved_legal_sources_json, prompt_version, ai_model_name,
                 source_citations_json, linked_case_facts_json, missing_facts_json, unresolved_warnings_json,
                 reviewer_comments_json, readiness_check_result_json, is_immutable, approved_by,
                 approved_by_role, approved_at, submission_package_json, external_filing_reference,
                 external_filing_date, created_by, created_by_role, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             draft["draft_id"],
             draft["case_id"],
             draft.get("artifact_id", "bail_draft_01"),
+            draft.get("organization_id", "GLOBAL_DEFAULT"),
             draft.get("template_id"),
             draft.get("template_version", 1),
             draft.get("version_number", 1),
             draft.get("status", "DRAFT"),
-            draft["original_ai_text"],
-            draft["content_text"],
+            draft.get("original_ai_text") or draft.get("content_text", ""),
+            draft.get("content_text", ""),
             json.dumps(draft.get("exact_case_facts", {})),
             json.dumps(draft.get("source_documents", [])),
             json.dumps(draft.get("legal_rule_result", {})),
@@ -7516,6 +7627,7 @@ def get_legal_document_draft(draft_id: str) -> Optional[Dict[str, Any]]:
             return None
         cols = [d[0] for d in cursor.description]
         d = dict(zip(cols, row))
+        d["organization_id"] = d.get("organization_id") or "GLOBAL_DEFAULT"
         d["exact_case_facts"] = json.loads(d["exact_case_facts_json"]) if d.get("exact_case_facts_json") else {}
         d["source_documents"] = json.loads(d["source_documents_json"]) if d.get("source_documents_json") else []
         d["legal_rule_result"] = json.loads(d["legal_rule_result_json"]) if d.get("legal_rule_result_json") else {}
@@ -7570,7 +7682,8 @@ def update_legal_document_draft(draft_id: str, updates: Dict[str, Any]) -> bool:
                 set_clauses.append("is_immutable = ?")
                 params.append(1 if val else 0)
             elif key in ("content_text", "status", "approved_by", "approved_by_role", "approved_at",
-                         "external_filing_reference", "external_filing_date", "template_id", "template_version"):
+                         "external_filing_reference", "external_filing_date", "template_id", "template_version",
+                         "organization_id"):
                 set_clauses.append(f"{key} = ?")
                 params.append(val)
 
@@ -7598,6 +7711,7 @@ def list_legal_document_drafts_for_case(case_id: str) -> List[Dict[str, Any]]:
         drafts = []
         for r in rows:
             d = dict(zip(cols, r))
+            d["organization_id"] = d.get("organization_id") or "GLOBAL_DEFAULT"
             d["exact_case_facts"] = json.loads(d["exact_case_facts_json"]) if d.get("exact_case_facts_json") else {}
             d["source_documents"] = json.loads(d["source_documents_json"]) if d.get("source_documents_json") else []
             d["legal_rule_result"] = json.loads(d["legal_rule_result_json"]) if d.get("legal_rule_result_json") else {}
@@ -7614,6 +7728,260 @@ def list_legal_document_drafts_for_case(case_id: str) -> List[Dict[str, Any]]:
         return drafts
     finally:
         conn.close()
+
+
+def store_institutional_delegation(delegation: Dict[str, Any]) -> bool:
+    """Store or update an institutional delegation record."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        cursor.execute("""
+            INSERT OR REPLACE INTO institutional_delegations (
+                delegation_id, granted_to_user_id, granted_to_role, granted_by_user_id,
+                granted_by_role, organization_id, jurisdiction, capability,
+                allowed_document_types_json, allowed_case_scope_json, valid_from,
+                valid_until, status, reason, created_at, revoked_at, revoked_by_user_id,
+                audit_reference
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            delegation["delegation_id"],
+            delegation["granted_to_user_id"],
+            delegation["granted_to_role"],
+            delegation["granted_by_user_id"],
+            delegation["granted_by_role"],
+            delegation.get("organization_id", "GLOBAL_DEFAULT"),
+            delegation.get("jurisdiction", "National / BNSS 2023"),
+            delegation["capability"],
+            json.dumps(delegation.get("allowed_document_types", ["*"])),
+            json.dumps(delegation.get("allowed_case_scope", ["*"])),
+            delegation["valid_from"],
+            delegation["valid_until"],
+            delegation.get("status", "ACTIVE"),
+            delegation.get("reason", ""),
+            delegation.get("created_at") or now_iso,
+            delegation.get("revoked_at"),
+            delegation.get("revoked_by_user_id"),
+            delegation.get("audit_reference", ""),
+        ))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to store institutional delegation: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_institutional_delegation(delegation_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve an institutional delegation by ID."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM institutional_delegations WHERE delegation_id = ?", (delegation_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cursor.description]
+        d = dict(zip(cols, row))
+        d["allowed_document_types"] = json.loads(d["allowed_document_types_json"]) if d.get("allowed_document_types_json") else ["*"]
+        d["allowed_case_scope"] = json.loads(d["allowed_case_scope_json"]) if d.get("allowed_case_scope_json") else ["*"]
+        return d
+    finally:
+        conn.close()
+
+
+def list_institutional_delegations(
+    user_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    capability: Optional[str] = None,
+    status: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """List institutional delegations matching filter parameters."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        query = "SELECT * FROM institutional_delegations WHERE 1=1"
+        params: List[Any] = []
+        if user_id:
+            query += " AND granted_to_user_id = ?"
+            params.append(user_id)
+        if organization_id and organization_id != "GLOBAL_DEFAULT":
+            query += " AND (organization_id = ? OR organization_id = 'GLOBAL_DEFAULT')"
+            params.append(organization_id)
+        if capability:
+            query += " AND capability = ?"
+            params.append(capability)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC"
+
+        cursor.execute(query, tuple(params))
+        rows = cursor.fetchall()
+        cols = [d[0] for d in cursor.description]
+        delegations = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            d["allowed_document_types"] = json.loads(d["allowed_document_types_json"]) if d.get("allowed_document_types_json") else ["*"]
+            d["allowed_case_scope"] = json.loads(d["allowed_case_scope_json"]) if d.get("allowed_case_scope_json") else ["*"]
+            delegations.append(d)
+        return delegations
+    finally:
+        conn.close()
+
+
+def revoke_institutional_delegation(delegation_id: str, revoked_by_user_id: str, reason: Optional[str] = None) -> bool:
+    """Revoke an active delegation immediately."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        cursor.execute("""
+            UPDATE institutional_delegations
+            SET status = 'REVOKED', revoked_at = ?, revoked_by_user_id = ?, reason = COALESCE(?, reason)
+            WHERE delegation_id = ?
+        """, (now_iso, revoked_by_user_id, reason, delegation_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def find_active_user_delegation(
+    user_id: str,
+    capability: str,
+    organization_id: Optional[str] = None,
+    case_id: Optional[str] = None,
+    document_type: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Find an active, valid, time-bound delegation for a user.
+    Enforces expiration, organization boundary, case scope, and document type constraints.
+    """
+    delegations = list_institutional_delegations(user_id=user_id, capability=capability, status="ACTIVE")
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    for d in delegations:
+        # Time bound verification
+        valid_from = d.get("valid_from", "")
+        valid_until = d.get("valid_until", "")
+        if valid_from and now_iso < valid_from:
+            continue
+        if valid_until and now_iso > valid_until:
+            # Mark expired in DB
+            try:
+                conn = get_db_connection()
+                c = conn.cursor()
+                c.execute("UPDATE institutional_delegations SET status = 'EXPIRED' WHERE delegation_id = ?", (d["delegation_id"],))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+            continue
+
+        # Organization scope verification
+        delg_org = d.get("organization_id", "GLOBAL_DEFAULT")
+        if organization_id and delg_org != "GLOBAL_DEFAULT" and organization_id != "GLOBAL_DEFAULT":
+            if delg_org != organization_id:
+                continue
+
+        # Case scope verification
+        case_scope = d.get("allowed_case_scope", ["*"])
+        if case_id and case_scope != ["*"] and "*" not in case_scope:
+            if case_id not in case_scope:
+                continue
+
+        # Document type / template verification
+        doc_scope = d.get("allowed_document_types", ["*"])
+        if document_type and doc_scope != ["*"] and "*" not in doc_scope:
+            clean_doc = document_type.lower()
+            if not any(clean_doc == str(dt).lower() for dt in doc_scope):
+                continue
+
+        return d
+
+    return None
+
+
+def store_document_preparation_requisition(req: Dict[str, Any]) -> bool:
+    """Store a document preparation requisition sent from DLSA to assigned counsel."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        cursor.execute("""
+            INSERT OR REPLACE INTO document_preparation_requisitions (
+                requisition_id, case_id, template_id, document_type, requested_by_user_id,
+                requested_by_role, assigned_counsel_id, assigned_counsel_name, urgency,
+                reason, missing_prerequisites_json, status, task_id, organization_id,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            req["requisition_id"],
+            req["case_id"],
+            req["template_id"],
+            req.get("document_type", "BAIL_APPLICATION"),
+            req["requested_by_user_id"],
+            req["requested_by_role"],
+            req.get("assigned_counsel_id"),
+            req.get("assigned_counsel_name"),
+            req.get("urgency", "NORMAL"),
+            req.get("reason", ""),
+            json.dumps(req.get("missing_prerequisites", [])),
+            req.get("status", "DOCUMENT_PREPARATION_REQUESTED"),
+            req.get("task_id"),
+            req.get("organization_id", "GLOBAL_DEFAULT"),
+            req.get("created_at") or now_iso,
+            req.get("updated_at") or now_iso,
+        ))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to store document preparation requisition: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_document_preparation_requisition(requisition_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve a document preparation requisition by ID."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM document_preparation_requisitions WHERE requisition_id = ?", (requisition_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cursor.description]
+        d = dict(zip(cols, row))
+        d["missing_prerequisites"] = json.loads(d["missing_prerequisites_json"]) if d.get("missing_prerequisites_json") else []
+        return d
+    finally:
+        conn.close()
+
+
+def list_document_preparation_requisitions_for_case(case_id: str) -> List[Dict[str, Any]]:
+    """List all document preparation requisitions for a case."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM document_preparation_requisitions 
+            WHERE case_id = ? 
+            ORDER BY created_at DESC
+        """, (case_id,))
+        rows = cursor.fetchall()
+        cols = [d[0] for d in cursor.description]
+        reqs = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            d["missing_prerequisites"] = json.loads(d["missing_prerequisites_json"]) if d.get("missing_prerequisites_json") else []
+            reqs.append(d)
+        return reqs
+    finally:
+        conn.close()
+
 
 
 

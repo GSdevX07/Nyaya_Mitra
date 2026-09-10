@@ -38,6 +38,8 @@ REPORTS_READ           = "reports:read"
 NOTIFICATIONS_READ     = "notifications:read"
 ACTIONS_TRIGGER        = "actions:trigger"
 USERS_MANAGE           = "users:manage"
+FIR_CREATE             = "fir:create"
+FIR_UPDATE             = "fir:update"
 
 
 def _deny(reason: str = "Access denied.") -> None:
@@ -61,21 +63,104 @@ def _facility_match(user: AuthUser, resource: dict[str, Any]) -> bool:
     fac = (resource.get("facility_id") or resource.get("jail_location") or "").lower().strip()
     if not fac:
         return False
-    user_facs = [str(f).lower().strip() for f in user.facility_ids]
-    for ufac in user_facs:
-        if ufac in fac or fac in ufac:
+    user_facilities = [str(f).lower().strip() for f in user.facility_ids]
+
+    # Check for specific jail unit numbers in Tihar (e.g., Jail No. 4 vs Jail No. 2)
+    user_has_tihar_4 = any("04" in f or "no. 4" in f or "jail 4" in f or "jail no. 4" in f for f in user_facilities)
+    user_has_tihar_2 = any("02" in f or "no. 2" in f or "jail 2" in f or "jail no. 2" in f for f in user_facilities)
+
+    if user_has_tihar_4 and not user_has_tihar_2:
+        if "tihar" in fac and ("2" in fac or "no. 2" in fac or "jail 2" in fac or "fac_tihar_jail_02" in fac):
+            return False
+        if "tihar" in fac and ("4" in fac or "no. 4" in fac or "jail 4" in fac or "fac_tihar_jail_04" in fac):
             return True
-        if "tihar" in ufac and "tihar" in fac:
+
+    if user_has_tihar_2 and not user_has_tihar_4:
+        if "tihar" in fac and ("4" in fac or "no. 4" in fac or "jail 4" in fac or "fac_tihar_jail_04" in fac):
+            return False
+        if "tihar" in fac and ("2" in fac or "no. 2" in fac or "jail 2" in fac or "fac_tihar_jail_02" in fac):
+            return True
+
+    for ufac in user_facilities:
+        if ufac == "tihar":
+            continue
+        if ufac in fac or fac in ufac:
             return True
         if "rohini" in ufac and "rohini" in fac:
             return True
+        if "lucknow" in ufac and "lucknow" in fac:
+            return True
         if "mandoli" in ufac and "mandoli" in fac:
             return True
+        if "bengaluru" in ufac and "bengaluru" in fac:
+            return True
+
+    if "tihar" in user_facilities and "tihar" in fac:
+        return True
+
     return False
 
 
 def _is_assigned(user: AuthUser, resource: dict[str, Any]) -> bool:
     return resource.get("assigned_lawyer_id") == user.id
+
+
+def _police_scope_match(user: AuthUser, resource: dict[str, Any]) -> bool:
+    """
+    Enforce strict 3-tier hierarchy: station -> district -> organization.
+    Fail-closed if any level with specified constraints fails.
+    """
+    if user.role == Role.PLATFORM_ADMIN:
+        return True
+
+    # 1. Organization Tier
+    res_org = resource.get("org_id") or resource.get("organization_id") or ""
+    if res_org and user.org_id:
+        if (
+            res_org != "GLOBAL_DEFAULT"
+            and user.org_id != "GLOBAL_DEFAULT"
+            and res_org != "org_dlsa_central"
+            and user.org_id != res_org
+            and user.org_id != resource.get("police_station_id", "")
+            and not (user.role == Role.GOV_ADMIN and ("slsa" in user.org_id and "dlsa" in res_org))
+        ):
+            return False
+
+    # 2. District Tier
+    res_dist = (resource.get("district") or "").strip().lower()
+    auth_dists = [d.strip().lower() for d in (getattr(user, "authorized_district_ids", None) or []) if d]
+    user_dist = (getattr(user, "district", None) or "").strip().lower()
+    if user_dist and user_dist not in auth_dists:
+        auth_dists.append(user_dist)
+    if res_dist and auth_dists and not any(ad in ("all", "all (statewide)") for ad in auth_dists):
+        if not any(ad in res_dist or res_dist in ad for ad in auth_dists):
+            return False
+
+    # 3. Station Tier
+    user_st_id = (getattr(user, "police_station_id", None) or "").strip().lower()
+    user_st_name = (getattr(user, "police_station", None) or "").strip().lower()
+    user_jur_ids = [j.strip().lower() for j in (getattr(user, "jurisdiction_ids", []) or []) if j]
+
+    res_st_id = (resource.get("police_station_id") or "").strip().lower()
+    res_st_name = (resource.get("police_station") or "").strip().lower()
+
+    if res_st_id:
+        if user_st_id and user_st_id == res_st_id:
+            return True
+        if res_st_id in user_jur_ids:
+            return True
+        return False
+
+    if res_st_name:
+        if user_st_name and (user_st_name == res_st_name or user_st_name in res_st_name or res_st_name in user_st_name):
+            return True
+        return False
+
+    # If resource refers to an existing case and has neither station id nor station name, fail-closed
+    if resource.get("case_id"):
+        return False
+
+    return True
 
 
 def check_permission(
@@ -125,23 +210,29 @@ def check_permission(
 
     # ── Read-only auditor ─────────────────────────────────────────────────────
     if role == Role.READ_ONLY_AUDITOR:
-        if action in (AUDIT_READ, CASES_READ_LIST, CASES_READ_DETAIL, REPORTS_READ):
+        if action in (AUDIT_READ, CASES_READ_LIST, CASES_READ_DETAIL, REPORTS_READ, NOTIFICATIONS_READ):
             return
         _deny("Read-only auditor cannot perform write operations.")
 
     # ── Accused user — own case only ──────────────────────────────────────────
     if role == Role.ACCUSED_USER:
-        if action == ACCUSED_SELF_READ:
+        if action in (ACCUSED_SELF_READ, CASES_READ_DETAIL):
             if user.linked_case_id and r.get("case_id") == user.linked_case_id:
                 return
-        _deny("Accused users may only view their own case.")
+            _deny("Accused users may only view their own linked case.")
+        if action == NOTIFICATIONS_READ:
+            return
+        _deny(f"Accused users cannot perform action: {action}")
 
     # ── Family guardian ───────────────────────────────────────────────────────
     if role == Role.FAMILY_GUARDIAN:
-        if action == ACCUSED_FAMILY_READ:
+        if action in (ACCUSED_FAMILY_READ, CASES_READ_DETAIL):
             if user.linked_case_id and r.get("case_id") == user.linked_case_id:
                 return
-        _deny("Family/guardian may only view their linked accused person's case.")
+            _deny("Family/guardian may only view their linked accused person's case.")
+        if action == NOTIFICATIONS_READ:
+            return
+        _deny(f"Family/guardian cannot perform action: {action}")
 
     # ── Controlled external advocate ──────────────────────────────────────────
     if role == Role.CONTROLLED_EXTERNAL_ADVOCATE:
@@ -154,21 +245,39 @@ def check_permission(
     # ── Jail officer ──────────────────────────────────────────────────────────
     if role == Role.JAIL_OFFICER:
         allowed = {CASES_READ_LIST, CASES_READ_DETAIL, ACCUSED_READ_IDENTITY,
-                   CUSTODY_UPDATE_STATUS, DOCUMENTS_UPLOAD, NOTIFICATIONS_READ}
+                   ACCUSED_UPDATE_IDENTITY, CUSTODY_UPDATE_STATUS, DOCUMENTS_UPLOAD, NOTIFICATIONS_READ}
         if action not in allowed:
             _deny(f"Jail officers cannot perform action: {action}")
-        if action == CUSTODY_UPDATE_STATUS and not _facility_match(user, r):
-            _deny("Jail officers can only update custody for their own facility.")
+        if action in (CUSTODY_UPDATE_STATUS, ACCUSED_UPDATE_IDENTITY) and not _facility_match(user, r):
+            _deny("Jail officers can only update custody/profile records for their own facility.")
+        if action == CASES_READ_DETAIL and r and not _facility_match(user, r):
+            _deny("Jail officers can only access cases for their own facility.")
         return
 
     # ── Police officer ────────────────────────────────────────────────────────
     if role == Role.POLICE_OFFICER:
-        allowed = {CASES_READ_LIST, CASES_READ_DETAIL, ACCUSED_READ_IDENTITY,
-                   DOCUMENTS_UPLOAD, NOTIFICATIONS_READ}
+        denied_messages = {
+            CASES_APPROVE: "Police officers cannot approve legal documents.",
+            CASES_FILE_IN_COURT: "Police officers cannot file documents in court.",
+            CASES_ASSIGN_LAWYER: "Police officers cannot assign lawyers.",
+            CASES_READ_MEDICAL: "Police officers do not have medical clearance.",
+            EVIDENCE_VERIFY: "Police officers cannot verify evidence for court or DLSA.",
+            RAG_INGEST: "Police officers cannot ingest legal knowledge.",
+            EXPORT_CASE_FILE: "Police officers cannot export defence case files.",
+            AUDIT_READ: "Police officers cannot access statutory audit ledger.",
+        }
+        if action in denied_messages:
+            _deny(denied_messages[action])
+
+        allowed = {
+            CASES_READ_LIST, CASES_READ_DETAIL, ACCUSED_READ_IDENTITY,
+            DOCUMENTS_UPLOAD, NOTIFICATIONS_READ, ACTIONS_TRIGGER,
+            FIR_CREATE, FIR_UPDATE,
+        }
         if action not in allowed:
             _deny(f"Police officers cannot perform action: {action}")
-        if not _org_match(user, r):
-            _deny("Police officers can only access records in their district.")
+        if r and not _police_scope_match(user, r):
+            _deny("Police officers can only access/mutate records within their authorized police station, district, and organization jurisdiction.")
         return
 
     # ── DLSA officer ──────────────────────────────────────────────────────────
@@ -199,25 +308,47 @@ def check_permission(
     # ── Supervising legal officer ─────────────────────────────────────────────
     if role == Role.SUPERVISING_LEGAL_OFFICER:
         allowed = {CASES_READ_LIST, CASES_READ_DETAIL, CASES_READ_MEDICAL,
-                   CASES_APPROVE, CASES_FILE_IN_COURT, CASES_ASSIGN_LAWYER,
+                   CASES_APPROVE,
                    DOCUMENTS_DOWNLOAD, DOCUMENTS_UPLOAD, EVIDENCE_VERIFY,
                    EXPORT_CASE_FILE, REPORTS_READ, NOTIFICATIONS_READ, ACTIONS_TRIGGER}
         if action not in allowed:
             _deny(f"Supervising officers cannot perform action: {action}")
         if not _org_match(user, r):
             _deny("Supervising officers can only act within their organization.")
-        if action == CASES_FILE_IN_COURT:
-            if r.get("status") != "APPROVED_READY_FOR_FILING":
-                _deny("Case must be in APPROVED_READY_FOR_FILING status to file.")
+        auth_dists = [d.strip().lower() for d in (getattr(user, "authorized_district_ids", None) or []) if d]
+        user_dist = (getattr(user, "district", None) or "").strip().lower()
+        if user_dist and user_dist not in auth_dists:
+            auth_dists.append(user_dist)
+        res_dist = (r.get("district") or "").strip().lower()
+        if res_dist and auth_dists and "all" not in auth_dists and "all (statewide)" not in auth_dists:
+            if not any(ad in res_dist or res_dist in ad for ad in auth_dists):
+                _deny("Supervising officers can only act within their authorized district jurisdiction.")
         return
 
     # ── Gov admin ─────────────────────────────────────────────────────────────
     if role == Role.GOV_ADMIN:
-        denied = {ACCUSED_SELF_READ, ACCUSED_FAMILY_READ, INTEGRATION_RUN}
+        denied = {
+            CASES_APPROVE,
+            CASES_FILE_IN_COURT,
+            CASES_TAKE_OR_DECLINE,
+            ACCUSED_SELF_READ,
+            ACCUSED_FAMILY_READ,
+            INTEGRATION_RUN,
+            EVIDENCE_VERIFY,
+            ACCUSED_UPDATE_IDENTITY,
+        }
         if action in denied:
-            _deny(f"Gov admin cannot perform action: {action}")
+            _deny(f"Gov admin is an institutional governance role and cannot perform '{action}'.")
         if not _org_match(user, r):
-            _deny("Gov admin can only access their organization's records.")
+            _deny("Gov admin can only access their authorized organization's records.")
+        auth_dists = [d.strip().lower() for d in (getattr(user, "authorized_district_ids", None) or []) if d]
+        user_dist = (getattr(user, "district", None) or "").strip().lower()
+        if user_dist and user_dist not in auth_dists:
+            auth_dists.append(user_dist)
+        res_dist = (r.get("district") or "").strip().lower()
+        if res_dist and auth_dists and "all" not in auth_dists and "all (statewide)" not in auth_dists:
+            if not any(ad in res_dist or res_dist in ad for ad in auth_dists):
+                _deny("Gov admin can only access records within their authorized state/district jurisdiction.")
         return
 
     _deny(f"Role {role} does not have permission for action: {action}")

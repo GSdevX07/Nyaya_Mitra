@@ -26,6 +26,7 @@ import type {
   ReadinessReport,
   DraftDiffResult,
   SubmissionPackageManifest,
+  InstitutionalDelegation,
 } from "../lib/api";
 import {
   fetchDocumentTemplates,
@@ -42,6 +43,9 @@ import {
   recordExternalFiling,
   fetchDraftDiff,
   exportDraftDocument,
+  exportDraftPDF,
+  fetchMyActiveDelegationApi,
+  requestDocumentPreparationApi,
 } from "../lib/api";
 import DocumentDiffViewer from "../components/documents/DocumentDiffViewer";
 import DocumentReadinessCard from "../components/documents/DocumentReadinessCard";
@@ -57,21 +61,40 @@ export const DocumentWorkspacePage: React.FC = () => {
 
   // State
   const [caseId, setCaseId] = useState<string>(caseIdFromUrl);
-  const [allCases, setAllCases] = useState<Array<{ case_id: string; name: string }>>([]);
+  const [allCases, setAllCases] = useState<Array<{ case_id: string; name: string; jail_location?: string }>>([]);
   const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("tmpl_bnss_479_bail_v1");
   const [caseDrafts, setCaseDrafts] = useState<LegalDocumentDraft[]>([]);
   const [activeDraft, setActiveDraft] = useState<LegalDocumentDraft | null>(null);
 
-  // Role capability flags aligned with 11-Role Matrix (Stage 19)
-  const canEditDraft = hasRole("DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN") && !activeDraft?.is_immutable;
-  const canApproveDraft = hasRole("DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER", "PLATFORM_ADMIN") && !activeDraft?.is_immutable;
-  const canRejectDraft = hasRole("DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "PLATFORM_ADMIN") && !activeDraft?.is_immutable;
-  const canGenerateDraft = hasRole("DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "PLATFORM_ADMIN");
-  const canComment = hasRole("DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "PLATFORM_ADMIN");
-  const canPackage = hasRole("DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "PLATFORM_ADMIN");
-  const canRecordFiling = hasRole("DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER", "DLSA_OFFICER", "PLATFORM_ADMIN");
-  const canExportInternalNotes = hasRole("DEFENSE_ADVOCATE", "SUPERVISING_LEGAL_OFFICER", "READ_ONLY_AUDITOR", "PLATFORM_ADMIN");
+  // Role capability flags aligned with Section 37 11-Role Matrix (Stage 19)
+  const isAdvocate = hasRole("DEFENSE_ADVOCATE");
+  const isSupervisor = hasRole("SUPERVISING_LEGAL_OFFICER");
+  const isDlsa = hasRole("DLSA_OFFICER");
+  const isPlatformAdmin = hasRole("PLATFORM_ADMIN");
+  const isAuditor = hasRole("READ_ONLY_AUDITOR");
+  const isGovAdmin = hasRole("GOV_ADMIN");
+
+  const [delegationInfo, setDelegationInfo] = useState<InstitutionalDelegation | null>(null);
+  const [isCheckingDelegation, setIsCheckingDelegation] = useState<boolean>(false);
+  const [isDelegatedDrafting, setIsDelegatedDrafting] = useState<boolean>(false);
+
+  // Requisition Modal State
+  const [showReqModal, setShowReqModal] = useState<boolean>(false);
+  const [reqUrgency, setReqUrgency] = useState<"ROUTINE" | "URGENT" | "CRITICAL">("URGENT");
+  const [reqReason, setReqReason] = useState<string>("");
+  const [reqMissingPrereqs, setReqMissingPrereqs] = useState<string[]>([]);
+  const [reqSending, setReqSending] = useState<boolean>(false);
+
+  // Human-only legal approval reserved for assigned counsel and supervising legal officers
+  const canEditDraft = (isAdvocate || isSupervisor || (isDlsa && isDelegatedDrafting && delegationInfo?.capability === "CAN_EDIT_DOCUMENT_DRAFT")) && !activeDraft?.is_immutable;
+  const canApproveDraft = (isAdvocate || isSupervisor) && !activeDraft?.is_immutable;
+  const canRejectDraft = (isAdvocate || isSupervisor || isDlsa) && !activeDraft?.is_immutable;
+  const canGenerateDraft = isAdvocate || isSupervisor || (isDlsa && isDelegatedDrafting && (delegationInfo?.capability === "CAN_INITIATE_DOCUMENT_DRAFT" || delegationInfo?.capability === "CAN_EDIT_DOCUMENT_DRAFT"));
+  const canComment = isAdvocate || isSupervisor || isDlsa;
+  const canPackage = isAdvocate || isSupervisor;
+  const canRecordFiling = isAdvocate || isSupervisor;
+  const canExportInternalNotes = isAdvocate || isSupervisor || isAuditor;
 
   // Editor states
   const [workingContent, setWorkingContent] = useState<string>("");
@@ -108,6 +131,7 @@ export const DocumentWorkspacePage: React.FC = () => {
             data.map((c: any) => ({
               case_id: c.case_id,
               name: c.name || c.accused_name || "Accused Inmate",
+              jail_location: c.jail_location || c.facility_name || "Custody",
             }))
           );
         }
@@ -129,7 +153,7 @@ export const DocumentWorkspacePage: React.FC = () => {
       .then((data) => {
         setTemplates(data);
         if (data.length > 0 && !selectedTemplateId) {
-          setSelectedTemplateId(data[0].template_id);
+          setSelectedTemplateId(data[0].template_id || data[0].id || "");
         }
       })
       .catch((err) => console.error("Error loading templates:", err));
@@ -181,6 +205,37 @@ export const DocumentWorkspacePage: React.FC = () => {
     }
   }, [activeDraft?.draft_id]);
 
+  // Query active delegation for DLSA Officer
+  useEffect(() => {
+    if (isDlsa && caseId) {
+      setIsCheckingDelegation(true);
+      fetchMyActiveDelegationApi({
+        case_id: caseId,
+        capability: "CAN_INITIATE_DOCUMENT_DRAFT",
+        document_type: selectedTemplateId,
+      })
+        .then((res) => {
+          if (res.is_delegated && res.delegation) {
+            setDelegationInfo(res.delegation);
+            setIsDelegatedDrafting(true);
+          } else {
+            setDelegationInfo(null);
+            setIsDelegatedDrafting(false);
+          }
+        })
+        .catch(() => {
+          setDelegationInfo(null);
+          setIsDelegatedDrafting(false);
+        })
+        .finally(() => {
+          setIsCheckingDelegation(false);
+        });
+    } else {
+      setDelegationInfo(null);
+      setIsDelegatedDrafting(false);
+    }
+  }, [isDlsa, caseId, selectedTemplateId]);
+
   // Handle Draft Generation
   const handleGenerateDraft = async () => {
     setIsActionLoading(true);
@@ -196,6 +251,40 @@ export const DocumentWorkspacePage: React.FC = () => {
       setActionError(err.message || "Failed to generate draft.");
     } finally {
       setIsActionLoading(false);
+    }
+  };
+
+  // DLSA Requisition to Assigned Defence Counsel
+  const handleOpenRequisitionModal = () => {
+    const tmpl = templates.find((t) => t.template_id === selectedTemplateId);
+    const tmplName = tmpl?.name || "Bail Application";
+    setReqReason(`Formal legal aid drafting requisition: Undertrial inmate in case ${caseId} requires ${tmplName} prepared under statutory provisions.`);
+    setReqMissingPrereqs([]);
+    setShowReqModal(true);
+  };
+
+  const handleConfirmRequisition = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setReqSending(true);
+    setActionError(null);
+    try {
+      const tmpl = templates.find((t) => t.template_id === selectedTemplateId);
+      const docType = tmpl?.doc_type || "BAIL_APPLICATION";
+      const res = await requestDocumentPreparationApi({
+        case_id: caseId,
+        template_id: selectedTemplateId,
+        document_type: docType,
+        urgency: reqUrgency,
+        reason: reqReason,
+        missing_prerequisites: reqMissingPrereqs,
+      });
+      setShowReqModal(false);
+      setActionSuccess(res.message || `Requisition dispatched: Task created for assigned counsel in UniversalTaskQueue for ${caseId}.`);
+      setTimeout(() => setActionSuccess(null), 5000);
+    } catch (err: any) {
+      setActionError(err.message || "Failed to dispatch document preparation requisition.");
+    } finally {
+      setReqSending(false);
     }
   };
 
@@ -349,7 +438,7 @@ export const DocumentWorkspacePage: React.FC = () => {
     }
   };
 
-  // Export clean or internal
+  // Export clean or internal text
   const handleExport = async (includeInternalNotes: boolean) => {
     if (!activeDraft) return;
     try {
@@ -366,6 +455,25 @@ export const DocumentWorkspacePage: React.FC = () => {
       URL.revokeObjectURL(url);
     } catch (err: any) {
       setActionError(err.message || "Failed to export document.");
+    }
+  };
+
+  // Export certified court PDF (%PDF-1.4)
+  const handleExportPDF = async (includeInternalNotes: boolean = false) => {
+    if (!activeDraft) return;
+    try {
+      const blob = await exportDraftPDF(activeDraft.draft_id, includeInternalNotes);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      const typeLabel = includeInternalNotes ? "INTERNAL_CERTIFIED" : "EXTERNAL_COURT";
+      link.download = `Petition_${activeDraft.case_id}_v${activeDraft.version_number}_${typeLabel}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setActionError(err.message || "Failed to export PDF document.");
     }
   };
 
@@ -430,16 +538,16 @@ export const DocumentWorkspacePage: React.FC = () => {
               {allCases.length > 0 ? (
                 <>
                   {!allCases.some((c) => c.case_id === caseId) && (
-                    <option value={caseId}>{caseId} (Active Matter)</option>
+                    <option value={caseId}>{caseId} — Active Matter</option>
                   )}
                   {allCases.map((c) => (
                     <option key={c.case_id} value={c.case_id}>
-                      {c.case_id} ({c.name})
+                      {c.case_id} — {c.name} — {c.jail_location || "Custody"}
                     </option>
                   ))}
                 </>
               ) : (
-                <option value={caseId}>{caseId} (Active Matter)</option>
+                <option value={caseId}>{caseId} — Active Matter</option>
               )}
             </select>
           </div>
@@ -452,6 +560,19 @@ export const DocumentWorkspacePage: React.FC = () => {
           >
             <RefreshCw className="w-4 h-4" />
           </button>
+        </div>
+      </div>
+
+      {/* Prominent Legal Advisory Banner */}
+      <div className="bg-secondary/70 border-l-4 border-foreground p-4 rounded-sm flex items-start space-x-3 text-xs font-mono shadow-sm">
+        <ShieldCheck className="w-5 h-5 text-foreground shrink-0 mt-0.5" />
+        <div>
+          <div className="font-bold text-foreground tracking-wide uppercase">
+            AI-GENERATED PROVISIONAL DRAFT — MANDATORY HUMAN REVIEW & LEGAL SIGN-OFF REQUIRED
+          </div>
+          <div className="text-muted-foreground font-serif text-[11px] mt-0.5 leading-relaxed">
+            All AI-assisted drafting outputs are strictly provisional candidate drafts and never constitute final judicial pleadings or filings. Formal scrutiny, citation grounding, and assigned legal counsel sign-off are required prior to court submission.
+          </div>
         </div>
       </div>
 
@@ -532,31 +653,73 @@ export const DocumentWorkspacePage: React.FC = () => {
           )}
         </div>
 
-        {/* Template Selector & Generate Button */}
-        {canGenerateDraft && (
-          <div className="flex items-center space-x-2">
-            <select
-              value={selectedTemplateId}
-              onChange={(e) => setSelectedTemplateId(e.target.value)}
-              className="bg-background border border-border text-xs font-mono text-foreground rounded-sm px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary max-w-xs"
-            >
-              {templates.map((t) => (
-                <option key={t.template_id} value={t.template_id}>
-                  {t.name} (v{t.version})
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={handleGenerateDraft}
-              disabled={isActionLoading}
-              className="px-3.5 py-1.5 bg-primary hover:opacity-90 text-primary-foreground rounded-sm text-xs font-mono font-bold uppercase tracking-wider flex items-center space-x-1.5 disabled:opacity-50 transition-opacity shadow-sm"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Generate Grounded Draft</span>
-            </button>
-          </div>
-        )}
+        {/* Template Selector & Requisition / Generation Controls */}
+        <div className="flex items-center space-x-2">
+          {isPlatformAdmin ? (
+            <div className="px-3 py-1.5 rounded-sm bg-muted/60 border border-border text-[11px] font-mono text-muted-foreground">
+              Technical Infrastructure View &bull; Drafting Restricted
+            </div>
+          ) : isGovAdmin ? (
+            <div className="px-3 py-1.5 rounded-sm bg-muted/60 border border-border text-[11px] font-mono text-muted-foreground">
+              Statewide Governance Oversight &bull; Read Only
+            </div>
+          ) : isAuditor ? (
+            <div className="px-3 py-1.5 rounded-sm bg-muted/60 border border-border text-[11px] font-mono text-muted-foreground">
+              Audit Scrutiny Console &bull; Read Only
+            </div>
+          ) : (
+            <>
+              <select
+                value={selectedTemplateId}
+                onChange={(e) => setSelectedTemplateId(e.target.value)}
+                className="bg-background border border-border text-xs font-mono text-foreground rounded-sm px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary max-w-xs"
+              >
+                {templates.map((t) => (
+                  <option key={t.template_id} value={t.template_id}>
+                    {t.name} ({t.doc_type} | v{t.version} | {t.jurisdiction || "National"})
+                  </option>
+                ))}
+              </select>
+
+              {isDlsa && !isDelegatedDrafting ? (
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={handleOpenRequisitionModal}
+                    className="px-3.5 py-1.5 bg-primary hover:opacity-90 text-primary-foreground rounded-sm text-xs font-mono font-bold uppercase tracking-wider flex items-center space-x-1.5 shadow-sm transition-opacity"
+                    title="Route document preparation requirement to assigned Panel Lawyer"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Send to Assigned Counsel</span>
+                  </button>
+                  {isCheckingDelegation && (
+                    <span className="text-[10px] font-mono text-muted-foreground animate-pulse">Checking delegation...</span>
+                  )}
+                </div>
+              ) : (
+                canGenerateDraft && (
+                  <div className="flex items-center space-x-2">
+                    {isDlsa && delegationInfo && (
+                      <span className="hidden md:inline-flex items-center px-2 py-1 bg-emerald-500/10 border border-emerald-600/40 text-emerald-800 text-[10px] font-mono font-bold rounded-sm">
+                        <ShieldCheck className="w-3 h-3 mr-1 text-emerald-700" />
+                        Delegation Active: {delegationInfo.delegation_id}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleGenerateDraft}
+                      disabled={isActionLoading}
+                      className="px-3.5 py-1.5 bg-primary hover:opacity-90 text-primary-foreground rounded-sm text-xs font-mono font-bold uppercase tracking-wider flex items-center space-x-1.5 disabled:opacity-50 transition-opacity shadow-sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>{isDlsa ? "Generate (Delegated)" : "Generate Grounded Draft"}</span>
+                    </button>
+                  </div>
+                )
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Main Workspace Layout */}
@@ -708,28 +871,49 @@ export const DocumentWorkspacePage: React.FC = () => {
                   <span>{isValidating ? "Auditing..." : "Audit Readiness"}</span>
                 </button>
 
-                {/* Clean Court Copy Export */}
+                {/* Clean Court Copy Export (Text & PDF) */}
                 <button
                   type="button"
                   onClick={() => handleExport(false)}
-                  className="px-3 py-1.5 rounded-sm bg-secondary hover:bg-muted text-foreground font-bold uppercase flex items-center space-x-1.5 border border-border transition-colors"
+                  className="px-2.5 py-1.5 rounded-sm bg-secondary hover:bg-muted text-foreground font-bold uppercase flex items-center space-x-1.5 border border-border transition-colors text-[11px]"
                   title="Export Clean Court Copy without internal reviewer comments"
                 >
-                  <Download className="w-4 h-4 text-primary" />
-                  <span>Court Copy</span>
+                  <Download className="w-3.5 h-3.5 text-primary" />
+                  <span>Court TXT</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleExportPDF(false)}
+                  className="px-2.5 py-1.5 rounded-sm bg-secondary hover:bg-muted text-foreground font-bold uppercase flex items-center space-x-1.5 border border-border transition-colors text-[11px]"
+                  title="Export Certified Court-Grade PDF (%PDF-1.4)"
+                >
+                  <FileText className="w-3.5 h-3.5 text-primary" />
+                  <span>Court PDF</span>
                 </button>
 
                 {/* Internal Certified Copy Export for Authorized Roles */}
                 {canExportInternalNotes && (
-                  <button
-                    type="button"
-                    onClick={() => handleExport(true)}
-                    className="px-3 py-1.5 rounded-sm bg-secondary hover:bg-muted text-foreground font-bold uppercase flex items-center space-x-1.5 border border-border transition-colors"
-                    title="Export Internal Certified Copy with Reviewer Commentary"
-                  >
-                    <Download className="w-4 h-4 text-primary" />
-                    <span>Internal Certified</span>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleExport(true)}
+                      className="px-2.5 py-1.5 rounded-sm bg-secondary hover:bg-muted text-foreground font-bold uppercase flex items-center space-x-1.5 border border-border transition-colors text-[11px]"
+                      title="Export Internal Certified Copy with Reviewer Commentary"
+                    >
+                      <Download className="w-3.5 h-3.5 text-primary" />
+                      <span>Internal TXT</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleExportPDF(true)}
+                      className="px-2.5 py-1.5 rounded-sm bg-secondary hover:bg-muted text-foreground font-bold uppercase flex items-center space-x-1.5 border border-border transition-colors text-[11px]"
+                      title="Export Internal Certified PDF with Reviewer Commentary"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-primary" />
+                      <span>Internal PDF</span>
+                    </button>
+                  </>
                 )}
               </div>
 
@@ -1136,7 +1320,7 @@ export const DocumentWorkspacePage: React.FC = () => {
                   </form>
                 ) : (
                   <p className="text-[11px] font-mono text-muted-foreground pt-3 border-t border-border italic">
-                    External court filing logging is restricted to assigned counsel and authorized DLSA officers.
+                    External court filing logging is strictly restricted to assigned defense counsel and supervising legal officers.
                   </p>
                 )}
 
@@ -1159,15 +1343,158 @@ export const DocumentWorkspacePage: React.FC = () => {
           <p className="text-xs font-serif text-muted-foreground max-w-md mx-auto leading-relaxed">
             Click &ldquo;Generate Grounded Draft&rdquo; above to initiate a provisional legal petition anchored to verified case facts and statutory Section 479 BNSS guidelines.
           </p>
-          <button
-            type="button"
-            onClick={handleGenerateDraft}
-            disabled={isActionLoading}
-            className="px-4 py-2 bg-primary hover:opacity-90 text-primary-foreground rounded-sm text-xs font-mono font-bold uppercase tracking-wider inline-flex items-center space-x-1.5 disabled:opacity-50 transition-opacity shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Generate Grounded Draft</span>
-          </button>
+          {isDlsa && !isDelegatedDrafting ? (
+            <button
+              type="button"
+              onClick={handleOpenRequisitionModal}
+              className="px-4 py-2 bg-primary hover:opacity-90 text-primary-foreground rounded-sm text-xs font-mono font-bold uppercase tracking-wider inline-flex items-center space-x-1.5 shadow-sm transition-opacity"
+            >
+              <Send className="w-4 h-4" />
+              <span>Send to Assigned Counsel</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleGenerateDraft}
+              disabled={isActionLoading}
+              className="px-4 py-2 bg-primary hover:opacity-90 text-primary-foreground rounded-sm text-xs font-mono font-bold uppercase tracking-wider inline-flex items-center space-x-1.5 disabled:opacity-50 transition-opacity shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{isDlsa ? "Generate (Delegated)" : "Generate Grounded Draft"}</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* DLSA Document Preparation Requisition Modal */}
+      {showReqModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-card border-2 border-border max-w-lg w-full rounded-sm shadow-xl p-6 font-mono space-y-4">
+            <div className="flex items-start justify-between border-b border-border pb-3">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-wide text-foreground">
+                  Institutional Document Preparation Requisition
+                </h3>
+                <p className="text-[11px] font-serif text-muted-foreground mt-0.5">
+                  Matter: {caseId} &bull; Requisitioning Authority: DLSA Officer
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReqModal(false)}
+                className="text-muted-foreground hover:text-foreground text-sm font-bold"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmRequisition} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block font-bold text-foreground text-[10px] uppercase mb-1">
+                  Document Template / Type
+                </label>
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) => setSelectedTemplateId(e.target.value)}
+                  className="w-full bg-background border border-border rounded-sm p-2 text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  {templates.map((t) => (
+                    <option key={t.template_id} value={t.template_id}>
+                      {t.name} ({t.doc_type})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-foreground text-[10px] uppercase mb-1">
+                  Urgency Classification
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(["ROUTINE", "URGENT", "CRITICAL"] as const).map((urg) => (
+                    <button
+                      key={urg}
+                      type="button"
+                      onClick={() => setReqUrgency(urg)}
+                      className={`py-1.5 px-2 border rounded-sm font-bold text-[10px] uppercase transition-colors ${
+                        reqUrgency === urg
+                          ? "border-primary bg-primary/10 text-primary shadow-sm"
+                          : "border-border bg-secondary hover:bg-muted text-foreground"
+                      }`}
+                    >
+                      {urg}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-foreground text-[10px] uppercase mb-1">
+                  Missing Prerequisites Checklist (Optional)
+                </label>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  {[
+                    { id: "custody_certificate", label: "Custody Certificate" },
+                    { id: "remand_order", label: "Remand Order" },
+                    { id: "fir_copy", label: "FIR Copy" },
+                    { id: "charge_sheet", label: "Charge Sheet" },
+                  ].map((p) => {
+                    const isChecked = reqMissingPrereqs.includes(p.id);
+                    return (
+                      <label
+                        key={p.id}
+                        className="flex items-center space-x-2 border border-border p-1.5 rounded-sm bg-secondary/50 cursor-pointer text-foreground"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setReqMissingPrereqs([...reqMissingPrereqs, p.id]);
+                            } else {
+                              setReqMissingPrereqs(reqMissingPrereqs.filter((x) => x !== p.id));
+                            }
+                          }}
+                          className="rounded-sm border-border"
+                        />
+                        <span>{p.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-foreground text-[10px] uppercase mb-1">
+                  Factual Grounds & Institutional Coordination Notes
+                </label>
+                <textarea
+                  value={reqReason}
+                  onChange={(e) => setReqReason(e.target.value)}
+                  rows={3}
+                  placeholder="Enter statutory grounds or specific instructions for assigned counsel..."
+                  className="w-full bg-background border border-border rounded-sm p-2 text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-primary text-xs"
+                />
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-3 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setShowReqModal(false)}
+                  className="px-3 py-1.5 border border-border bg-secondary hover:bg-muted text-foreground rounded-sm text-xs font-mono uppercase"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={reqSending || !reqReason.trim()}
+                  className="px-4 py-1.5 bg-primary hover:opacity-90 text-primary-foreground rounded-sm text-xs font-mono font-bold uppercase tracking-wider disabled:opacity-50 transition-opacity"
+                >
+                  {reqSending ? "Dispatching..." : "Dispatch to Assigned Counsel"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

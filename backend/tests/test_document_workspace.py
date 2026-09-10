@@ -17,12 +17,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from datetime import datetime, timezone, timedelta
 from app.database import (
     init_db,
     get_case,
     get_document_templates,
     get_legal_document_draft,
     list_legal_document_drafts_for_case,
+    store_institutional_delegation,
 )
 from app.auth.tokens import create_access_token
 from app.auth.roles import Role
@@ -367,15 +369,22 @@ def test_secure_document_export_segregation():
     )
     assert res_admin_internal.status_code == 403
 
-    # 3. Controlled External Advocate requests internal notes -> permitted to export, but internal notes stripped to EXTERNAL_COURT
+    # 3. Controlled External Advocate requests internal notes -> 403 Forbidden (internal notes strictly restricted)
     headers_ext = get_auth_headers(Role.CONTROLLED_EXTERNAL_ADVOCATE.value)
     res_ext_internal = client.get(
         f"/api/documents/drafts/{draft_id}/export?include_internal_notes=true",
         headers=headers_ext,
     )
-    assert res_ext_internal.status_code == 200
-    assert res_ext_internal.json()["export_type"] == "EXTERNAL_COURT"
-    assert "CONFIDENTIAL" not in res_ext_internal.json()["exported_text"]
+    assert res_ext_internal.status_code == 403
+
+    # Controlled External Advocate exporting regular court document succeeds
+    res_ext_court = client.get(
+        f"/api/documents/drafts/{draft_id}/export?include_internal_notes=false",
+        headers=headers_ext,
+    )
+    assert res_ext_court.status_code == 200
+    assert res_ext_court.json()["export_type"] == "EXTERNAL_COURT"
+    assert "CONFIDENTIAL" not in res_ext_court.json()["exported_text"]
 
     # 3. Supervising Legal Officer requests internal notes -> included
     res_sup_internal = client.get(
@@ -413,7 +422,53 @@ def test_dlsa_officer_boundaries():
     """Verify DLSA Officer allowed and disallowed actions as per Stage 19 matrix."""
     headers_dlsa = get_auth_headers(Role.DLSA_OFFICER.value)
 
-    # 1. DLSA Officer CAN initiate draft workflow where delegated
+    # 1. DLSA Officer CANNOT initiate draft workflow without delegation (403 Forbidden)
+    res_gen_blocked = client.post(
+        "/api/documents/drafts/generate",
+        json={"case_id": "UTP-0001", "template_id": "tmpl_bnss_479_bail_v1"},
+        headers=headers_dlsa,
+    )
+    assert res_gen_blocked.status_code == 403
+    assert "delegation" in res_gen_blocked.json()["detail"].lower()
+
+    # 2. DLSA Officer CAN request document preparation (routing requisition to defense counsel)
+    res_req = client.post(
+        "/api/documents/drafts/request-preparation",
+        json={
+            "case_id": "UTP-0001",
+            "template_id": "tmpl_bnss_479_bail_v1",
+            "document_type": "BAIL_APPLICATION",
+            "urgency": "URGENT",
+            "reason": "Section 479 BNSS eligibility threshold satisfied. Urgent petition required.",
+            "missing_prerequisites": ["custody_certificate"],
+        },
+        headers=headers_dlsa,
+    )
+    assert res_req.status_code in (200, 201)
+    req_data = res_req.json()
+    assert req_data["case_id"] == "UTP-0001"
+    assert req_data["task_id"] is not None
+
+    # 3. Insert an active institutional delegation for demo_dlsa_officer
+    now = datetime.now(timezone.utc)
+    store_institutional_delegation({
+        "delegation_id": "del_test_dlsa_boundary",
+        "granted_to_user_id": "demo_dlsa_officer",
+        "granted_to_role": "DLSA_OFFICER",
+        "granted_by_user_id": "demo_supervising",
+        "granted_by_role": "SUPERVISING_LEGAL_OFFICER",
+        "organization_id": "org_dlsa_central",
+        "jurisdiction": "Central Delhi",
+        "capability": "CAN_INITIATE_DOCUMENT_DRAFT",
+        "allowed_document_types": ["tmpl_bnss_479_bail_v1"],
+        "allowed_case_scope": ["UTP-0001"],
+        "valid_from": (now - timedelta(minutes=5)).isoformat(),
+        "valid_until": (now + timedelta(hours=2)).isoformat(),
+        "status": "ACTIVE",
+        "reason": "Authorized drafting coordination",
+    })
+
+    # 4. DLSA Officer CAN initiate draft workflow with valid delegation
     res_gen = client.post(
         "/api/documents/drafts/generate",
         json={"case_id": "UTP-0001", "template_id": "tmpl_bnss_479_bail_v1"},
@@ -422,7 +477,7 @@ def test_dlsa_officer_boundaries():
     assert res_gen.status_code == 201
     draft_id = res_gen.json()["draft_id"]
 
-    # 2. DLSA Officer CANNOT edit draft text (prohibited from acting as lawyer)
+    # 5. DLSA Officer CANNOT edit draft text (prohibited from acting as lawyer)
     res_edit = client.put(
         f"/api/documents/drafts/{draft_id}",
         json={"content_text": "Modified legal argument by DLSA staff."},
@@ -430,7 +485,7 @@ def test_dlsa_officer_boundaries():
     )
     assert res_edit.status_code == 403
 
-    # 3. DLSA Officer CANNOT approve legal petition
+    # 6. DLSA Officer CANNOT approve legal petition
     res_appr = client.post(
         f"/api/documents/drafts/{draft_id}/approve",
         json={"comment": "DLSA sign off"},
@@ -438,13 +493,14 @@ def test_dlsa_officer_boundaries():
     )
     assert res_appr.status_code == 403
 
-    # 4. DLSA Officer CAN add review comments and routing notes
+    # 7. DLSA Officer CAN add review comments and routing notes
     res_comm = client.post(
         f"/api/documents/drafts/{draft_id}/comments",
         json={"comment": "Routed to Panel Lawyer for formal review and signature."},
         headers=headers_dlsa,
     )
     assert res_comm.status_code == 200
+
 
 
 def test_controlled_external_advocate_read_only_boundary():

@@ -114,12 +114,12 @@ export function JailWorkspace() {
     emergency_family_contact_relation: "",
   });
 
-  // Release Confirmation form state
+  // Release Confirmation form state - strictly required human-entered values
   const [releaseForm, setReleaseForm] = useState<PrisonReleasePayload>({
     release_date: new Date().toISOString().split("T")[0],
-    gate_pass_number: `GP-${Math.floor(100000 + Math.random() * 900000)}`,
-    surety_verification_ref: "SURETY-VERIF-OK-2026",
-    superintendent_notes: "Bail bond verified and accepted. Accused physically released from custody gate.",
+    gate_pass_number: "",
+    surety_verification_ref: "",
+    superintendent_notes: "",
   });
 
   // Upload modal state
@@ -263,6 +263,18 @@ export function JailWorkspace() {
     e.preventDefault();
     if (!targetCaseId) {
       setFormError("Please select an inmate record.");
+      return;
+    }
+    if (!releaseForm.gate_pass_number || !releaseForm.gate_pass_number.trim()) {
+      setFormError("Gate Pass / Discharge Memo Ref is mandatory and must be explicitly entered from physical prison records.");
+      return;
+    }
+    if (!releaseForm.surety_verification_ref || !releaseForm.surety_verification_ref.trim()) {
+      setFormError("Surety Verification Record Ref is mandatory and must be verified against judicial order.");
+      return;
+    }
+    if (!releaseForm.superintendent_notes || !releaseForm.superintendent_notes.trim()) {
+      setFormError("Superintendent physical release endorsement notes are mandatory.");
       return;
     }
     setSubmitting(true);
@@ -635,6 +647,12 @@ export function JailWorkspace() {
                       <button
                         onClick={() => {
                           setTargetCaseId(c.inmate_id);
+                          setReleaseForm({
+                            release_date: new Date().toISOString().split("T")[0],
+                            gate_pass_number: "",
+                            surety_verification_ref: "",
+                            superintendent_notes: "",
+                          });
                           setFormError(null);
                           setShowReleaseModal(true);
                         }}
@@ -1165,9 +1183,10 @@ export function JailWorkspace() {
               </div>
 
               <div>
-                <label className="block uppercase text-muted-foreground mb-1">Surety Verification Record Ref</label>
+                <label className="block uppercase text-muted-foreground mb-1">Surety Verification Record Ref *</label>
                 <input
                   type="text"
+                  required
                   value={releaseForm.surety_verification_ref || ""}
                   onChange={(e) => setReleaseForm({ ...releaseForm, surety_verification_ref: e.target.value })}
                   placeholder="e.g. SURETY-VERIF-DELHI-449"
@@ -1176,12 +1195,13 @@ export function JailWorkspace() {
               </div>
 
               <div>
-                <label className="block uppercase text-muted-foreground mb-1">Superintendent Release Endorsement Notes</label>
+                <label className="block uppercase text-muted-foreground mb-1">Superintendent Release Endorsement Notes *</label>
                 <textarea
                   rows={2}
+                  required
                   value={releaseForm.superintendent_notes || ""}
                   onChange={(e) => setReleaseForm({ ...releaseForm, superintendent_notes: e.target.value })}
-                  placeholder="Release memo verified against judicial order. Prisoner discharged with personal effects..."
+                  placeholder="Mandatory endorsement: Enter verification against judicial bail order, identity confirmation, and physical gate release details..."
                   className="w-full p-2 bg-input border border-border rounded-sm font-mono text-xs"
                 />
               </div>

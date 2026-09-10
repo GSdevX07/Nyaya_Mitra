@@ -22,6 +22,8 @@ from app.models.tasks import (
     AccusedProfileUpdateRequest,
     PrisonReleaseConfirmationRequest,
     ExpediteCoordinationRequest,
+    FIRRecordIntakeRequest,
+    FIRRecordUpdateRequest,
 )
 from app.services.task_service import TaskService
 
@@ -108,6 +110,7 @@ async def update_operational_task_endpoint(
 
 
 @router.post("/tasks/bulk-action")
+@router.post("/tasks/bulk")
 async def execute_bulk_task_action_endpoint(
     req: BulkTaskActionRequest,
     current_user: AuthUser = Depends(get_current_user),
@@ -130,6 +133,7 @@ async def execute_bulk_task_action_endpoint(
 # ── 2. Jail Officer Specific Workflows ────────────────────────────────────────
 
 @router.post("/cases/intake-custody", tags=["Jail Operations"])
+@router.post("/cases/custody-intake", tags=["Jail Operations"])
 @router.post("/jail/intake-inmate", tags=["Jail Operations"])
 async def intake_custody_record_endpoint(
     req: CustodyIntakeRequest,
@@ -234,6 +238,53 @@ async def expedite_document_coordination_endpoint(
             current_user=current_user,
             target_roles=target_roles,
         )
+        return result
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+# ── 3. Police Officer Specific Workflows ──────────────────────────────────────
+
+@router.post("/cases/fir-intake", tags=["Police Operations"])
+@router.post("/cases/intake-fir", tags=["Police Operations"])
+@router.post("/police/fir", tags=["Police Operations"])
+async def intake_fir_record_endpoint(
+    req: FIRRecordIntakeRequest,
+    current_user: AuthUser = Depends(require_role(Role.POLICE_OFFICER, Role.PLATFORM_ADMIN)),
+):
+    """
+    Register a newly entered police FIR docket into station records.
+    Creates records in cases, firs, court_cases, and accused_persons.
+    Strictly scoped to officer's authorized police station and district.
+    """
+    try:
+        result = TaskService.intake_new_fir_record(req, current_user)
+        return result
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.put("/cases/{case_id}/fir", tags=["Police Operations"])
+@router.patch("/cases/{case_id}/fir", tags=["Police Operations"])
+@router.put("/police/{case_id}/fir", tags=["Police Operations"])
+@router.patch("/police/{case_id}/fir", tags=["Police Operations"])
+async def update_fir_record_endpoint(
+    case_id: str,
+    req: FIRRecordUpdateRequest,
+    current_user: AuthUser = Depends(require_role(Role.POLICE_OFFICER, Role.PLATFORM_ADMIN)),
+):
+    """
+    Update authorized station FIR / investigation records (offense sections, charge sheet/remand status).
+    Strictly restricted to cases under the officer's authorized police station.
+    """
+    try:
+        result = TaskService.update_fir_record(case_id, req, current_user)
         return result
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

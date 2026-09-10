@@ -98,6 +98,12 @@ def transition_rule_lifecycle(
         )
 
     # Authority Enforcement Guard
+    if current_user.role in (Role.READ_ONLY_AUDITOR, Role.ACCUSED_USER, Role.FAMILY_GUARDIAN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: Role '{current_user.role.value}' cannot mutate statutory rule lifecycle states.",
+        )
+
     if target_state_enum in (RuleLifecycleState.APPROVED, RuleLifecycleState.ACTIVE):
         if current_user.role != Role.SUPERVISING_LEGAL_OFFICER:
             raise HTTPException(

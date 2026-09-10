@@ -110,6 +110,12 @@ export function AdvocateWorkspace() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Link
+            to="/documents"
+            className="px-3.5 py-2 bg-secondary text-foreground font-mono text-xs font-bold uppercase rounded-sm border border-border flex items-center gap-1.5 hover:bg-secondary/80"
+          >
+            <FileText className="w-4 h-4" /> Document Workspace
+          </Link>
           {isExternal ? (
             <Link
               to="/legal-sources"
@@ -291,6 +297,13 @@ export function AdvocateWorkspace() {
                           {c.status}
                         </span>
                       )}
+
+                      <Link
+                        to={`/documents?case_id=${c.case_id}`}
+                        className="px-3 py-1.5 font-serif font-bold text-xs rounded-sm border border-border bg-secondary text-foreground flex items-center gap-1 hover:bg-secondary/80 transition-colors"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> Workspace
+                      </Link>
 
                       <Link
                         to={`/case/${c.case_id}${c.status === "ANALYSIS_READY" || c.status === "HUMAN_REVIEW" || isApprovedForFiling ? "?tab=draft" : ""}`}

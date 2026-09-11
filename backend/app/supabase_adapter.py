@@ -18,9 +18,12 @@ import os
 import datetime
 import json
 import logging
+import threading
+import functools
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from dotenv import load_dotenv
+import httpx
 
 logger = logging.getLogger("nyaya_mitra.supabase_adapter")
 
@@ -34,22 +37,99 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
 _supabase = None
+_client_lock = threading.Lock()
 
 
-def get_supabase_client():
-    """Return a live Supabase client, or None if not configured."""
+def get_supabase_client(force_refresh: bool = False):
+    """
+    Return a live, resilient Supabase client, or None if not configured.
+    Configured with keep-alive expiration and transport-level auto-reconnect
+    so idle connection drops from Supabase/Cloudflare edge proxies do not cause
+    'Server disconnected' (RemoteProtocolError).
+    """
     global _supabase
-    if _supabase is not None:
+    if _supabase is not None and not force_refresh:
         return _supabase
-    if SUPABASE_URL and SUPABASE_KEY and not SUPABASE_URL.startswith("https://your-project-ref"):
-        try:
-            from supabase import create_client
-            _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-            print(f"[INFO] Supabase PostgreSQL adapter active: {SUPABASE_URL.split('.supabase.co')[0]}...")
+    with _client_lock:
+        if _supabase is not None and not force_refresh:
             return _supabase
-        except Exception as e:
-            print(f"[WARN] Supabase client init failed: {e}. Backend will use SQLite fallback.")
+        if SUPABASE_URL and SUPABASE_KEY and not SUPABASE_URL.startswith("https://your-project-ref"):
+            try:
+                from supabase import create_client, ClientOptions
+
+                # 1. keepalive_expiry=25.0: Actively expires idle sockets before cloud proxies (60s) drop them.
+                # 2. retries=3: Automatically catches and retries on connection reset / server disconnect.
+                # 3. Timeouts prevent unbounded hanging.
+                limits = httpx.Limits(
+                    max_keepalive_connections=20,
+                    max_connections=50,
+                    keepalive_expiry=25.0,
+                )
+                transport = httpx.HTTPTransport(
+                    retries=3,
+                    verify=True,
+                )
+                custom_httpx = httpx.Client(
+                    transport=transport,
+                    limits=limits,
+                    timeout=httpx.Timeout(30.0, connect=10.0),
+                )
+                options = ClientOptions(
+                    httpx_client=custom_httpx,
+                    postgrest_client_timeout=30,
+                )
+                _supabase = create_client(SUPABASE_URL, SUPABASE_KEY, options=options)
+                print(f"[INFO] Supabase PostgreSQL adapter active (resilient pool): {SUPABASE_URL.split('.supabase.co')[0]}...")
+                return _supabase
+            except Exception as e:
+                print(f"[WARN] Supabase client init failed: {e}. Backend will use SQLite fallback.")
     return None
+
+
+def reset_supabase_client():
+    """Reset the cached Supabase client so subsequent requests instantiate a fresh connection pool."""
+    global _supabase
+    with _client_lock:
+        if _supabase is not None:
+            try:
+                if hasattr(_supabase, "postgrest") and hasattr(_supabase.postgrest, "session"):
+                    _supabase.postgrest.session.close()
+            except Exception:
+                pass
+            _supabase = None
+
+
+def with_supa_retry(func):
+    """
+    Decorator that catches connection disconnect errors ('Server disconnected',
+    'RemoteProtocolError', 'ConnectionResetError', 'BrokenPipeError') during Supabase calls,
+    refreshes the client connection, and retries the operation once.
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        for attempt in range(2):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                err_str = str(e).lower()
+                is_disconnect = any(
+                    term in err_str
+                    for term in (
+                        "server disconnected",
+                        "remoteprotocolerror",
+                        "connection reset",
+                        "broken pipe",
+                        "connection closed",
+                    )
+                )
+                if is_disconnect and attempt == 0:
+                    logger.warning(
+                        f"Supabase connection dropped in {func.__name__} ({e}). Refreshing client and retrying..."
+                    )
+                    reset_supabase_client()
+                    continue
+                raise
+    return wrapper
 
 
 def is_supabase_active() -> bool:
@@ -219,8 +299,17 @@ def supa_upsert_evidence(record: Dict) -> bool:
     client = get_supabase_client()
     if not client:
         return False
-    client.table("evidence").upsert(record).execute()
-    return True
+    try:
+        cid = record.get("case_id")
+        if cid:
+            chk = client.table("court_cases").select("id").eq("id", cid).execute()
+            if not chk.data:
+                return False
+        client.table("evidence").upsert(record).execute()
+        return True
+    except Exception as e:
+        logger.warning(f"supa_upsert_evidence error: {e}")
+        return False
 
 
 def supa_get_case_documents(case_id: str) -> List[Dict]:
@@ -680,4 +769,12 @@ def supa_bulk_update_tasks(task_ids: List[str], updates: Dict) -> int:
     except Exception as e:
         logger.warning(f"supa_bulk_update_tasks error: {e}")
         return 0
+
+
+# ── Auto-apply with_supa_retry to all supa_* functions ─────────────────────────
+_this_module = globals()
+for _name, _obj in list(_this_module.items()):
+    if _name.startswith("supa_") and callable(_obj):
+        _this_module[_name] = with_supa_retry(_obj)
+
 

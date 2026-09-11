@@ -54,6 +54,16 @@ class WorkflowService:
     @classmethod
     def get_case_state(cls, case_id: str) -> Tuple[MatterState, int, Dict[str, Any]]:
         """Retrieve current canonical state, version number, and case record directly from DB."""
+        from app.database import get_case, get_case_version
+        case = get_case(case_id)
+        if case:
+            case_dict = case if isinstance(case, dict) else (case.model_dump() if hasattr(case, "model_dump") else (case.__dict__ if hasattr(case, "__dict__") else {}))
+            raw_status = getattr(case, "status", None) or case_dict.get("status") or case_dict.get("current_status") or "INTAKE"
+            canonical_state = CaseState.to_canonical(raw_status)
+            version_number = get_case_version(case_id)
+            return canonical_state, version_number, case_dict
+
+        # Fallback to local SQLite direct row query if get_case did not find it
         row = None
         try:
             conn = get_db_connection()
@@ -64,22 +74,19 @@ class WorkflowService:
         except Exception:
             pass
 
-        if not row:
-            from app.database import get_case
-            case = get_case(case_id)
-            if not case:
-                case = case_repo.get_case_by_id(case_id)
-            if not case:
-                raise LookupError(f"Case with ID '{case_id}' not found.")
-            case_dict = case if isinstance(case, dict) else (case.model_dump() if hasattr(case, "model_dump") else (case.__dict__ if hasattr(case, "__dict__") else {}))
-            raw_status = getattr(case, "status", None) or "INTAKE"
+        if row:
+            data_json, raw_status, version_number = row[0], row[1], row[2] or 1
+            case_dict = json.loads(data_json) if isinstance(data_json, str) else dict(data_json)
             canonical_state = CaseState.to_canonical(raw_status)
-            version_number = get_case_version(case_id)
             return canonical_state, version_number, case_dict
 
-        data_json, raw_status, version_number = row[0], row[1], row[2] or 1
-        case_dict = json.loads(data_json) if isinstance(data_json, str) else dict(data_json)
+        case = case_repo.get_case_by_id(case_id)
+        if not case:
+            raise LookupError(f"Case with ID '{case_id}' not found.")
+        case_dict = case if isinstance(case, dict) else (case.model_dump() if hasattr(case, "model_dump") else (case.__dict__ if hasattr(case, "__dict__") else {}))
+        raw_status = getattr(case, "status", None) or "INTAKE"
         canonical_state = CaseState.to_canonical(raw_status)
+        version_number = get_case_version(case_id)
         return canonical_state, version_number, case_dict
 
     @classmethod
@@ -466,9 +473,15 @@ class WorkflowService:
         )
 
         if not success:
-            raise ConcurrencyConflictError(
-                f"Concurrent Modification Detected: Failed to commit transition '{action}' for matter '{case_id}'. {err_msg}"
-            )
+            err_lower = (err_msg or "").lower()
+            if "not found" in err_lower:
+                raise LookupError(f"Matter '{case_id}' not found. {err_msg}")
+            elif "conflict" in err_lower or "version" in err_lower or "concurrent" in err_lower:
+                raise ConcurrencyConflictError(
+                    f"Concurrent Modification Detected: Failed to commit transition '{action}' for matter '{case_id}'. {err_msg}"
+                )
+            else:
+                raise ValueError(f"Failed to commit transition '{action}' for matter '{case_id}'. {err_msg}")
 
         # 6. Immutable Audit Trail Logging
         provenance = "AI" if is_ai_agent else ("SYSTEM" if actor.role == Role.INTEGRATION_SERVICE else "USER")
@@ -551,7 +564,23 @@ class WorkflowService:
             prisoner_name = case_data.get("name") or "Undertrial"
             assigned_lawyer_id = updated_data.get("assigned_lawyer_id") or case_data.get("assigned_lawyer_id") or case_data.get("assigned_advocate_id")
 
-            if action == "ASSIGN_COUNSEL":
+            if action == "SUBMIT_FOR_LEGAL_AID_REVIEW":
+                add_notification(
+                    case_id=case_id,
+                    title=f"Legal Aid Review Requested: {case_id}",
+                    message=f"Jail Officer {actor_name} verified custody records for {prisoner_name} ({case_id}) and submitted the dossier for DLSA legal aid intake review.",
+                    notif_type="urgent",
+                    target_role="DLSA_OFFICER,SUPERVISING_LEGAL_OFFICER",
+                )
+            elif action == "FLAG_LEGAL_AID_REQUIRED":
+                add_notification(
+                    case_id=case_id,
+                    title=f"Legal Aid Approved / Required: {case_id}",
+                    message=f"DLSA Officer {actor_name} approved legal aid review for {prisoner_name} ({case_id}). Matter is now queued for defense counsel assignment.",
+                    notif_type="info",
+                    target_role="DLSA_OFFICER,SUPERVISING_LEGAL_OFFICER,JAIL_OFFICER",
+                )
+            elif action == "ASSIGN_COUNSEL":
                 adv_id = updated_data.get("assigned_lawyer_id")
                 add_notification(
                     case_id=case_id,
@@ -561,7 +590,7 @@ class WorkflowService:
                     target_role="DEFENSE_ADVOCATE,CONTROLLED_EXTERNAL_ADVOCATE",
                     user_id=adv_id,
                 )
-            elif action in ("COUNSEL_SIGN_OFF", "SUBMIT_FOR_REVIEW"):
+            elif action in ("COUNSEL_SIGN_OFF", "SUBMIT_FOR_SUPERVISORY_REVIEW"):
                 add_notification(
                     case_id=case_id,
                     title=f"Bail Petition Draft Signed Off: {case_id}",

@@ -82,12 +82,12 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
 supabase_client = None
-if SUPABASE_URL and SUPABASE_KEY and not SUPABASE_URL.startswith("https://placeholder"):
-    try:
-        from supabase import create_client
-        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    except Exception as e:
-        logger.warning(f"Supabase client init failed: {e}.")
+try:
+    from app.supabase_adapter import get_supabase_client, is_supabase_active
+    if is_supabase_active():
+        supabase_client = get_supabase_client()
+except Exception as e:
+    logger.warning(f"Supabase client init failed: {e}.")
 
 
 # ── Canonical 6 Hero Synthetic Cases ───────────────────────────────────────────
@@ -666,6 +666,521 @@ def _build_initial_hero_cases() -> List[CaseRecord]:
             data_provenance={
                 "release_order": {"source": "Court Order Copy", "type": "HUMAN_VERIFIED"},
                 "release_memo": {"source": "Tihar Jail Records", "type": "INSTITUTIONAL_ENTRY"},
+            },
+        ),
+
+        # Case: Medical Priority Undertrial (Senior Citizen + Health Flag in VERIFICATION state)
+        CaseRecord(
+            case_id="UTP-0021",
+            name="Kavita Sundaram (Synthetic)",
+            prisoner_category=PrisonerCategory.UNDERTRIAL,
+            legal_code=LegalCode.BNS_2023,
+            offense_sections=["BNS 316(2)"],  # Criminal breach of trust
+            cnr_number="DLCT010067452024",
+            fir_number="FIR-2024-142",
+            police_station="Kotwali Police Station",
+            police_station_id="ps_kotwali_central",
+            court_name="Chief Metropolitan Magistrate Court, Central",
+            district="Central Delhi",
+            state="Delhi",
+            dlsa_reference_number="DLSA-CD-2024-0811",
+            arrest_date="2024-09-01",
+            custody_days=360,
+            excluded_delay_days=0,
+            max_sentence_days_for_offense=1095,
+            punishable_by_death_or_life=False,
+            multiple_active_cases=False,
+            prior_bail_orders=[],
+            required_docs=["remand_order", "charge_sheet", "medical_certificate"],
+            present_docs=["remand_order", "charge_sheet", "medical_certificate"],
+            urgency_flags=UrgencyFlags(
+                age=67,
+                health_flag=True,
+                health_details="Emergency cardiac review requested by Jail Superintendent. Severe hypertension under medical observation.",
+                repeat_offender=False,
+            ),
+            jail_location="Central Jail No. 4, Tihar (Synthetic)",
+            preferred_language="en",
+            relative_name="Kamla Prasad (Synthetic)",
+            relative_relation="Son",
+            relative_phone="+91 98765 21021",
+            permanent_address="H.No 304, Green Avenue, Central Delhi, Delhi - 110001",
+            status=CaseState.VERIFICATION,
+            assignment_status="AVAILABLE",
+            assigned_lawyer_id=None,
+            assigned_lawyer=None,
+            data_source_status=DataSourceStatus.DEMO_SYNTHETIC,
+            legal_needs=[
+                LegalNeedItem(
+                    need_type=LegalNeedType.UNDERTRIAL_BAIL_479,
+                    title="Section 479 BNSS Bail Review (Medical Priority)",
+                    description="Detention exceeds 1/3 statutory threshold for first-time offender (360/365 days). Senior citizen medical urgency.",
+                    urgency="URGENT",
+                    blocking_bail_workflow=False,
+                    status="ACTION_REQUIRED",
+                ),
+                LegalNeedItem(
+                    need_type=LegalNeedType.MEDICAL_VULNERABILITY_REVIEW,
+                    title="Prison Dispensary Medical Escalation",
+                    description="Medical Custody Certificate on file. Prison medical screening confirms urgent hospital review.",
+                    urgency="HIGH",
+                    blocking_bail_workflow=False,
+                    status="ACTION_REQUIRED",
+                ),
+            ],
+            timeline=[
+                TimelineEvent(
+                    id="TLE-0021-1",
+                    timestamp="2024-09-01T10:00:00Z",
+                    event_type="INTAKE",
+                    title="Arrest and Remand",
+                    description="Admitted under judicial custody under BNS 316(2). Medical screening initiated.",
+                    actor="Station House Officer",
+                    actor_role="Police Officer",
+                    source="FIR-2024-142 / Remand Sheet",
+                    is_human_verified=True,
+                ),
+                TimelineEvent(
+                    id="TLE-0021-2",
+                    timestamp="2024-10-15T14:00:00Z",
+                    event_type="DOCUMENT",
+                    title="Medical Custody Certificate Placed on File",
+                    description="Jail Medical Officer issued Custody Certificate & Medical Evaluation for chronic hypertension.",
+                    actor="Medical Officer",
+                    actor_role="Jail Health Service",
+                    source="Dispensary Record",
+                    is_human_verified=True,
+                ),
+                TimelineEvent(
+                    id="TLE-0021-3",
+                    timestamp="2025-01-10T09:00:00Z",
+                    event_type="VERIFICATION",
+                    title="Custody Verification Commenced",
+                    description="Custody records and medical certification verified by Jail Officer.",
+                    actor="Jail Superintendent",
+                    actor_role="JAIL_OFFICER",
+                    source="Prison Ledger",
+                    is_human_verified=True,
+                ),
+            ],
+            data_provenance={
+                "remand_order": {"source": "Court File", "type": "HUMAN_VERIFIED"},
+                "charge_sheet": {"source": "Police Station", "type": "HUMAN_VERIFIED"},
+                "medical_certificate": {"source": "Tihar Jail Hospital", "type": "INSTITUTIONAL_ENTRY"},
+            },
+        ),
+
+        # Case: New Undertrial Case 1 (Fresh Intake under Section 479 BNSS — First-time Theft)
+        CaseRecord(
+            case_id="UTP-0031",
+            name="Amitabh Saxena (Synthetic)",
+            prisoner_category=PrisonerCategory.UNDERTRIAL,
+            legal_code=LegalCode.BNS_2023,
+            offense_sections=["BNS 303(2)"],  # Theft in dwelling house
+            cnr_number="DLCT010078312024",
+            fir_number="FIR-2024-311",
+            police_station="Kotwali Police Station",
+            police_station_id="ps_kotwali_central",
+            court_name="Chief Metropolitan Magistrate Court, Central",
+            district="Central Delhi",
+            state="Delhi",
+            dlsa_reference_number="DLSA-CD-2024-0931",
+            arrest_date="2024-08-20",
+            custody_days=385,
+            excluded_delay_days=0,
+            max_sentence_days_for_offense=1095,
+            punishable_by_death_or_life=False,
+            multiple_active_cases=False,
+            prior_bail_orders=[],
+            required_docs=["remand_order", "charge_sheet"],
+            present_docs=["remand_order", "charge_sheet"],
+            urgency_flags=UrgencyFlags(
+                age=32,
+                health_flag=False,
+                repeat_offender=False,
+            ),
+            jail_location="Central Jail No. 4, Tihar (Synthetic)",
+            preferred_language="en",
+            relative_name="Sunita Saxena (Synthetic)",
+            relative_relation="Spouse",
+            relative_phone="+91 98765 31001",
+            permanent_address="House 12, Chandni Chowk, Central Delhi, Delhi - 110006",
+            status=CaseState.INTAKE,
+            assignment_status="AVAILABLE",
+            assigned_lawyer_id=None,
+            assigned_lawyer=None,
+            data_source_status=DataSourceStatus.DEMO_SYNTHETIC,
+            legal_needs=[
+                LegalNeedItem(
+                    need_type=LegalNeedType.UNDERTRIAL_BAIL_479,
+                    title="Section 479 BNSS Statutory Bail Review",
+                    description="Detention exceeds 1/3 statutory threshold for first-time offender (385/365 days). Eligible for bail.",
+                    urgency="HIGH",
+                    blocking_bail_workflow=False,
+                    status="ACTION_REQUIRED",
+                ),
+            ],
+            timeline=[
+                TimelineEvent(
+                    id="TLE-0031-1",
+                    timestamp="2024-08-20T10:00:00Z",
+                    event_type="INTAKE",
+                    title="Arrest & Judicial Remand",
+                    description="Accused produced before magistrate under BNS 303(2). Judicial custody ordered at Tihar Jail.",
+                    actor="Station House Officer",
+                    actor_role="Police Officer",
+                    source="FIR-2024-311 / Remand Sheet",
+                    is_human_verified=True,
+                ),
+                TimelineEvent(
+                    id="TLE-0031-2",
+                    timestamp="2024-10-05T14:30:00Z",
+                    event_type="DOCUMENT",
+                    title="Charge Sheet Filed",
+                    description="Final police investigation report / charge sheet filed before CMM Central.",
+                    actor="Court Clerk",
+                    actor_role="Court Official",
+                    source="Court Registry",
+                    is_human_verified=True,
+                ),
+            ],
+            data_provenance={
+                "remand_order": {"source": "Court File", "type": "HUMAN_VERIFIED"},
+                "charge_sheet": {"source": "Police Station", "type": "HUMAN_VERIFIED"},
+            },
+        ),
+
+        # Case: New Undertrial Case 2 (Verified Intake ready for Legal Aid Review — Female undertrial under 479 Proviso)
+        CaseRecord(
+            case_id="UTP-0032",
+            name="Pooja Mehra (Synthetic)",
+            prisoner_category=PrisonerCategory.UNDERTRIAL,
+            legal_code=LegalCode.BNS_2023,
+            offense_sections=["BNS 318(2)"],  # Cheating
+            cnr_number="DLCT010078322025",
+            fir_number="FIR-2025-102",
+            police_station="Daryaganj Police Station",
+            police_station_id="ps_daryaganj",
+            court_name="Metropolitan Magistrate Court 05, Central",
+            district="Central Delhi",
+            state="Delhi",
+            dlsa_reference_number="DLSA-CD-2025-0932",
+            arrest_date="2025-02-12",
+            custody_days=210,
+            excluded_delay_days=0,
+            max_sentence_days_for_offense=1095,
+            punishable_by_death_or_life=False,
+            multiple_active_cases=False,
+            prior_bail_orders=[],
+            required_docs=["remand_order", "charge_sheet"],
+            present_docs=["remand_order", "charge_sheet"],
+            urgency_flags=UrgencyFlags(
+                age=26,
+                health_flag=False,
+                repeat_offender=False,
+            ),
+            jail_location="Central Jail No. 4, Tihar (Synthetic)",
+            preferred_language="hi",
+            relative_name="Vikrant Mehra (Synthetic)",
+            relative_relation="Brother",
+            relative_phone="+91 98765 32002",
+            permanent_address="Flat 4B, Ansari Road, Daryaganj, Delhi - 110002",
+            status=CaseState.VERIFICATION,
+            assignment_status="AVAILABLE",
+            assigned_lawyer_id=None,
+            assigned_lawyer=None,
+            data_source_status=DataSourceStatus.DEMO_SYNTHETIC,
+            legal_needs=[
+                LegalNeedItem(
+                    need_type=LegalNeedType.UNDERTRIAL_BAIL_479,
+                    title="Section 479 BNSS Proviso Bail Review (Woman Accused)",
+                    description="Female undertrial eligible for special statutory consideration under Section 479 BNSS proviso.",
+                    urgency="HIGH",
+                    blocking_bail_workflow=False,
+                    status="ACTION_REQUIRED",
+                ),
+            ],
+            timeline=[
+                TimelineEvent(
+                    id="TLE-0032-1",
+                    timestamp="2025-02-12T11:00:00Z",
+                    event_type="INTAKE",
+                    title="Admission & Female Ward Remand",
+                    description="Accused admitted to Tihar Women's Facility under judicial remand for BNS 318(2).",
+                    actor="Jail Duty Officer",
+                    actor_role="JAIL_OFFICER",
+                    source="Prison Inward Register",
+                    is_human_verified=True,
+                ),
+                TimelineEvent(
+                    id="TLE-0032-2",
+                    timestamp="2025-03-20T15:00:00Z",
+                    event_type="DOCUMENT",
+                    title="Attested Charge Sheet Placed on Record",
+                    description="Police charge sheet copy served and attested in prison dossier.",
+                    actor="Investigating Officer",
+                    actor_role="Police Officer",
+                    source="Daryaganj Police Station",
+                    is_human_verified=True,
+                ),
+                TimelineEvent(
+                    id="TLE-0032-3",
+                    timestamp="2025-04-01T09:30:00Z",
+                    event_type="VERIFICATION",
+                    title="Nominal Roll Verified",
+                    description="Jail Superintendent completed custody ledger and biometric verification. Ready for Legal Aid Review.",
+                    actor="Jail Superintendent",
+                    actor_role="JAIL_OFFICER",
+                    source="Prison Ledger",
+                    is_human_verified=True,
+                ),
+            ],
+            data_provenance={
+                "remand_order": {"source": "Court File", "type": "HUMAN_VERIFIED"},
+                "charge_sheet": {"source": "Police Station", "type": "HUMAN_VERIFIED"},
+            },
+        ),
+
+        # Case: New Undertrial Case 3 (Fresh Intake with Missing Charge Sheet — Requisition Testing)
+        CaseRecord(
+            case_id="UTP-0033",
+            name="Rameshwar Yadav (Synthetic)",
+            prisoner_category=PrisonerCategory.UNDERTRIAL,
+            legal_code=LegalCode.BNS_2023,
+            offense_sections=["BNS 115(2)"],  # Voluntarily causing hurt
+            cnr_number="DLCT010078332025",
+            fir_number="FIR-2025-088",
+            police_station="Kotwali Police Station",
+            police_station_id="ps_kotwali_central",
+            court_name="Metropolitan Magistrate Court 02, Central",
+            district="Central Delhi",
+            state="Delhi",
+            dlsa_reference_number="DLSA-CD-2025-0933",
+            arrest_date="2025-04-10",
+            custody_days=155,
+            excluded_delay_days=0,
+            max_sentence_days_for_offense=365,
+            punishable_by_death_or_life=False,
+            multiple_active_cases=False,
+            prior_bail_orders=[],
+            required_docs=["remand_order", "charge_sheet"],
+            present_docs=["remand_order"],
+            urgency_flags=UrgencyFlags(
+                age=45,
+                health_flag=False,
+                repeat_offender=False,
+            ),
+            jail_location="Central Jail No. 4, Tihar (Synthetic)",
+            preferred_language="hi",
+            relative_name="Shanti Yadav (Synthetic)",
+            relative_relation="Mother",
+            relative_phone="+91 98765 33003",
+            permanent_address="Village Mandi, Burari, Delhi - 110084",
+            status=CaseState.INTAKE,
+            assignment_status="AVAILABLE",
+            assigned_lawyer_id=None,
+            assigned_lawyer=None,
+            data_source_status=DataSourceStatus.DEMO_SYNTHETIC,
+            legal_needs=[
+                LegalNeedItem(
+                    need_type=LegalNeedType.UNDERTRIAL_BAIL_479,
+                    title="Section 479 BNSS Bail Review (Missing Charge Sheet)",
+                    description="Detention exceeds 1/3 statutory threshold (155/122 days). Attested charge sheet copy required from Police.",
+                    urgency="URGENT",
+                    blocking_bail_workflow=True,
+                    status="ACTION_REQUIRED",
+                ),
+            ],
+            timeline=[
+                TimelineEvent(
+                    id="TLE-0033-1",
+                    timestamp="2025-04-10T09:00:00Z",
+                    event_type="INTAKE",
+                    title="Remand Intake",
+                    description="Judicial remand granted under BNS 115(2). Remand slip on file.",
+                    actor="Duty Magistrate",
+                    actor_role="Judicial Officer",
+                    source="Remand Order",
+                    is_human_verified=True,
+                ),
+            ],
+            data_provenance={
+                "remand_order": {"source": "Court File", "type": "HUMAN_VERIFIED"},
+            },
+        ),
+
+        # Case: New Undertrial Case 4 (Verified Intake ready for Legal Aid Review — Medical Priority & Breach of Trust)
+        CaseRecord(
+            case_id="UTP-0034",
+            name="Deepak Chawla (Synthetic)",
+            prisoner_category=PrisonerCategory.UNDERTRIAL,
+            legal_code=LegalCode.BNS_2023,
+            offense_sections=["BNS 316(2)"],  # Criminal breach of trust
+            cnr_number="DLCT010078342024",
+            fir_number="FIR-2024-419",
+            police_station="Civil Lines Police Station",
+            police_station_id="ps_civil_lines",
+            court_name="Chief Metropolitan Magistrate Court, Central",
+            district="Central Delhi",
+            state="Delhi",
+            dlsa_reference_number="DLSA-CD-2024-0934",
+            arrest_date="2024-07-15",
+            custody_days=420,
+            excluded_delay_days=0,
+            max_sentence_days_for_offense=1095,
+            punishable_by_death_or_life=False,
+            multiple_active_cases=False,
+            prior_bail_orders=[],
+            required_docs=["remand_order", "charge_sheet", "medical_certificate"],
+            present_docs=["remand_order", "charge_sheet", "medical_certificate"],
+            urgency_flags=UrgencyFlags(
+                age=39,
+                health_flag=True,
+                health_details="Diabetic neuropathy and chronic orthopedic ailment under prison hospital care.",
+                repeat_offender=False,
+            ),
+            jail_location="Central Jail No. 4, Tihar (Synthetic)",
+            preferred_language="en",
+            relative_name="Geeta Chawla (Synthetic)",
+            relative_relation="Sister",
+            relative_phone="+91 98765 34004",
+            permanent_address="B-14, Civil Lines, Central Delhi, Delhi - 110054",
+            status=CaseState.VERIFICATION,
+            assignment_status="AVAILABLE",
+            assigned_lawyer_id=None,
+            assigned_lawyer=None,
+            data_source_status=DataSourceStatus.DEMO_SYNTHETIC,
+            legal_needs=[
+                LegalNeedItem(
+                    need_type=LegalNeedType.UNDERTRIAL_BAIL_479,
+                    title="Section 479 BNSS Bail Review (Overdue Detention)",
+                    description="Detention exceeds 1/3 statutory threshold (420/365 days). Verified for legal aid submission.",
+                    urgency="HIGH",
+                    blocking_bail_workflow=False,
+                    status="ACTION_REQUIRED",
+                ),
+            ],
+            timeline=[
+                TimelineEvent(
+                    id="TLE-0034-1",
+                    timestamp="2024-07-15T10:00:00Z",
+                    event_type="INTAKE",
+                    title="Arrest and Remand",
+                    description="Remanded to Tihar under BNS 316(2). Medical screening noted chronic condition.",
+                    actor="Station House Officer",
+                    actor_role="Police Officer",
+                    source="FIR-2024-419 / Remand Sheet",
+                    is_human_verified=True,
+                ),
+                TimelineEvent(
+                    id="TLE-0034-2",
+                    timestamp="2024-09-10T11:00:00Z",
+                    event_type="DOCUMENT",
+                    title="Charge Sheet and Medical Evaluation Placed on Record",
+                    description="Police charge sheet and Prison CMO medical certificate placed on file.",
+                    actor="Medical Officer",
+                    actor_role="Jail Health Service",
+                    source="Dispensary Ledger",
+                    is_human_verified=True,
+                ),
+                TimelineEvent(
+                    id="TLE-0034-3",
+                    timestamp="2024-11-01T14:00:00Z",
+                    event_type="VERIFICATION",
+                    title="Verification Completed by Jail Officer",
+                    description="Custody days and nominal roll validated. Case ready for Legal Aid submission.",
+                    actor="Jail Superintendent",
+                    actor_role="JAIL_OFFICER",
+                    source="Prison Ledger",
+                    is_human_verified=True,
+                ),
+            ],
+            data_provenance={
+                "remand_order": {"source": "Court File", "type": "HUMAN_VERIFIED"},
+                "charge_sheet": {"source": "Police Station", "type": "HUMAN_VERIFIED"},
+                "medical_certificate": {"source": "Tihar Jail Hospital", "type": "INSTITUTIONAL_ENTRY"},
+            },
+        ),
+
+        # Case: New Undertrial Case 5 (Fresh Intake — Senior Citizen with Respiratory Urgency)
+        CaseRecord(
+            case_id="UTP-0035",
+            name="Farooq Ahmed (Synthetic)",
+            prisoner_category=PrisonerCategory.UNDERTRIAL,
+            legal_code=LegalCode.BNS_2023,
+            offense_sections=["BNS 329(3)"],  # Criminal trespass
+            cnr_number="DLCT010078352024",
+            fir_number="FIR-2024-512",
+            police_station="Kotwali Police Station",
+            police_station_id="ps_kotwali_central",
+            court_name="Metropolitan Magistrate Court 02, Central",
+            district="Central Delhi",
+            state="Delhi",
+            dlsa_reference_number="DLSA-CD-2024-0935",
+            arrest_date="2024-11-20",
+            custody_days=290,
+            excluded_delay_days=0,
+            max_sentence_days_for_offense=730,
+            punishable_by_death_or_life=False,
+            multiple_active_cases=False,
+            prior_bail_orders=[],
+            required_docs=["remand_order", "charge_sheet", "medical_certificate"],
+            present_docs=["remand_order", "charge_sheet", "medical_certificate"],
+            urgency_flags=UrgencyFlags(
+                age=66,
+                health_flag=True,
+                health_details="Senior citizen (66 yrs) with severe bronchial asthma requiring regular inhaler and medical supervision.",
+                repeat_offender=False,
+            ),
+            jail_location="Central Jail No. 4, Tihar (Synthetic)",
+            preferred_language="hi",
+            relative_name="Tariq Ahmed (Synthetic)",
+            relative_relation="Son",
+            relative_phone="+91 98765 35005",
+            permanent_address="Mohalla Rodgaran, Lal Kuan, Delhi - 110006",
+            status=CaseState.INTAKE,
+            assignment_status="AVAILABLE",
+            assigned_lawyer_id=None,
+            assigned_lawyer=None,
+            data_source_status=DataSourceStatus.DEMO_SYNTHETIC,
+            legal_needs=[
+                LegalNeedItem(
+                    need_type=LegalNeedType.UNDERTRIAL_BAIL_479,
+                    title="Section 479 BNSS Senior Citizen Bail Review",
+                    description="Detention exceeds 1/3 statutory threshold (290/243 days). Senior citizen medical urgency.",
+                    urgency="URGENT",
+                    blocking_bail_workflow=False,
+                    status="ACTION_REQUIRED",
+                ),
+            ],
+            timeline=[
+                TimelineEvent(
+                    id="TLE-0035-1",
+                    timestamp="2024-11-20T10:00:00Z",
+                    event_type="INTAKE",
+                    title="Prison Custody Intake & Admission",
+                    description="Admitted under judicial custody for BNS 329(3). Senior citizen vulnerability recorded.",
+                    actor="Jail Duty Officer",
+                    actor_role="JAIL_OFFICER",
+                    source="Prison Inward Register",
+                    is_human_verified=True,
+                ),
+                TimelineEvent(
+                    id="TLE-0035-2",
+                    timestamp="2024-12-15T12:00:00Z",
+                    event_type="DOCUMENT",
+                    title="Medical Examination & Inhaler Protocol Documented",
+                    description="Jail Medical Officer issued clinical evaluation certificate for respiratory illness.",
+                    actor="Medical Officer",
+                    actor_role="Jail Health Service",
+                    source="Tihar Hospital Record",
+                    is_human_verified=True,
+                ),
+            ],
+            data_provenance={
+                "remand_order": {"source": "Court File", "type": "HUMAN_VERIFIED"},
+                "charge_sheet": {"source": "Court File", "type": "HUMAN_VERIFIED"},
+                "medical_certificate": {"source": "Tihar Jail Hospital", "type": "INSTITUTIONAL_ENTRY"},
             },
         ),
     ]
@@ -2161,6 +2676,20 @@ def sync_case_documents_and_evidence(cursor_or_conn=None, case_id: Optional[str]
         cursor.execute("SELECT case_id, data FROM cases")
     rows = cursor.fetchall()
 
+    # Pre-fetch valid court_case IDs from Supabase to prevent FK constraint violations
+    valid_cc_ids = set()
+    sb_client = None
+    try:
+        from app.supabase_adapter import is_supabase_active, get_supabase_client
+        if is_supabase_active():
+            sb_client = get_supabase_client()
+            if sb_client:
+                cc_res = sb_client.table("court_cases").select("id").execute()
+                if cc_res and hasattr(cc_res, "data") and cc_res.data:
+                    valid_cc_ids = {r["id"] for r in cc_res.data if r.get("id")}
+    except Exception as e:
+        logger.debug(f"Could not pre-fetch Supabase court_cases for evidence validation: {e}")
+
     for cid, d_str in rows:
         data = json.loads(d_str) if d_str else {}
         present = data.get("present_docs", [])
@@ -2188,22 +2717,19 @@ def sync_case_documents_and_evidence(cursor_or_conn=None, case_id: Optional[str]
                     1 if doc in req else 0, 1,
                 ),
             )
-            # Dual-write baseline evidence record to Supabase if active
-            try:
-                from app.supabase_adapter import is_supabase_active, get_supabase_client
-                if is_supabase_active():
-                    sb_client = get_supabase_client()
-                    if sb_client:
-                        sb_client.table("evidence").upsert({
-                            "evidence_id": evi_id,
-                            "case_id": cid,
-                            "document_type": doc,
-                            "file_name": f"{doc}.pdf",
-                            "stored_hash": doc_hash,
-                            "created_at": now_iso,
-                        }).execute()
-            except Exception:
-                pass
+            # Dual-write baseline evidence record to Supabase only if case exists in court_cases (prevents FK error)
+            if sb_client and cid in valid_cc_ids:
+                try:
+                    sb_client.table("evidence").upsert({
+                        "evidence_id": evi_id,
+                        "case_id": cid,
+                        "document_type": doc,
+                        "file_name": f"{doc}.pdf",
+                        "stored_hash": doc_hash,
+                        "created_at": now_iso,
+                    }).execute()
+                except Exception:
+                    pass
 
     if close_at_end and conn:
         conn.commit()
@@ -2449,8 +2975,8 @@ def init_db():
             ("demo_police",       "org_dlsa_central", "police@demo.nyayamitra.in",       "Police Officer (Demo)",         "POLICE_OFFICER",             "Central Delhi", None),
             ("demo_dlsa",         "org_dlsa_central", "dlsa@demo.nyayamitra.in",         "DLSA Legal Officer (Demo)",     "DLSA_OFFICER",               "Central Delhi", None),
             ("demo_supervising",  "org_dlsa_central", "supervising@demo.nyayamitra.in",  "Supervising Officer (Demo)",    "SUPERVISING_LEGAL_OFFICER",  "Central Delhi", None),
-            ("demo_advocate",     "org_dlsa_central", "advocate@demo.nyayamitra.in",     "Defense Advocate (Demo)",       "DEFENSE_ADVOCATE",           "Central Delhi", "UTP-0001"),
-            ("demo_ext_advocate", "org_dlsa_central", "extadvocate@demo.nyayamitra.in",  "External Advocate (Demo)",      "CONTROLLED_EXTERNAL_ADVOCATE","Central Delhi", "UTP-0001"),
+            ("demo_advocate",     "org_dlsa_central", "advocate@demo.nyayamitra.in",     "Defense Advocate (Demo)",       "DEFENSE_ADVOCATE",           "Central Delhi", None),
+            ("demo_ext_advocate", "org_dlsa_central", "extadvocate@demo.nyayamitra.in",  "External Advocate (Demo)",      "CONTROLLED_EXTERNAL_ADVOCATE","Central Delhi", None),
             ("demo_accused",      "org_dlsa_central", "accused@demo.nyayamitra.in",      "Accused Person (Demo)",         "ACCUSED_USER",               "Central Delhi", "UTP-0001"),
             ("demo_family",       "org_dlsa_central", "family@demo.nyayamitra.in",       "Family Guardian (Demo)",        "FAMILY_GUARDIAN",            "Central Delhi", "UTP-0001"),
             ("demo_auditor",      "org_dlsa_central", "auditor@demo.nyayamitra.in",      "Read-Only Auditor (Demo)",      "READ_ONLY_AUDITOR",          "Central Delhi", None),
@@ -2755,12 +3281,24 @@ def init_db():
             from app.supabase_adapter import is_supabase_active, supa_get_all_legacy_cases
             if is_supabase_active():
                 raw_cases = supa_get_all_legacy_cases()
+                conn_hyd = get_db_connection()
+                cur_hyd = conn_hyd.cursor()
                 for d in raw_cases:
                     try:
                         rec = CaseRecord.model_validate(d)
                         _MEMORY_CASES[rec.case_id] = rec
+                        cur_hyd.execute(
+                            "INSERT OR REPLACE INTO cases (case_id, data, status, assignment_status, assigned_lawyer_id) VALUES (?, ?, ?, ?, ?)",
+                            (rec.case_id, rec.model_dump_json(), rec.status.value, rec.assignment_status, rec.assigned_lawyer_id),
+                        )
+                        cur_hyd.execute(
+                            "UPDATE court_cases SET current_status = ?, assignment_status = ?, assigned_lawyer_id = ? WHERE id = ?",
+                            (rec.status.value, rec.assignment_status, rec.assigned_lawyer_id, rec.case_id),
+                        )
                     except Exception:
                         pass
+                conn_hyd.commit()
+                conn_hyd.close()
             else:
                 conn_hyd = get_db_connection()
                 cur_hyd = conn_hyd.cursor()
@@ -4071,7 +4609,7 @@ def get_all_cases() -> List[CaseRecord]:
         if rows:
             for r in rows:
                 rec = _safe_parse_case_record(r[0])
-                if rec:
+                if rec and rec.case_id not in cases_map:
                     cases_map[rec.case_id] = rec
     except Exception as e:
         logger.warning(f"SQLite get_all_cases error: {e}")
@@ -4873,11 +5411,9 @@ def get_evidence_item(evidence_id: str) -> Optional[dict]:
                     if conn_e:
                         conn_e.close()
                 try:
-                    from app.supabase_adapter import is_supabase_active, get_supabase_client
+                    from app.supabase_adapter import is_supabase_active, supa_upsert_evidence
                     if is_supabase_active():
-                        sb_client = get_supabase_client()
-                        if sb_client:
-                            sb_client.table("evidence").upsert(rec).execute()
+                        supa_upsert_evidence(rec)
                 except Exception:
                     pass
                 return rec
@@ -5348,20 +5884,18 @@ def get_notifications_for_user(
     """Retrieve notifications filtered specifically by recipient role, user ID, or linked case ID — Supabase primary."""
     rows = []
     seen_ids = set()
-    from app.supabase_adapter import is_supabase_active, get_supabase_client
+    from app.supabase_adapter import is_supabase_active, supa_get_all_notifications
     if is_supabase_active():
         try:
-            client = get_supabase_client()
-            if client:
-                res = client.table("notifications").select("id, case_id, title, message, type, is_read, timestamp, target_role, user_id").order("timestamp", desc=True).execute()
-                if res.data:
-                    for r in res.data:
-                        nid = r.get("id")
-                        if nid and nid not in seen_ids:
-                            seen_ids.add(nid)
-                            rows.append(
-                                (nid, r.get("case_id"), r.get("title"), r.get("message"), r.get("type"), 1 if r.get("is_read") else 0, r.get("timestamp"), r.get("target_role"), r.get("user_id"))
-                            )
+            supa_notifs = supa_get_all_notifications()
+            if supa_notifs:
+                for r in supa_notifs:
+                    nid = r.get("id")
+                    if nid and nid not in seen_ids:
+                        seen_ids.add(nid)
+                        rows.append(
+                            (nid, r.get("case_id"), r.get("title"), r.get("message"), r.get("type"), 1 if r.get("is_read") else 0, r.get("timestamp"), r.get("target_role"), r.get("user_id"))
+                        )
         except Exception as e:
             logger.warning(f"Supabase get_notifications_for_user error: {e}")
 
@@ -6778,6 +7312,22 @@ def execute_case_transition_tx(
         cursor.execute("SELECT data, version_number, status FROM cases WHERE case_id = ?", (case_id,))
         row = cursor.fetchone()
         if not row:
+            # Resilient auto-backfill from authoritative cloud / in-memory layer
+            fallback_rec = get_case(case_id) or _MEMORY_CASES.get(case_id)
+            if fallback_rec:
+                f_data = fallback_rec.model_dump_json() if hasattr(fallback_rec, "model_dump_json") else json.dumps(fallback_rec)
+                f_stat = getattr(fallback_rec, "status", None)
+                f_stat_val = f_stat.value if hasattr(f_stat, "value") else str(f_stat or "INTAKE")
+                f_asn_stat = getattr(fallback_rec, "assignment_status", "AVAILABLE")
+                f_lawyer = getattr(fallback_rec, "assigned_lawyer_id", None)
+                cursor.execute(
+                    "INSERT INTO cases (case_id, data, status, assignment_status, assigned_lawyer_id, version_number) VALUES (?, ?, ?, ?, ?, 1)",
+                    (case_id, f_data, f_stat_val, f_asn_stat, f_lawyer),
+                )
+                cursor.execute("SELECT data, version_number, status FROM cases WHERE case_id = ?", (case_id,))
+                row = cursor.fetchone()
+
+        if not row:
             conn.rollback()
             conn.close()
             return False, 0, f"Matter '{case_id}' not found."
@@ -6814,6 +7364,15 @@ def execute_case_transition_tx(
             conn.close()
             return False, current_ver, "Concurrent transition conflict detected. State change aborted."
 
+        cursor.execute(
+            """
+            UPDATE court_cases
+            SET current_status = ?, assigned_lawyer_id = ?, assignment_status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (new_status, new_assigned_id, new_assignment_status, case_id),
+        )
+
         conn.commit()
         conn.close()
 
@@ -6828,7 +7387,7 @@ def execute_case_transition_tx(
 
         # Supabase sync if active
         try:
-            from app.supabase_adapter import is_supabase_active, supa_upsert_legacy_case
+            from app.supabase_adapter import is_supabase_active, supa_upsert_legacy_case, supa_update_case_status
             if is_supabase_active():
                 supa_upsert_legacy_case(
                     case_id=case_id,
@@ -6837,6 +7396,7 @@ def execute_case_transition_tx(
                     assignment_status=new_assignment_status,
                     assigned_lawyer_id=new_assigned_id,
                 )
+                supa_update_case_status(case_id, new_status)
         except Exception as e:
             logger.warning(f"Supabase sync on transition error: {e}")
 

@@ -51,6 +51,11 @@ export function AdvocateWorkspace() {
         // Direct ID match
         if (lawyerId && userId && lawyerId === userId) return true;
 
+        // Known demo advocate aliases
+        if (userId === "demo_advocate" && ["demo_advocate", "adv_001", "adv_rajesh_sharma"].includes(lawyerId)) {
+          return true;
+        }
+
         // User profile linked case match
         if (user?.linked_case_id && c.case_id === user.linked_case_id && (!lawyerId || lawyerId === userId)) {
           return true;

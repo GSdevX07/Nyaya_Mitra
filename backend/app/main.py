@@ -535,67 +535,8 @@ def _check_supervisor_jurisdiction_and_scope(case: Any, user: AuthUser) -> bool:
     return any(ad in case_dist or case_dist in ad for ad in auth_dists)
 
 
-def _is_case_assigned_to_advocate(case: Any, user: AuthUser) -> bool:
-    """
-    Strict validation of counsel assignment and prerequisite statutory progression.
-    A case belongs to a defense / external advocate IF AND ONLY IF:
-    1. The case has assignment_status explicitly set to 'ASSIGNED'.
-    2. The case has completed all statutory prerequisite milestones
-       (Prison Custody Intake, Custody Verification, and Legal Aid Eligibility Evaluation).
-       Cases in preliminary states (INTAKE, VERIFICATION, REVIEW, LEGAL_AID_REQUIRED, etc.)
-       must NEVER be accessible to defense advocates.
-    3. The assigned_lawyer_id strictly matches the authenticated advocate ID.
-    """
-    assign_status = getattr(case, "assignment_status", None)
-    if assign_status != "ASSIGNED":
-        return False
+from app.auth.policy import is_case_assigned_to_advocate as _is_case_assigned_to_advocate
 
-    # ── Prerequisite Lifecycle Gate ──────────────────────────────────────────
-    raw_status = getattr(case, "status", None)
-    status_str = raw_status.value if hasattr(raw_status, "value") else str(raw_status or "").strip().upper()
-    preliminary_states = {
-        "INTAKE", "INTAKE_PENDING", "DETECTED", "VERIFICATION", "CUSTODY_VERIFIED",
-        "CUSTODY_PENDING", "REVIEW", "LEGAL_AID_REQUIRED", "LEGAL_NEED_IDENTIFIED",
-        "PRE_INTAKE", "DRAFT_INTAKE",
-    }
-    if status_str in preliminary_states:
-        return False
-
-    try:
-        from app.models.domain import CaseState, MatterState
-        canonical = CaseState.to_canonical(raw_status)
-        if canonical in (
-            MatterState.INTAKE,
-            MatterState.VERIFICATION,
-            MatterState.REVIEW,
-            MatterState.LEGAL_AID_REQUIRED,
-        ):
-            if status_str not in ("ASSIGNED", "DOCUMENT_PENDING", "ANALYSIS_READY", "HUMAN_REVIEW", "SUBMITTED", "APPROVED", "FILED"):
-                return False
-    except Exception:
-        pass
-
-    lawyer_id = getattr(case, "assigned_lawyer_id", None) or getattr(case, "assigned_advocate_id", None)
-
-    # 0. User scoped to a specific case via linked_case_id
-    if getattr(user, "linked_case_id", None):
-        if getattr(case, "case_id", None) == user.linked_case_id:
-            return True
-        return False
-
-    # 1. Direct ID match
-    if lawyer_id and str(lawyer_id).strip().lower() == str(user.id).strip().lower():
-        return True
-
-    # 2. Known demo advocate aliases
-    if user.id == "demo_advocate" and str(lawyer_id).strip().lower() in ("adv_rajesh_sharma", "adv_001", "demo_advocate"):
-        return True
-
-    # 3. Test harness synthetic advocate users
-    if user.id.startswith("adv_test") and lawyer_id in ("demo_advocate", user.id):
-        return True
-
-    return False
 
 
 @app.get("/cases", tags=["Cases"])
@@ -1595,6 +1536,22 @@ def assign_counsel_to_case(
         from app.models.schemas import CaseState
         update_case_status(case_id, CaseState.LEGAL_AID_REQUIRED)
         status_str = "LEGAL_AID_REQUIRED"
+    elif status_str == "REVIEW":
+        try:
+            from app.workflow.service import WorkflowService
+            WorkflowService.execute_transition(
+                case_id=case_id,
+                action="FLAG_LEGAL_AID_REQUIRED",
+                actor=current_user,
+                comment="Counsel allocation initiated by DLSA Officer; auto-approved legal aid intake review",
+            )
+        except Exception as e:
+            logger.info(f"Auto FLAG_LEGAL_AID_REQUIRED on assign: {e}")
+        from app.database import update_case_status
+        from app.models.schemas import CaseState
+        update_case_status(case_id, CaseState.LEGAL_AID_REQUIRED)
+        status_str = "LEGAL_AID_REQUIRED"
+
     if status_str != "LEGAL_AID_REQUIRED":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

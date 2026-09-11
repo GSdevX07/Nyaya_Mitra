@@ -108,7 +108,7 @@ class SupabaseTaskRepository(BaseTaskRepository):
         linked_case = getattr(current_user, "linked_case_id", None)
         station = getattr(current_user, "police_station", None) or getattr(current_user, "extra_claims", {}).get("police_station", "")
 
-        return supa_get_task_queue(
+        tasks = supa_get_task_queue(
             current_user_role=role_str,
             user_id=user_id_str,
             user_facilities=user_facs,
@@ -131,6 +131,15 @@ class SupabaseTaskRepository(BaseTaskRepository):
             sort_by=sort_by,
             sort_order=sort_order,
         )
+        if role_str in ("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE"):
+            try:
+                from app.database import get_all_cases
+                from app.auth.policy import is_case_assigned_to_advocate
+                valid_cids = {c.case_id for c in get_all_cases() if is_case_assigned_to_advocate(c, current_user)}
+                tasks = [t for t in tasks if t.get("case_id") in valid_cids]
+            except Exception as e:
+                logger.warning(f"Advocate task queue filter error: {e}")
+        return tasks
 
     def get_task_by_id(self, task_id: str) -> Optional[Dict[str, Any]]:
         from app.supabase_adapter import supa_get_task_by_id
@@ -342,6 +351,16 @@ class SqliteTaskRepository(BaseTaskRepository):
                 if d.get("status") not in ("COMPLETED", "EXCEPTION") and d.get("due_date") and d["due_date"] < today_iso:
                     d["status"] = "OVERDUE"
                 items.append(d)
+
+            if role in ("DEFENSE_ADVOCATE", "CONTROLLED_EXTERNAL_ADVOCATE"):
+                try:
+                    from app.database import get_all_cases
+                    from app.auth.policy import is_case_assigned_to_advocate
+                    valid_cids = {c.case_id for c in get_all_cases() if is_case_assigned_to_advocate(c, current_user)}
+                    items = [t for t in items if t.get("case_id") in valid_cids]
+                except Exception as e:
+                    logger.warning(f"Sqlite advocate task queue filter error: {e}")
+
             return items
         finally:
             conn.close()

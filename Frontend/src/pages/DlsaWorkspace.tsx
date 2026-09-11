@@ -27,6 +27,7 @@ import {
   expediteCoordinationApi,
   fetchMyActiveDelegationApi,
   requestDocumentPreparationApi,
+  requestMatterTransition,
   type CaseRecord,
   type InstitutionalDelegation,
 } from "../lib/api";
@@ -152,13 +153,12 @@ export function DlsaWorkspace() {
     loadData();
   }, [loadData]);
 
-  // Derived subsets
-  // Assignment-ready matters: strictly in LEGAL_AID_REQUIRED and unassigned
+  // Assignment-ready matters: in LEGAL_AID_REQUIRED or REVIEW and unassigned
   const assignmentReadyCases = cases.filter(
     (c) =>
       !c.assigned_lawyer &&
       c.assignment_status !== "ASSIGNED" &&
-      c.status === "LEGAL_AID_REQUIRED"
+      (c.status === "LEGAL_AID_REQUIRED" || c.status === "REVIEW")
   );
 
   const unassignedCases = cases.filter(
@@ -357,11 +357,32 @@ export function DlsaWorkspace() {
   };
 
 
-  const handleOpenAssignModal = async (c: CaseRecord) => {
-    if (c.status !== "LEGAL_AID_REQUIRED") {
+  const [approvingCaseId, setApprovingCaseId] = useState<string | null>(null);
+
+  const handleApproveForLegalAid = async (c: CaseRecord) => {
+    setApprovingCaseId(c.case_id);
+    try {
+      await requestMatterTransition(c.case_id, "FLAG_LEGAL_AID_REQUIRED", {}, "Approved by DLSA Legal Aid Officer");
+      setActionNotice({
+        type: "success",
+        message: `Case ${c.case_id} intake review approved. Matter transitioned to LEGAL_AID_REQUIRED.`,
+      });
+      await loadData();
+    } catch (err: any) {
       setActionNotice({
         type: "error",
-        message: `Cannot assign defense counsel: Matter stage must be 'LEGAL_AID_REQUIRED'. Current stage: '${c.status}'.`,
+        message: err.message || "Failed to approve legal aid review.",
+      });
+    } finally {
+      setApprovingCaseId(null);
+    }
+  };
+
+  const handleOpenAssignModal = async (c: CaseRecord) => {
+    if (c.status !== "LEGAL_AID_REQUIRED" && c.status !== "REVIEW") {
+      setActionNotice({
+        type: "error",
+        message: `Cannot assign defense counsel: Matter stage must be 'REVIEW' or 'LEGAL_AID_REQUIRED'. Current stage: '${c.status}'.`,
       });
       return;
     }
@@ -869,13 +890,35 @@ export function DlsaWorkspace() {
                           >
                             <UserPlus className="w-3.5 h-3.5" /> Assign Counsel
                           </button>
+                        ) : c.status === "REVIEW" ? (
+                          <div className="flex items-center gap-1.5 justify-end">
+                            <button
+                              onClick={() => handleApproveForLegalAid(c)}
+                              disabled={approvingCaseId === c.case_id}
+                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-xs font-bold rounded-sm inline-flex items-center gap-1 shadow-sm transition-colors"
+                              title="Approve intake review and advance to Legal Aid Required"
+                            >
+                              {approvingCaseId === c.case_id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                              Approve Legal Aid
+                            </button>
+                            <button
+                              onClick={() => handleOpenAssignModal(c)}
+                              className="px-2.5 py-1.5 bg-primary text-primary-foreground font-mono text-xs font-bold rounded-sm inline-flex items-center gap-1 hover:opacity-90 shadow-sm"
+                              title="Formally allocate defense counsel (auto-approves legal aid review)"
+                            >
+                              <UserPlus className="w-3.5 h-3.5" /> Assign Counsel
+                            </button>
+                            <Link
+                              to={`/case/${c.case_id}`}
+                              className="px-2 py-1.5 bg-secondary text-foreground hover:bg-secondary/80 border border-border font-mono text-xs rounded-sm inline-flex items-center gap-1 transition-colors"
+                              title="Review custody details in dossier"
+                            >
+                              <Scale className="w-3.5 h-3.5" /> Dossier
+                            </Link>
+                          </div>
                         ) : c.status === "VERIFICATION" ? (
                           <span className="inline-flex items-center px-2 py-1 rounded-sm text-[11px] font-mono font-medium text-muted-foreground bg-secondary/60 border border-border">
-                            Awaiting Legal-Aid Review
-                          </span>
-                        ) : c.status === "REVIEW" ? (
-                          <span className="inline-flex items-center px-2 py-1 rounded-sm text-[11px] font-mono font-medium text-muted-foreground bg-secondary/60 border border-border">
-                            DLSA Review Pending
+                            Custody Verification Pending
                           </span>
                         ) : c.status === "INTAKE" ? (
                           <span className="inline-flex items-center px-2 py-1 rounded-sm text-[11px] font-mono font-medium text-muted-foreground bg-secondary/60 border border-border">

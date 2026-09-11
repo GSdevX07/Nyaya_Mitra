@@ -388,7 +388,7 @@ def test_illegal_transitions_rejected_with_400(client, test_case_id, dlsa_token,
 # ── 3. Strict Nyaya Mitra Role Ownership Enforcement ──────────────────────────
 
 def test_role_ownership_blocks_unauthorized_actors(
-    client, test_case_id, platform_admin_token, gov_admin_token, auditor_token, jail_token, dlsa_token, advocate_token
+    client, test_case_id, platform_admin_token, gov_admin_token, auditor_token, jail_token, dlsa_token, advocate_token, supervisor_token
 ):
     """
     Ensure strict separation of powers:
@@ -436,7 +436,7 @@ def test_role_ownership_blocks_unauthorized_actors(
     # 4a. Supervisor cannot approve directly from HUMAN_REVIEW (400 Bad Request)
     res_skip = client.post(
         f"/api/cases/{cid}/transitions",
-        headers={"Authorization": f"Bearer {dlsa_token}"},
+        headers={"Authorization": f"Bearer {supervisor_token}"},
         json={"transition": "SUPERVISORY_APPROVE", "payload": {"artifact_version_id": "ver_dummy"}},
     )
     assert res_skip.status_code == 400

@@ -766,6 +766,28 @@ export function CaseIntelligence() {
           <p className="text-muted-foreground text-sm max-w-md mx-auto">
             {error || "Case record could not be loaded."}
           </p>
+          {isForbidden && (user?.role === "DEFENSE_ADVOCATE" || user?.role === "CONTROLLED_EXTERNAL_ADVOCATE") && (
+            <div className="mt-4 p-3.5 text-left bg-muted/40 border border-border rounded-sm text-xs space-y-2 font-sans max-w-md mx-auto">
+              <p className="font-bold text-foreground flex items-center gap-1.5">
+                <Scale className="w-4 h-4 text-primary shrink-0" />
+                Statutory Counsel Allocation Prerequisite
+              </p>
+              <p className="text-muted-foreground leading-relaxed">
+                Under NALSA guidelines and undertrial privacy protections, panel defense advocates may only access a dossier <strong>after</strong> DLSA conducts legal aid intake review and formally allocates counsel.
+              </p>
+              <p className="text-foreground/90 leading-relaxed font-mono text-[11px] bg-secondary/50 p-2 rounded border border-border">
+                <strong>Matter ID:</strong> {id} &bull; <strong>How to unlock:</strong> Log in as <em>DLSA Legal Aid Officer</em>, open case <strong>{id}</strong>, click <strong>Approve Legal Aid</strong>, and execute <strong>Assign Counsel</strong> to allocate this matter to your advocate profile.
+              </p>
+              <div className="pt-2 text-center">
+                <Link
+                  to="/case/UTP-0022?tab=draft"
+                  className="text-xs text-primary font-bold hover:underline font-mono inline-flex items-center gap-1"
+                >
+                  Switch to your active assigned case UTP-0022 (Bail Draft Ready) &rarr;
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <Link
@@ -2909,7 +2931,7 @@ export function CaseIntelligence() {
           )}
 
           {/* DLSA Counsel Assignment Desk */}
-          {can("CASE_ASSIGN_COUNSEL") && (matterState === "LEGAL_AID_REQUIRED" || matterState === "ASSIGNED" || c.assignment_status === "ASSIGNED" || c.status === "ASSIGNED") && (
+          {can("CASE_ASSIGN_COUNSEL") && (matterState === "REVIEW" || matterState === "LEGAL_AID_REQUIRED" || matterState === "ASSIGNED" || c.assignment_status === "ASSIGNED" || c.status === "ASSIGNED" || c.status === "REVIEW") && (
             <div className="p-5 rounded border border-border bg-card space-y-4 shadow-sm">
               <div className="border-b border-border pb-3 flex items-center justify-between">
                 <div>
@@ -2920,12 +2942,32 @@ export function CaseIntelligence() {
                     Formal statutory allocation of certified panel defense advocate under Legal Services Authorities Act, 1987.
                   </p>
                 </div>
-                {c.assignment_status === "ASSIGNED" && (
+                {c.assignment_status === "ASSIGNED" ? (
                   <span className="px-2.5 py-0.5 rounded font-mono text-[11px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-bold">
                     ACTIVE ALLOCATION
                   </span>
-                )}
+                ) : (matterState === "REVIEW" || c.status === "REVIEW") ? (
+                  <span className="px-2.5 py-0.5 rounded font-mono text-[11px] bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold">
+                    REVIEW PENDING
+                  </span>
+                ) : null}
               </div>
+
+              {(matterState === "REVIEW" || c.status === "REVIEW") && (
+                <div className="p-3 rounded bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 font-mono text-xs flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Scale className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Matter awaiting DLSA intake review. Appointing counsel below will automatically approve Legal Aid review.</span>
+                  </div>
+                  <button
+                    onClick={() => handleWorkflowTransition("FLAG_LEGAL_AID_REQUIRED", {}, "Approved by DLSA Legal Aid Officer")}
+                    disabled={!!transitioningAction}
+                    className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[11px] font-bold font-mono shrink-0 shadow-xs"
+                  >
+                    {transitioningAction === "FLAG_LEGAL_AID_REQUIRED" ? "Approving..." : "Approve Legal Aid First"}
+                  </button>
+                </div>
+              )}
 
               {assignmentSuccess && (
                 <div className="p-3 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-mono text-xs flex items-center gap-2">
